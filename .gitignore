@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+
+# Build output
+dist/
+out/
+
+# Local meeting data (audio/transcripts/notes live in the user's Documents, but ignore any that land here)
+Meetings/
+*.webm
+*.m4a
+*.wav
+*.mp3
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log

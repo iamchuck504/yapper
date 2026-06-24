@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; media-src blob:" />
+  <title>Actas</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <aside id="sidebar">
+    <div class="sidebar-header">
+      <span class="logo">Actas</span>
+      <button id="btn-new" title="New meeting">
+        <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="sidebar-label">Meetings</div>
+    <ul id="meeting-list"></ul>
+  </aside>
+
+  <button id="btn-theme" title="Toggle light/dark mode">
+    <svg class="icon-sun" viewBox="0 0 16 16" width="15" height="15"><circle cx="8" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.2v1.8M8 13v1.8M1.2 8H3M13 8h1.8M3.2 3.2l1.3 1.3M11.5 11.5l1.3 1.3M12.8 3.2l-1.3 1.3M4.5 11.5l-1.3 1.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+    <svg class="icon-moon" viewBox="0 0 16 16" width="15" height="15"><path d="M13.4 9.6A5.8 5.8 0 0 1 6.4 2.6a5.8 5.8 0 1 0 7 7z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+  </button>
+
+  <main id="content">
+
+    <!-- ===== Record view ===== -->
+    <section id="view-record">
+      <h1 class="page-title">New meeting</h1>
+
+      <input id="meeting-title" type="text" placeholder="Meeting title (optional)" autocomplete="off" spellcheck="false" />
+
+      <div class="options-card">
+        <div class="opt-row">
+          <span class="opt-label">Note style</span>
+          <div id="style-pills" class="seg">
+            <button class="seg-btn" data-style="general">General</button>
+            <button class="seg-btn" data-style="standup">Stand-up</button>
+            <button class="seg-btn" data-style="one_on_one">1:1</button>
+            <button class="seg-btn" data-style="client">Client call</button>
+            <button class="seg-btn" data-style="brainstorm">Brainstorm</button>
+          </div>
+        </div>
+        <div class="opt-row">
+          <span class="opt-label">Detail</span>
+          <div id="detail-seg" class="seg">
+            <button class="seg-btn" data-detail="concise">Concise</button>
+            <button class="seg-btn" data-detail="detailed">Detailed</button>
+          </div>
+        </div>
+        <div class="opt-row">
+          <span class="opt-label">Instructions</span>
+          <input id="custom-instructions" type="text" placeholder="Optional context for the notes, e.g. attendees, project, what to focus on" autocomplete="off" spellcheck="false" />
+        </div>
+      </div>
+
+      <div id="rec-zone">
+        <div class="rec-actions">
+          <button id="btn-record" class="record-btn">
+            <svg viewBox="0 0 16 16" width="14" height="14"><circle cx="8" cy="8" r="5" fill="currentColor"/></svg>
+            Start recording
+          </button>
+          <button id="btn-import" class="import-btn" title="Transcribe an audio file verbatim">
+            <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 2v8M5 7l3 3 3-3M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+            Import voice note
+          </button>
+        </div>
+
+        <div id="rec-live" class="hidden">
+          <div class="rec-status-row">
+            <span class="rec-dot"></span>
+            <span id="timer">00:00</span>
+            <div id="levels">
+              <label>System<meter id="meter-sys" min="0" max="1" value="0"></meter></label>
+              <label>Mic<meter id="meter-mic" min="0" max="1" value="0"></meter></label>
+            </div>
+            <button id="btn-stop" class="stop-btn">
+              <svg viewBox="0 0 16 16" width="12" height="12"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>
+              Stop &amp; summarize
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="pipeline" class="hidden">
+        <div class="step" data-step="save"><span class="step-dot"></span>Save recording</div>
+        <div class="step-line"></div>
+        <div class="step" data-step="transcribe"><span class="step-dot"></span>Transcribe</div>
+        <div class="step-line"></div>
+        <div class="step" data-step="notes"><span class="step-dot"></span>Generate notes</div>
+      </div>
+
+      <div id="status" class="hidden"></div>
+    </section>
+
+    <!-- ===== Meeting view ===== -->
+    <section id="view-meeting" class="hidden">
+      <div class="meeting-toolbar">
+        <h1 id="result-title" class="page-title"></h1>
+        <div class="toolbar-actions">
+          <select id="regen-style" title="Note style">
+            <option value="general">General</option>
+            <option value="standup">Stand-up</option>
+            <option value="one_on_one">1:1</option>
+            <option value="client">Client call</option>
+            <option value="brainstorm">Brainstorm</option>
+          </select>
+          <select id="regen-detail" title="Detail level">
+            <option value="concise">Concise</option>
+            <option value="detailed">Detailed</option>
+          </select>
+          <button id="btn-regen" title="Regenerate notes with the selected style">Regenerate</button>
+          <button id="btn-copy" title="Copy notes as markdown">Copy</button>
+          <button id="btn-pdf" title="Export notes to PDF">Export PDF</button>
+          <button id="btn-open-folder" title="Open meeting folder">Open folder</button>
+        </div>
+      </div>
+
+      <div id="regen-status" class="hidden"></div>
+      <div id="notes"></div>
+
+      <details>
+        <summary>Full transcript</summary>
+        <pre id="transcript"></pre>
+      </details>
+    </section>
+
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
