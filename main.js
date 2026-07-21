@@ -1,6 +1,8 @@
 const { app, BrowserWindow, ipcMain, session, desktopCapturer, shell, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const crypto = require('crypto');
 const { spawn } = require('child_process');
 
 const MEETINGS_DIR = path.join(app.getPath('documents'), 'Meetings');
@@ -46,7 +48,7 @@ function createWindow() {
     backgroundColor: '#12141c',
     autoHideMenuBar: true,
     title: 'Actas',
-    icon: path.join(__dirname, 'build', 'app.ico'),
+    icon: path.join(__dirname, 'build', 'actas-icon-v2.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -65,10 +67,12 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === 'win32') app.setAppUserModelId('com.actas.meetingnotes');
   migrateOldData();
   createWindow();
 });
 app.on('window-all-closed', () => app.quit());
+app.on('before-quit', () => liveStopInternal());
 
 function meetingFolderName(date) {
   const p = n => String(n).padStart(2, '0');
@@ -87,14 +91,25 @@ function resolveClaude() {
   return fs.existsSync(CLAUDE_FALLBACK) ? CLAUDE_FALLBACK : 'claude';
 }
 
-ipcMain.handle('save-recording', async (_e, arrayBuffer, title) => {
+function writeParticipants(folder, participants) {
+  const p = path.join(folder, 'participants.txt');
+  if (participants && participants.trim()) fs.writeFileSync(p, participants.trim(), 'utf8');
+}
+
+function readParticipants(folder) {
+  const p = path.join(folder, 'participants.txt');
+  return fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() : '';
+}
+
+ipcMain.handle('save-recording', async (_e, arrayBuffer, title, participants) => {
   const folder = newMeetingFolder();
   fs.writeFileSync(path.join(folder, 'recording.webm'), Buffer.from(arrayBuffer));
   if (title) fs.writeFileSync(path.join(folder, 'title.txt'), title, 'utf8');
+  writeParticipants(folder, participants);
   return folder;
 });
 
-ipcMain.handle('import-audio', async () => {
+ipcMain.handle('import-audio', async (_e, participants) => {
   const res = await dialog.showOpenDialog(win, {
     title: 'Import voice note',
     properties: ['openFile'],
@@ -110,15 +125,23 @@ ipcMain.handle('import-audio', async () => {
   fs.copyFileSync(src, path.join(folder, 'recording' + ext));
   const title = path.basename(src, path.extname(src));
   fs.writeFileSync(path.join(folder, 'title.txt'), title, 'utf8');
+  writeParticipants(folder, participants);
   return { folder, title };
 });
+
+// Whisper initial_prompt biasing: nudges the model toward spelling these names/terms correctly
+function transcriptionHint(participants) {
+  if (!participants || !participants.trim()) return '';
+  return `The people in this conversation are: ${participants.trim().replace(/\n/g, ', ')}.`;
+}
 
 ipcMain.handle('transcribe', async (_e, folder) => {
   const audioFile = fs.readdirSync(folder).find(f => f.startsWith('recording.'));
   if (!audioFile) throw new Error('No recording found in this meeting folder.');
   const audio = path.join(folder, audioFile);
+  const hint = transcriptionHint(readParticipants(folder));
   return new Promise((resolve, reject) => {
-    const py = spawn('python', [path.join(__dirname, 'transcribe.py'), audio, WHISPER_MODEL, process.env.ACTAS_LANG || 'auto'], {
+    const py = spawn('python', [path.join(__dirname, 'transcribe.py'), audio, WHISPER_MODEL, process.env.ACTAS_LANG || 'auto', hint], {
       env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }
     });
     let transcript = '';
@@ -200,6 +223,20 @@ Tasks or commitments, including owner and due date if mentioned. If none, write 
 
 ## Next steps
 What happens after this call.`,
+  minutes: `## TL;DR
+A few high-level bullet points capturing the essence of the meeting at a glance.
+
+## Discussion
+Bullet points recapping what was discussed, grouped by topic. Use short sub-bullets for detail where it helps.
+
+## Decisions
+Bullet points of what was decided or agreed. If none, write "No decisions recorded."
+
+## Action items
+Bullet points of tasks or commitments, including owner and due date if mentioned. If none, write "No action items recorded."
+
+## Next steps
+Bullet points of follow-ups and what happens after the meeting. Omit this section if there are none.`,
   brainstorm: `## Summary
 A short paragraph with the essence of the session.
 
@@ -227,7 +264,13 @@ Write meeting notes in English, in markdown, with exactly these sections:
 ${sections}
 
 ${detail}
+Write in neutral third person. Do not assume who led, organized, or called the meeting. The person who recorded this is just one of the participants and is NOT necessarily the leader, the main speaker, or the owner of the action items — do not center the notes on them or address the reader as "you". Assign ownership and roles only when the transcript itself makes them clear.
 Do not invent anything that is not in the transcript. Reply only with the markdown notes, no preamble.`;
+  if (options.participants && options.participants.trim()) {
+    const people = options.participants.trim().replace(/\n/g, ', ');
+    prompt += `\n\nThe participants in this meeting are: ${people}.
+Attribute discussion points, decisions, and action items to specific people by name when the transcript makes it reasonably clear who said or owns what. The transcript has no speaker labels, so infer from context and do not guess when it is ambiguous. Correct obvious mis-transcriptions of these names.`;
+  }
   if (options.custom && options.custom.trim()) {
     prompt += `\n\nAdditional instructions from the user:\n${options.custom.trim()}`;
   }
@@ -254,6 +297,7 @@ function runClaude(prompt, transcript) {
 }
 
 ipcMain.handle('summarize', async (_e, folder, transcript, options) => {
+  writeParticipants(folder, options && options.participants);
   const out = await runClaude(buildPrompt(options), transcript);
   fs.writeFileSync(path.join(folder, 'notes.md'), out, 'utf8');
   return out;
@@ -262,6 +306,7 @@ ipcMain.handle('summarize', async (_e, folder, transcript, options) => {
 ipcMain.handle('regenerate', async (_e, folder, options) => {
   const transcriptPath = path.join(folder, 'transcript.txt');
   if (!fs.existsSync(transcriptPath)) throw new Error('This meeting has no transcript to regenerate from.');
+  writeParticipants(folder, options && options.participants);
   const transcript = fs.readFileSync(transcriptPath, 'utf8');
   const out = await runClaude(buildPrompt(options), transcript);
   fs.writeFileSync(path.join(folder, 'notes.md'), out, 'utf8');
@@ -286,6 +331,11 @@ ipcMain.handle('check-environment', async () => {
     runOk(resolveClaude(), ['--version'])
   ]);
   return { whisper, claude };
+});
+
+ipcMain.handle('save-notes', async (_e, folder, md) => {
+  fs.writeFileSync(path.join(folder, 'notes.md'), md, 'utf8');
+  return true;
 });
 
 ipcMain.handle('list-meetings', async () => {
@@ -315,11 +365,99 @@ ipcMain.handle('load-meeting', async (_e, folder) => {
     transcript: read('transcript.txt'),
     summary: read('notes.md'),
     title: read('title.txt').trim(),
+    participants: read('participants.txt').trim(),
     hasRecording: fs.readdirSync(folder).some(f => f.startsWith('recording.'))
   };
 });
 
 ipcMain.handle('open-folder', async (_e, folder) => shell.openPath(folder));
+
+// ---------- reminders / action items ----------
+
+function remindersFile() {
+  return path.join(app.getPath('userData'), 'reminders.json');
+}
+function readReminders() {
+  try { return JSON.parse(fs.readFileSync(remindersFile(), 'utf8')); } catch { return []; }
+}
+function writeReminders(list) {
+  fs.writeFileSync(remindersFile(), JSON.stringify(list, null, 2), 'utf8');
+}
+
+ipcMain.handle('list-reminders', async () => readReminders());
+
+ipcMain.handle('add-reminder', async (_e, text, source) => {
+  const t = String(text || '').trim();
+  if (!t) return null;
+  const list = readReminders();
+  const r = { id: crypto.randomUUID(), text: t, done: false, source: source || '', createdAt: Date.now() };
+  list.unshift(r);
+  writeReminders(list);
+  return r;
+});
+
+ipcMain.handle('update-reminder', async (_e, id, fields) => {
+  const list = readReminders();
+  const r = list.find(x => x.id === id);
+  if (r) { Object.assign(r, fields); writeReminders(list); }
+  return r || null;
+});
+
+ipcMain.handle('delete-reminder', async (_e, id) => {
+  writeReminders(readReminders().filter(x => x.id !== id));
+  return true;
+});
+
+// ---------- semi-live transcription worker ----------
+
+let liveWorker = null;
+let liveTmpDir = null;
+let liveSeq = 0;
+
+function liveStopInternal() {
+  if (liveWorker) {
+    try { liveWorker.stdin.end(); } catch { /* closed */ }
+    try { liveWorker.kill(); } catch { /* gone */ }
+    liveWorker = null;
+  }
+  if (liveTmpDir) {
+    try { fs.rmSync(liveTmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    liveTmpDir = null;
+  }
+}
+
+ipcMain.handle('live-start', async (_e, participants) => {
+  liveStopInternal();
+  liveTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'actas-live-'));
+  liveSeq = 0;
+  liveWorker = spawn('python',
+    [path.join(__dirname, 'transcribe_live.py'), WHISPER_MODEL, process.env.ACTAS_LANG || 'auto', transcriptionHint(participants)],
+    { env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } });
+
+  let buf = '';
+  liveWorker.stdout.on('data', d => {
+    buf += d.toString('utf8');
+    let idx;
+    while ((idx = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (line && win && !win.isDestroyed()) win.webContents.send('live-transcript', line);
+    }
+  });
+  liveWorker.on('error', () => {
+    if (win && !win.isDestroyed()) win.webContents.send('live-transcript', JSON.stringify({ error: 'worker failed to start' }));
+  });
+  return true;
+});
+
+ipcMain.handle('live-chunk', async (_e, arrayBuffer) => {
+  if (!liveWorker || !liveTmpDir) return;
+  const p = path.join(liveTmpDir, `seg-${liveSeq++}.webm`);
+  fs.writeFileSync(p, Buffer.from(arrayBuffer));
+  try { liveWorker.stdin.write(p + '\n'); } catch { /* worker gone */ }
+});
+
+ipcMain.handle('live-stop', async () => liveStopInternal());
 
 ipcMain.handle('export-pdf', async (_e, html, suggestedName) => {
   const res = await dialog.showSaveDialog(win, {

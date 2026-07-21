@@ -34,15 +34,17 @@ def ts(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
-def transcribe(model_size, device, audio, language, printed):
+def transcribe(model_size, device, audio, language, printed, initial_prompt=None):
     if device == "cuda":
         model = WhisperModel(model_size, device="cuda", compute_type="float16")
         pipeline = BatchedInferencePipeline(model=model)
-        segments, info = pipeline.transcribe(audio, language=language, batch_size=16)
+        segments, info = pipeline.transcribe(audio, language=language, batch_size=16,
+                                             initial_prompt=initial_prompt)
     else:
         # batched mode crashes on Windows CPU (stack overflow); use the classic path
         model = WhisperModel(model_size, device="cpu", compute_type="int8")
-        segments, info = model.transcribe(audio, vad_filter=True, language=language)
+        segments, info = model.transcribe(audio, vad_filter=True, language=language,
+                                          initial_prompt=initial_prompt)
     print(f"Device: {device} | Detected language: {info.language} "
           f"(p={info.language_probability:.2f})", file=sys.stderr)
     for seg in segments:
@@ -59,16 +61,17 @@ def main() -> int:
     audio = sys.argv[1]
     model_size = sys.argv[2] if len(sys.argv) > 2 else "small"
     language = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] != "auto" else None
+    initial_prompt = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] else None
 
     add_nvidia_dll_dirs()
     printed = {"n": 0}
     try:
-        transcribe(model_size, "cuda", audio, language, printed)
+        transcribe(model_size, "cuda", audio, language, printed, initial_prompt)
     except Exception as e:
         if printed["n"] > 0:
             raise  # GPU died mid-transcription; retrying would duplicate output
         print(f"GPU transcription unavailable ({e}); falling back to CPU", file=sys.stderr)
-        transcribe(model_size, "cpu", audio, language, printed)
+        transcribe(model_size, "cpu", audio, language, printed, initial_prompt)
     return 0
 
 

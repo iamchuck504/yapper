@@ -1,105 +1,88 @@
-"""Generate the Actas app icon (.ico) — lead-gray gradient background,
-note sheet with a pencil in the center."""
-import math
+"""Generate the Actas app icon (.ico) — modern indigo->cyan gradient squircle
+with a clean white soundwave glyph (audio / transcription)."""
 import os
 
 from PIL import Image, ImageDraw, ImageFilter
 
 S = 1024
+SS = 2  # supersample factor
+W = S * SS
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 
-def rotate_point(x, y, cx, cy, deg):
-    rad = math.radians(deg)
-    dx, dy = x - cx, y - cy
-    return (
-        cx + dx * math.cos(rad) - dy * math.sin(rad),
-        cy + dx * math.sin(rad) + dy * math.cos(rad),
-    )
+def lerp(a, b, t):
+    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
-def vertical_gradient(size, top, bottom):
-    strip = Image.new("RGB", (1, size))
+def diagonal_gradient(size, c1, c2):
+    """Smooth top-left -> bottom-right gradient."""
+    base = Image.new("RGB", (size, size))
+    px = base.load()
     for y in range(size):
-        t = y / (size - 1)
-        strip.putpixel((0, y), tuple(int(top[i] + (bottom[i] - top[i]) * t) for i in range(3)))
-    return strip.resize((size, size))
+        for x in range(size):
+            t = (x + y) / (2 * (size - 1))
+            px[x, y] = lerp(c1, c2, t)
+    return base
 
 
-# ---- background: rounded square, lead-gray gradient ----
-bg = vertical_gradient(S, (172, 178, 190), (84, 90, 104)).convert("RGBA")
+def rounded_mask(size, radius):
+    m = Image.new("L", (size, size), 0)
+    ImageDraw.Draw(m).rounded_rectangle([0, 0, size - 1, size - 1], radius=radius, fill=255)
+    return m
 
-# soft radial highlight top-center for the "difuminado" feel
-hl = Image.new("L", (S, S), 0)
-ImageDraw.Draw(hl).ellipse([S * 0.05, -S * 0.45, S * 0.95, S * 0.55], fill=70)
-hl = hl.filter(ImageFilter.GaussianBlur(120))
-bg = Image.composite(Image.new("RGBA", (S, S), (255, 255, 255, 255)), bg, hl.point(lambda v: v))
 
-mask = Image.new("L", (S, S), 0)
-ImageDraw.Draw(mask).rounded_rectangle([0, 0, S - 1, S - 1], radius=int(S * 0.22), fill=255)
-icon = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-icon.paste(bg, (0, 0), mask)
+# ---- background squircle ----
+indigo = (99, 91, 240)   # deeper, richer indigo
+cyan = (34, 197, 230)    # vivid cyan
+grad = diagonal_gradient(W, indigo, cyan).convert("RGBA")
 
-# ---- note sheet shadow ----
-shadow = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-ImageDraw.Draw(shadow).rounded_rectangle(
-    [S * 0.255, S * 0.215, S * 0.755, S * 0.815], radius=int(S * 0.045), fill=(20, 24, 34, 110)
-)
-shadow = shadow.filter(ImageFilter.GaussianBlur(28))
+# soft radial sheen, top-center (subtle, keeps the colors saturated)
+sheen = Image.new("L", (W, W), 0)
+ImageDraw.Draw(sheen).ellipse([W * 0.05, -W * 0.55, W * 0.95, W * 0.4], fill=55)
+sheen = sheen.filter(ImageFilter.GaussianBlur(W * 0.14))
+grad = Image.composite(Image.new("RGBA", (W, W), (255, 255, 255, 255)), grad, sheen)
+
+mask = rounded_mask(W, int(W * 0.235))
+icon = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+icon.paste(grad, (0, 0), mask)
+
+# ---- soundwave glyph ----
+# bar heights as fraction of the glyph height, symmetric and lively
+heights = [0.34, 0.62, 0.92, 1.0, 0.72, 0.46, 0.28]
+n = len(heights)
+glyph_h = W * 0.46
+gap = W * 0.018
+bar_w = (W * 0.52 - gap * (n - 1)) / n
+total_w = bar_w * n + gap * (n - 1)
+x0 = (W - total_w) / 2
+cy = W * 0.5
+
+shadow = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+ds = ImageDraw.Draw(shadow)
+bars = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+db = ImageDraw.Draw(bars)
+
+for i, hf in enumerate(heights):
+    h = glyph_h * hf
+    x = x0 + i * (bar_w + gap)
+    rect = [x, cy - h / 2, x + bar_w, cy + h / 2]
+    r = bar_w / 2
+    ds.rounded_rectangle([rect[0], rect[1] + W * 0.012, rect[2], rect[3] + W * 0.012],
+                         radius=r, fill=(20, 30, 70, 90))
+    db.rounded_rectangle(rect, radius=r, fill=(255, 255, 255, 255))
+
+shadow = shadow.filter(ImageFilter.GaussianBlur(W * 0.012))
 icon = Image.alpha_composite(icon, shadow)
+icon = Image.alpha_composite(icon, bars)
 
-# ---- note sheet ----
-sheet = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-d = ImageDraw.Draw(sheet)
-x0, y0, x1, y1 = S * 0.245, S * 0.195, S * 0.745, S * 0.795
-d.rounded_rectangle([x0, y0, x1, y1], radius=int(S * 0.045), fill=(248, 249, 252, 255))
+# subtle inner edge for crispness
+edge = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+ImageDraw.Draw(edge).rounded_rectangle([2, 2, W - 3, W - 3], radius=int(W * 0.235),
+                                       outline=(255, 255, 255, 40), width=max(2, SS * 2))
+icon = Image.alpha_composite(icon, edge)
 
-# text lines: a wider title line + body lines
-pad = S * 0.055
-lw = int(S * 0.030)
-line_x0 = x0 + pad
-title_y = y0 + pad + lw // 2
-d.rounded_rectangle(
-    [line_x0, title_y - lw * 0.65, line_x0 + (x1 - x0) * 0.42, title_y + lw * 0.65],
-    radius=lw, fill=(110, 123, 242, 255),
-)
-for i in range(4):
-    ly = y0 + pad * 2.4 + i * S * 0.085
-    width = (x1 - x0) - pad * 2 if i < 3 else (x1 - x0) * 0.45
-    d.rounded_rectangle(
-        [line_x0, ly - lw / 2, line_x0 + width, ly + lw / 2],
-        radius=lw, fill=(196, 201, 213, 255),
-    )
-
-icon = Image.alpha_composite(icon, sheet)
-
-# ---- pencil, rotated 45°, tip toward the sheet ----
-pencil = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-d = ImageDraw.Draw(pencil)
-pw = S * 0.085                      # pencil width
-plen = S * 0.46                     # body length
-cx, cy = S * 0.615, S * 0.615      # pivot near sheet lower-right
-# pencil drawn pointing down (tip at bottom), then rotated -45 so tip points lower-left
-bx0, bx1 = cx - pw / 2, cx + pw / 2
-by0, by1 = cy - plen, cy
-body = [(bx0, by0), (bx1, by0), (bx1, by1), (bx0, by1)]
-tip = [(bx0, by1), (bx1, by1), (cx, by1 + pw * 1.25)]
-lead = [(cx - pw * 0.18, by1 + pw * 0.79), (cx + pw * 0.18, by1 + pw * 0.79), (cx, by1 + pw * 1.25)]
-eraser = [(bx0, by0), (bx1, by0), (bx1, by0 + pw * 0.55), (bx0, by0 + pw * 0.55)]
-
-ANG = -45
-d.polygon([rotate_point(x, y, cx, cy, ANG) for x, y in body], fill=(58, 63, 76, 255))
-d.polygon([rotate_point(x, y, cx, cy, ANG) for x, y in tip], fill=(233, 196, 144, 255))
-d.polygon([rotate_point(x, y, cx, cy, ANG) for x, y in lead], fill=(40, 44, 54, 255))
-d.polygon([rotate_point(x, y, cx, cy, ANG) for x, y in eraser], fill=(110, 123, 242, 255))
-# center groove along the body
-g0 = rotate_point(cx, by0 + pw * 0.7, cx, cy, ANG)
-g1 = rotate_point(cx, by1 - pw * 0.1, cx, cy, ANG)
-d.line([g0, g1], fill=(78, 84, 99, 255), width=int(pw * 0.14))
-
-icon = Image.alpha_composite(icon, pencil)
-
-# ---- export ----
+# ---- downsample & export ----
+icon = icon.resize((S, S), Image.LANCZOS)
 out_ico = os.path.join(HERE, "app.ico")
 out_png = os.path.join(HERE, "app.png")
 base = icon.resize((256, 256), Image.LANCZOS)
