@@ -2,6 +2,7 @@ const $ = id => document.getElementById(id);
 
 const viewRecord = $('view-record');
 const viewMeeting = $('view-meeting');
+const viewReminders = $('view-reminders');
 const btnRecord = $('btn-record');
 const btnStop = $('btn-stop');
 const btnNew = $('btn-new');
@@ -13,8 +14,8 @@ const timerEl = $('timer');
 const statusEl = $('status');
 const regenStatusEl = $('regen-status');
 const pipelineEl = $('pipeline');
-const meterSys = $('meter-sys');
-const meterMic = $('meter-mic');
+const vizSys = $('viz-sys');
+const vizMic = $('viz-mic');
 const titleInput = $('meeting-title');
 const customInput = $('custom-instructions');
 const notesEl = $('notes');
@@ -26,13 +27,44 @@ const regenDetail = $('regen-detail');
 
 let recorder = null;
 let chunks = [];
-let streams = [];
 let audioCtx = null;
+let dest = null;          // MediaStreamDestination feeding the recorder
+let micBus = null;        // GainNode summing all active mics
+let sysGainNode = null;   // GainNode for system audio
+let micHP = null;         // high-pass filter (cuts low rumble/hum)
+let micLP = null;         // low-pass filter (tames hiss on Strong)
+let sysStream = null;     // system-audio loopback stream
+
+let noiseReduction = localStorage.getItem('actas-noise') || 'standard';
+
+const numOr = (v, d) => (isNaN(parseFloat(v)) ? d : parseFloat(v));
+let gainSys = numOr(localStorage.getItem('actas-gain-sys'), 1);
+let gainMic = numOr(localStorage.getItem('actas-gain-mic'), 1);
+const micStreams = new Map(); // deviceId|'default' -> MediaStream
+const micNodes = new Map();   // deviceId|'default' -> MediaStreamAudioSourceNode
+let analysers = { sys: null, mic: null };
+let segRecorder = null;   // cycled recorder producing ~20s segments for live preview
+let segTimeout = null;
+let liveActive = false;
+const LIVE_SEGMENT_MS = 20000;
 let timerInterval = null;
 let levelRaf = null;
 let currentFolder = null;
 let currentNotesMd = '';
 let resultDateStr = '';
+let allMeetings = [];
+let searchQuery = '';
+
+const resultDate = $('result-date');
+const searchInput = $('search');
+const btnSpeak = $('btn-speak');
+const voiceSelect = $('voice-select');
+
+const micSelect = $('mic-select');
+let micSelection = localStorage.getItem('actas-mic') || 'default';
+
+const liveWrap = $('live-wrap');
+const liveTranscriptEl = $('live-transcript');
 
 // ---------- theme (persisted) ----------
 
@@ -53,13 +85,17 @@ applyTheme();
 
 // ---------- note options (persisted) ----------
 
+const participantsRec = $('participants-rec');
+const participantsMeet = $('participants-meet');
+
 const options = Object.assign(
-  { style: 'general', detail: 'concise', custom: '' },
+  { style: 'general', detail: 'concise', custom: '', participants: '' },
   JSON.parse(localStorage.getItem('actas-options') || '{}')
 );
 
 function saveOptions() {
   options.custom = customInput.value;
+  options.participants = participantsRec.value;
   localStorage.setItem('actas-options', JSON.stringify(options));
 }
 
@@ -68,7 +104,10 @@ function syncOptionControls() {
     p.classList.toggle('active', p.dataset.style === options.style));
   document.querySelectorAll('#detail-seg .seg-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.detail === options.detail));
+  document.querySelectorAll('#noise-seg .seg-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.noise === noiseReduction));
   customInput.value = options.custom || '';
+  participantsRec.value = options.participants || '';
   regenStyle.value = options.style;
   regenDetail.value = options.detail;
 }
@@ -77,7 +116,10 @@ document.querySelectorAll('#style-pills .seg-btn').forEach(p =>
   p.addEventListener('click', () => { options.style = p.dataset.style; saveOptions(); syncOptionControls(); }));
 document.querySelectorAll('#detail-seg .seg-btn').forEach(b =>
   b.addEventListener('click', () => { options.detail = b.dataset.detail; saveOptions(); syncOptionControls(); }));
+document.querySelectorAll('#noise-seg .seg-btn').forEach(b =>
+  b.addEventListener('click', () => { setNoiseReduction(b.dataset.noise); syncOptionControls(); }));
 customInput.addEventListener('change', saveOptions);
+participantsRec.addEventListener('change', saveOptions);
 regenStyle.addEventListener('change', () => { options.style = regenStyle.value; saveOptions(); syncOptionControls(); });
 regenDetail.addEventListener('change', () => { options.detail = regenDetail.value; saveOptions(); syncOptionControls(); });
 
@@ -86,6 +128,8 @@ regenDetail.addEventListener('change', () => { options.detail = regenDetail.valu
 function showView(name) {
   viewRecord.classList.toggle('hidden', name !== 'record');
   viewMeeting.classList.toggle('hidden', name !== 'meeting');
+  viewReminders.classList.toggle('hidden', name !== 'reminders');
+  $('btn-reminders').classList.toggle('active', name === 'reminders');
 }
 
 function setStatus(el, text, isError = false) {
@@ -117,8 +161,8 @@ function formatMeetingDate(name) {
 // ---------- markdown → color-coded section cards ----------
 
 const SECTION_META = [
-  { match: /summary/i, cls: 'sec-summary' },
-  { match: /key point|topic/i, cls: 'sec-key' },
+  { match: /summary|tl;?dr|highlight|recap|overview/i, cls: 'sec-summary' },
+  { match: /key point|topic|discussion|discussed/i, cls: 'sec-key' },
   { match: /decision|agreement/i, cls: 'sec-decision' },
   { match: /action|commitment/i, cls: 'sec-action' },
   { match: /question|feedback/i, cls: 'sec-question' },
@@ -189,9 +233,263 @@ function renderNotes(md) {
       card.innerHTML =
         `<div class="note-head"><span class="note-dot"></span>${escapeHtml(sec.title)}</div>` +
         bodyToHtml(sec.body);
+      if (meta.cls === 'sec-action' || meta.cls === 'sec-next') decorateAddButtons(card);
     }
     notesEl.appendChild(card);
   }
+}
+
+// add a "+ reminder" button to each list item in action-oriented sections
+function decorateAddButtons(card) {
+  for (const li of card.querySelectorAll('li')) {
+    const text = li.textContent.trim();
+    if (!text) continue;
+    const btn = document.createElement('button');
+    btn.className = 'li-add';
+    btn.textContent = '+ reminder';
+    btn.title = 'Add to action items';
+    btn.addEventListener('click', async () => {
+      if (await addReminderFromText(text, resultTitle.textContent)) {
+        btn.textContent = '✓ added';
+        btn.classList.add('added');
+      }
+    });
+    li.appendChild(btn);
+  }
+}
+
+// ---------- audio input devices ----------
+
+async function listMics() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    // skip the synthetic 'default'/'communications' aliases; we expose our own "Default (OS)"
+    return devices.filter(d => d.kind === 'audioinput'
+      && d.deviceId !== 'default' && d.deviceId !== 'communications');
+  } catch {
+    return [];
+  }
+}
+
+// labels are empty until mic permission is granted once
+async function unlockMicLabels() {
+  try {
+    const s = await navigator.mediaDevices.getUserMedia({ audio: true });
+    s.getTracks().forEach(t => t.stop());
+  } catch { /* user may deny; we still show generic names */ }
+}
+
+async function populateMicSelect() {
+  const mics = await listMics();
+  const prev = micSelection;
+  micSelect.innerHTML = '';
+  micSelect.add(new Option('Default (OS)', 'default'));
+  mics.forEach((d, i) => micSelect.add(new Option(d.label || `Microphone ${i + 1}`, d.deviceId)));
+  if (mics.length > 1) micSelect.add(new Option('All microphones', 'all'));
+  const exists = [...micSelect.options].some(o => o.value === prev);
+  micSelect.value = exists ? prev : 'default';
+  micSelection = micSelect.value;
+}
+
+function acquireMic(key) {
+  const on = noiseReduction !== 'off';
+  const audio = {
+    echoCancellation: on,
+    noiseSuppression: on,
+    autoGainControl: noiseReduction === 'strong'
+  };
+  if (key !== 'default') audio.deviceId = { exact: key };
+  return navigator.mediaDevices.getUserMedia({ audio });
+}
+
+// Web Audio post-filter on the mic bus (live-adjustable, no re-acquire needed)
+function applyNoiseFilter() {
+  if (!micHP || !micLP) return;
+  if (noiseReduction === 'strong') {
+    micHP.frequency.value = 130;
+    micLP.frequency.value = 8000;
+  } else if (noiseReduction === 'off') {
+    micHP.frequency.value = 10;      // effectively bypass
+    micLP.frequency.value = 20000;
+  } else {
+    micHP.frequency.value = 85;      // standard
+    micLP.frequency.value = 20000;
+  }
+}
+
+async function setNoiseReduction(level) {
+  noiseReduction = level;
+  localStorage.setItem('actas-noise', level);
+  applyNoiseFilter();
+  // the getUserMedia constraints differ per level, so re-acquire mics if recording
+  if (audioCtx) {
+    for (const key of [...micNodes.keys()]) dropMic(key);
+    await applyMicSelection();
+  }
+}
+
+function dropMic(key) {
+  const node = micNodes.get(key);
+  if (node) { try { node.disconnect(); } catch { /* already gone */ } }
+  const stream = micStreams.get(key);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  micNodes.delete(key);
+  micStreams.delete(key);
+}
+
+// Reconcile the live mic sources to match the current selection. Safe to call
+// before recording (no-op) or mid-recording (hot-swaps on the live micBus).
+async function applyMicSelection() {
+  if (!audioCtx || !micBus) return;
+  const mics = await listMics();
+  let desired = micSelection === 'all' ? mics.map(d => d.deviceId) : [micSelection];
+  if (desired.length === 0) desired = ['default'];
+
+  for (const key of [...micNodes.keys()]) {
+    if (!desired.includes(key)) dropMic(key);
+  }
+  for (const key of desired) {
+    if (micNodes.has(key)) continue;
+    try {
+      const stream = await acquireMic(key);
+      const node = audioCtx.createMediaStreamSource(stream);
+      node.connect(micBus);
+      micStreams.set(key, stream);
+      micNodes.set(key, node);
+    } catch { /* device busy/unavailable — skip it */ }
+  }
+}
+
+micSelect.addEventListener('change', async () => {
+  micSelection = micSelect.value;
+  localStorage.setItem('actas-mic', micSelection);
+  await applyMicSelection();
+});
+
+// ---------- volume sliders (live) ----------
+
+const gainSysSlider = $('gain-sys');
+const gainMicSlider = $('gain-mic');
+const gainSysVal = $('gain-sys-val');
+const gainMicVal = $('gain-mic-val');
+
+function initGainSliders() {
+  gainSysSlider.value = gainSys;
+  gainMicSlider.value = gainMic;
+  gainSysVal.textContent = gainSys.toFixed(1) + '×';
+  gainMicVal.textContent = gainMic.toFixed(1) + '×';
+}
+
+gainSysSlider.addEventListener('input', () => {
+  gainSys = parseFloat(gainSysSlider.value);
+  gainSysVal.textContent = gainSys.toFixed(1) + '×';
+  localStorage.setItem('actas-gain-sys', gainSys);
+  if (sysGainNode) sysGainNode.gain.value = gainSys;
+});
+
+gainMicSlider.addEventListener('input', () => {
+  gainMic = parseFloat(gainMicSlider.value);
+  gainMicVal.textContent = gainMic.toFixed(1) + '×';
+  localStorage.setItem('actas-gain-mic', gainMic);
+  if (micBus) micBus.gain.value = gainMic;
+});
+
+initGainSliders();
+
+// keep the list fresh and, while recording on "Default (OS)", follow the new default
+navigator.mediaDevices.addEventListener('devicechange', async () => {
+  await populateMicSelect();
+  if (audioCtx) {
+    if (micSelection === 'default') dropMic('default'); // re-acquire to follow OS default
+    await applyMicSelection();
+  }
+});
+
+// ---------- semi-live preview ----------
+
+async function startLivePreview() {
+  try {
+    if (!(await window.actas.liveStart(options.participants))) return;
+  } catch {
+    return; // preview is best-effort; final transcript is unaffected
+  }
+  liveTranscriptEl.textContent = '';
+  liveWrap.classList.remove('hidden');
+  liveActive = true;
+  cycleSegment();
+}
+
+function cycleSegment() {
+  if (!liveActive || !dest) return;
+  const segChunks = [];
+  try {
+    segRecorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm;codecs=opus' });
+  } catch {
+    return;
+  }
+  segRecorder.ondataavailable = e => { if (e.data.size) segChunks.push(e.data); };
+  segRecorder.onstop = async () => {
+    const blob = new Blob(segChunks, { type: 'audio/webm' });
+    if (blob.size > 3000) {
+      try { await window.actas.liveChunk(await blob.arrayBuffer()); } catch { /* worker gone */ }
+    }
+    if (liveActive && dest) cycleSegment();
+  };
+  segRecorder.start();
+  segTimeout = setTimeout(() => {
+    if (segRecorder && segRecorder.state !== 'inactive') segRecorder.stop();
+  }, LIVE_SEGMENT_MS);
+}
+
+async function stopLivePreview() {
+  liveActive = false;
+  if (segTimeout) { clearTimeout(segTimeout); segTimeout = null; }
+  if (segRecorder && segRecorder.state !== 'inactive') {
+    try { segRecorder.stop(); } catch { /* already stopped */ }
+  }
+  segRecorder = null;
+  liveWrap.classList.add('hidden');
+  try { await window.actas.liveStop(); } catch { /* ignore */ }
+}
+
+window.actas.onLiveTranscript(line => {
+  let msg;
+  try { msg = JSON.parse(line); } catch { return; }
+  if (msg.text) {
+    liveTranscriptEl.textContent += (liveTranscriptEl.textContent ? ' ' : '') + msg.text;
+    liveTranscriptEl.scrollTop = liveTranscriptEl.scrollHeight;
+  }
+});
+
+// ---------- waveform visualizer ----------
+
+function drawWave(m) {
+  const { analyser, buf, ctx, canvas, color } = m;
+  analyser.getByteTimeDomainData(buf);
+  const w = canvas.width, h = canvas.height, mid = h / 2;
+  ctx.clearRect(0, 0, w, h);
+
+  // baseline
+  ctx.strokeStyle = 'rgba(127,127,127,0.18)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, mid);
+  ctx.lineTo(w, mid);
+  ctx.stroke();
+
+  // waveform line
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.4;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  const step = w / buf.length;
+  let x = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const y = mid + ((buf[i] - 128) / 128) * mid * 0.92;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    x += step;
+  }
+  ctx.stroke();
 }
 
 // ---------- recording ----------
@@ -199,33 +497,52 @@ function renderNotes(md) {
 async function startRecording() {
   chunks = [];
   try {
-    const mic = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true }
-    });
     // main.js answers this with Windows system-audio loopback (video must be requested even if unused)
     const sys = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
     sys.getVideoTracks().forEach(t => (t.enabled = false));
-    streams = [mic, sys];
+    sysStream = sys;
 
     audioCtx = new AudioContext();
-    const dest = audioCtx.createMediaStreamDestination();
-    const meters = [];
-    for (const [stream, meter] of [[mic, meterMic], [sys, meterSys]]) {
-      if (stream.getAudioTracks().length === 0) continue;
-      const src = audioCtx.createMediaStreamSource(stream);
-      src.connect(dest);
+    dest = audioCtx.createMediaStreamDestination();
+    micBus = audioCtx.createGain();
+    micBus.gain.value = gainMic;
+    // mic noise-reduction filter chain: micBus -> highpass -> lowpass -> dest
+    micHP = audioCtx.createBiquadFilter();
+    micHP.type = 'highpass';
+    micLP = audioCtx.createBiquadFilter();
+    micLP.type = 'lowpass';
+    micBus.connect(micHP);
+    micHP.connect(micLP);
+    micLP.connect(dest);
+    applyNoiseFilter();
+
+    const css = getComputedStyle(document.body);
+    const colSys = css.getPropertyValue('--accent-2').trim() || '#54b8f2';
+    const colMic = css.getPropertyValue('--accent').trim() || '#7c83ff';
+
+    const makeViz = (sourceNode, canvas, color) => {
       const analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 256;
-      src.connect(analyser);
-      meters.push({ analyser, meter, buf: new Uint8Array(analyser.frequencyBinCount) });
+      analyser.fftSize = 512;
+      sourceNode.connect(analyser);
+      return { analyser, canvas, ctx: canvas.getContext('2d'), color, buf: new Uint8Array(analyser.fftSize) };
+    };
+
+    analysers = { sys: null, mic: null };
+    if (sys.getAudioTracks().length) {
+      const sysSrc = audioCtx.createMediaStreamSource(sys);
+      sysGainNode = audioCtx.createGain();
+      sysGainNode.gain.value = gainSys;
+      sysSrc.connect(sysGainNode);
+      sysGainNode.connect(dest);
+      analysers.sys = makeViz(sysGainNode, vizSys, colSys);
     }
+    analysers.mic = makeViz(micBus, vizMic, colMic);
+
+    await applyMicSelection();
 
     const updateLevels = () => {
-      for (const m of meters) {
-        m.analyser.getByteTimeDomainData(m.buf);
-        let peak = 0;
-        for (const v of m.buf) peak = Math.max(peak, Math.abs(v - 128) / 128);
-        m.meter.value = peak;
+      for (const m of [analysers.sys, analysers.mic]) {
+        if (m) drawWave(m);
       }
       levelRaf = requestAnimationFrame(updateLevels);
     };
@@ -237,13 +554,18 @@ async function startRecording() {
     });
     recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
     recorder.start(1000);
+    startLivePreview();
 
     btnRecord.classList.add('hidden');
     recLive.classList.remove('hidden');
     pipelineEl.classList.add('hidden');
     statusEl.classList.add('hidden');
-    if (sys.getAudioTracks().length === 0) {
+    if (micNodes.size === 0 && !sys.getAudioTracks().length) {
+      setStatus(statusEl, 'Warning: no audio source could be captured.');
+    } else if (!sys.getAudioTracks().length) {
       setStatus(statusEl, 'Warning: system audio could not be captured; only the mic is being recorded.');
+    } else if (micNodes.size === 0) {
+      setStatus(statusEl, 'Warning: no microphone could be captured; only system audio is being recorded.');
     }
 
     const t0 = Date.now();
@@ -265,9 +587,15 @@ function cleanupCapture() {
   if (levelRaf) cancelAnimationFrame(levelRaf);
   timerInterval = null;
   levelRaf = null;
-  streams.forEach(s => s.getTracks().forEach(t => t.stop()));
-  streams = [];
+  for (const key of [...micNodes.keys()]) dropMic(key);
+  if (sysStream) { sysStream.getTracks().forEach(t => t.stop()); sysStream = null; }
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  dest = null;
+  micBus = null;
+  sysGainNode = null;
+  micHP = null;
+  micLP = null;
+  analysers = { sys: null, mic: null };
   recLive.classList.add('hidden');
   btnRecord.classList.remove('hidden');
   timerEl.textContent = '00:00';
@@ -275,6 +603,7 @@ function cleanupCapture() {
 
 async function stopAndProcess() {
   if (!recorder || recorder.state === 'inactive') return;
+  await stopLivePreview();
   const stopped = new Promise(res => { recorder.onstop = res; });
   recorder.stop();
   await stopped;
@@ -290,7 +619,7 @@ async function stopAndProcess() {
     if (blob.size < 5000) throw new Error('The recording is empty or too short.');
 
     setStep('save', 'active');
-    const folder = await window.actas.saveRecording(await blob.arrayBuffer(), titleInput.value.trim());
+    const folder = await window.actas.saveRecording(await blob.arrayBuffer(), titleInput.value.trim(), options.participants);
     currentFolder = folder;
     setStep('save', 'done');
 
@@ -320,11 +649,15 @@ async function stopAndProcess() {
 
 // ---------- meeting view ----------
 
-function openMeetingView(title, summary, transcript, hasRecording = true) {
+function openMeetingView(title, summary, transcript, hasRecording = true, participants = null) {
+  stopSpeak();
+  exitEditMode();
   showView('meeting');
   regenStatusEl.classList.add('hidden');
   resultTitle.textContent = title;
   resultDateStr = currentFolder ? formatMeetingDate(currentFolder.split(/[\\/]/).pop()) : '';
+  resultDate.textContent = resultDateStr;
+  participantsMeet.value = participants != null ? participants : (options.participants || '');
   transcriptEl.textContent = transcript || '(no transcript)';
   btnRegen.disabled = !transcript;
   if (!transcript && hasRecording) {
@@ -350,7 +683,7 @@ async function retryTranscribe() {
     await window.actas.transcribe(currentFolder);
     const data = await window.actas.loadMeeting(currentFolder);
     regenStatusEl.classList.add('hidden');
-    openMeetingView(resultTitle.textContent, data.summary, data.transcript, data.hasRecording);
+    openMeetingView(resultTitle.textContent, data.summary, data.transcript, data.hasRecording, data.participants);
     await refreshMeetingList();
   } catch (err) {
     setStatus(regenStatusEl, `Error: ${err.message}`, true);
@@ -358,28 +691,152 @@ async function retryTranscribe() {
   }
 }
 
-async function refreshMeetingList() {
-  const meetings = await window.actas.listMeetings();
+function dateGroup(name) {
+  const m = name.match(/^(\d{4})-(\d{2})-(\d{2})_/);
+  if (!m) return 'Earlier';
+  const d = new Date(+m[1], +m[2] - 1, +m[3]);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - d) / 86400000);
+  if (diff <= 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  if (diff < 7) return 'This week';
+  if (diff < 30) return 'This month';
+  return 'Earlier';
+}
+
+function renderMeetingList() {
   meetingList.innerHTML = '';
-  for (const m of meetings) {
+  const q = searchQuery.trim().toLowerCase();
+  const items = allMeetings.filter(m =>
+    !q || (m.title || '').toLowerCase().includes(q) || formatMeetingDate(m.name).toLowerCase().includes(q));
+
+  if (items.length === 0) {
     const li = document.createElement('li');
-    if (m.folder === currentFolder) li.classList.add('active');
+    li.className = 'm-empty';
+    li.textContent = allMeetings.length === 0 ? 'No meetings yet.\nRecord or import to start.' : 'No matches';
+    meetingList.appendChild(li);
+    return;
+  }
+
+  let lastGroup = '';
+  for (const m of items) {
+    const g = dateGroup(m.name);
+    if (g !== lastGroup) {
+      lastGroup = g;
+      const gh = document.createElement('li');
+      gh.className = 'm-group';
+      gh.textContent = g;
+      meetingList.appendChild(gh);
+    }
+    const li = document.createElement('li');
+    li.className = 'm-item' + (m.folder === currentFolder ? ' active' : '');
+
+    const dot = document.createElement('span');
+    dot.className = 'm-status ' + (m.hasSummary ? 'done' : (m.hasTranscript ? 'partial' : 'pending'));
+    dot.title = m.hasSummary ? 'Notes ready' : (m.hasTranscript ? 'Transcript only' : 'Not transcribed');
+
+    const body = document.createElement('div');
+    body.className = 'm-body';
     const title = document.createElement('span');
-    title.className = 'm-title' + (m.hasSummary ? '' : ' m-pending');
+    title.className = 'm-title';
     title.textContent = m.title || 'Meeting';
     const date = document.createElement('span');
     date.className = 'm-date';
-    date.textContent = formatMeetingDate(m.name) + (m.hasTranscript ? '' : ' · not transcribed');
-    li.append(title, date);
+    date.textContent = formatMeetingDate(m.name);
+    body.append(title, date);
+
+    li.append(dot, body);
     li.addEventListener('click', async () => {
       currentFolder = m.folder;
       const data = await window.actas.loadMeeting(m.folder);
-      openMeetingView(data.title || formatMeetingDate(m.name), data.summary, data.transcript, data.hasRecording);
-      refreshMeetingList();
+      openMeetingView(data.title || formatMeetingDate(m.name), data.summary, data.transcript, data.hasRecording, data.participants);
+      renderMeetingList();
     });
     meetingList.appendChild(li);
   }
 }
+
+async function refreshMeetingList() {
+  allMeetings = await window.actas.listMeetings();
+  renderMeetingList();
+}
+
+searchInput.addEventListener('input', () => {
+  searchQuery = searchInput.value;
+  renderMeetingList();
+});
+
+// ---------- text-to-speech (read notes aloud) ----------
+
+const synth = window.speechSynthesis;
+let voices = [];
+let speaking = false;
+
+function loadVoices() {
+  voices = synth.getVoices();
+  if (!voices.length) return;
+  const saved = localStorage.getItem('actas-voice') || '';
+  const sorted = [...voices].sort((a, b) =>
+    (b.lang.startsWith('en') - a.lang.startsWith('en')) || a.name.localeCompare(b.name));
+  voiceSelect.innerHTML = '';
+  for (const v of sorted) {
+    const lang = v.lang.replace('_', '-');
+    voiceSelect.add(new Option(`${v.name.replace(/Microsoft |Desktop/g, '').trim()} · ${lang}`, v.voiceURI));
+  }
+  if (saved && voices.some(v => v.voiceURI === saved)) {
+    voiceSelect.value = saved;
+  } else {
+    const def = voices.find(v => v.lang.startsWith('en') && v.default)
+      || voices.find(v => v.lang.startsWith('en')) || voices[0];
+    if (def) voiceSelect.value = def.voiceURI;
+  }
+}
+
+synth.addEventListener('voiceschanged', loadVoices);
+loadVoices();
+
+voiceSelect.addEventListener('change', () => localStorage.setItem('actas-voice', voiceSelect.value));
+
+function updateSpeakBtn() {
+  btnSpeak.classList.toggle('speaking', speaking);
+  btnSpeak.querySelector('.speak-label').textContent = speaking ? 'Stop' : 'Read aloud';
+}
+
+function stopSpeak() {
+  synth.cancel();
+  speaking = false;
+  updateSpeakBtn();
+}
+
+function chunkText(text) {
+  const parts = text.replace(/\s+/g, ' ').match(/[^.!?]+[.!?]?/g) || [text];
+  const chunks = [];
+  let cur = '';
+  for (const p of parts) {
+    if ((cur + p).length > 220) { if (cur) chunks.push(cur.trim()); cur = p; }
+    else cur += p;
+  }
+  if (cur.trim()) chunks.push(cur.trim());
+  return chunks;
+}
+
+btnSpeak.addEventListener('click', () => {
+  if (speaking) { stopSpeak(); return; }
+  const text = notesEl.innerText.trim();
+  if (!text) return;
+  const voice = voices.find(v => v.voiceURI === voiceSelect.value);
+  const chunks = chunkText(text); // chunked to dodge the long-utterance cutoff bug
+  speaking = true;
+  updateSpeakBtn();
+  chunks.forEach((c, i) => {
+    const u = new SpeechSynthesisUtterance(c);
+    if (voice) u.voice = voice;
+    if (i === chunks.length - 1) u.onend = () => { speaking = false; updateSpeakBtn(); };
+    u.onerror = () => { speaking = false; updateSpeakBtn(); };
+    synth.speak(u);
+  });
+});
 
 // ---------- events ----------
 
@@ -391,7 +848,7 @@ btnImport.addEventListener('click', async () => {
   btnImport.disabled = true;
   btnRecord.disabled = true;
   try {
-    const picked = await window.actas.importAudio();
+    const picked = await window.actas.importAudio(options.participants);
     if (!picked) return;
     currentFolder = picked.folder;
     pipelineEl.classList.remove('hidden');
@@ -415,6 +872,7 @@ btnImport.addEventListener('click', async () => {
 });
 
 btnNew.addEventListener('click', () => {
+  stopSpeak();
   currentFolder = null;
   showView('record');
   statusEl.classList.add('hidden');
@@ -426,6 +884,10 @@ btnNew.addEventListener('click', () => {
 btnRegen.addEventListener('click', async () => {
   if (!currentFolder) return;
   btnRegen.disabled = true;
+  // use the participants edited in this meeting's bar, and remember them as the default
+  options.participants = participantsMeet.value;
+  localStorage.setItem('actas-options', JSON.stringify(options));
+  participantsRec.value = participantsMeet.value;
   setStatus(regenStatusEl, 'Regenerating notes with Claude…');
   try {
     const summary = await window.actas.regenerate(currentFolder, options);
@@ -446,6 +908,52 @@ btnCopy.addEventListener('click', async () => {
   setTimeout(() => { btnCopy.textContent = 'Copy'; }, 1500);
 });
 
+// ---------- edit notes by hand ----------
+
+const notesEditor = $('notes-editor');
+const notesTextarea = $('notes-textarea');
+const btnEdit = $('btn-edit');
+
+function enterEditMode() {
+  stopSpeak();
+  notesTextarea.value = currentNotesMd || '';
+  notesEl.classList.add('hidden');
+  notesEditor.classList.remove('hidden');
+  btnEdit.classList.add('speaking'); // reuse accent style to show active state
+  notesTextarea.focus();
+}
+
+function exitEditMode() {
+  notesEditor.classList.add('hidden');
+  notesEl.classList.remove('hidden');
+  btnEdit.classList.remove('speaking');
+}
+
+btnEdit.addEventListener('click', () => {
+  if (notesEditor.classList.contains('hidden')) enterEditMode();
+  else exitEditMode();
+});
+
+$('btn-cancel-notes').addEventListener('click', exitEditMode);
+
+$('btn-save-notes').addEventListener('click', async () => {
+  if (!currentFolder) return;
+  const md = notesTextarea.value.trim();
+  const btn = $('btn-save-notes');
+  btn.disabled = true;
+  try {
+    await window.actas.saveNotes(currentFolder, md);
+    currentNotesMd = md;
+    renderNotes(md);
+    exitEditMode();
+    await refreshMeetingList();
+  } catch (err) {
+    setStatus(regenStatusEl, `Could not save notes: ${err.message}`, true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 const SECTION_PDF_COLORS = {
   'sec-summary': '#6356d6', 'sec-key': '#1d8cad', 'sec-decision': '#2c8f54',
   'sec-action': '#aa7012', 'sec-question': '#b94570', 'sec-risk': '#bb373d',
@@ -461,8 +969,12 @@ function buildPdfHtml(title) {
     const headHtml = head
       ? `<div class="h" style="color:${color}">${escapeHtml(head.textContent.trim())}</div>`
       : '';
-    const inner = card.innerHTML.replace(/<div class="note-head">[\s\S]*?<\/div>/, '');
-    body += `<div class="card" style="border-color:${color}">${headHtml}${inner}</div>`;
+    // clone so we can strip interactive bits (the "+ reminder" buttons) without touching the UI
+    const clone = card.cloneNode(true);
+    clone.querySelectorAll('.li-add, button').forEach(el => el.remove());
+    const headClone = clone.querySelector('.note-head');
+    if (headClone) headClone.remove();
+    body += `<div class="card" style="border-color:${color}">${headHtml}${clone.innerHTML}</div>`;
   }
   const css = `
     * { box-sizing: border-box; }
@@ -511,11 +1023,113 @@ window.actas.onTranscribeProgress(text => {
   }
 });
 
+// ---------- reminders / action items ----------
+
+const btnReminders = $('btn-reminders');
+const remindersCount = $('reminders-count');
+const remindersList = $('reminders-list');
+const newReminderInput = $('new-reminder');
+
+function updateReminderCount(list) {
+  const pending = list.filter(r => !r.done).length;
+  remindersCount.textContent = pending;
+  remindersCount.classList.toggle('hidden', pending === 0);
+}
+
+function renderReminders(list) {
+  remindersList.innerHTML = '';
+  if (list.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'reminders-empty';
+    li.textContent = 'No action items yet. Add one above, or use the + on action items inside a meeting.';
+    remindersList.appendChild(li);
+    return;
+  }
+  const sorted = [...list].sort((a, b) => (a.done - b.done) || (b.createdAt - a.createdAt));
+  for (const r of sorted) {
+    const li = document.createElement('li');
+    li.className = 'reminder' + (r.done ? ' done' : '');
+
+    const check = document.createElement('button');
+    check.className = 'r-check';
+    check.title = r.done ? 'Mark as not done' : 'Mark as done';
+    check.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12"><path d="M3 8.5l3 3 7-7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    check.addEventListener('click', async () => {
+      await window.actas.updateReminder(r.id, { done: !r.done });
+      await refreshReminders();
+    });
+
+    const main = document.createElement('div');
+    main.className = 'r-main';
+    const text = document.createElement('input');
+    text.className = 'r-text';
+    text.value = r.text;
+    text.addEventListener('change', () => window.actas.updateReminder(r.id, { text: text.value.trim() }));
+    text.addEventListener('keydown', e => { if (e.key === 'Enter') text.blur(); });
+    main.appendChild(text);
+    if (r.source) {
+      const src = document.createElement('span');
+      src.className = 'r-source';
+      src.textContent = 'from: ' + r.source;
+      main.appendChild(src);
+    }
+
+    const del = document.createElement('button');
+    del.className = 'r-del';
+    del.title = 'Delete';
+    del.innerHTML = '<svg viewBox="0 0 16 16" width="13" height="13"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+    del.addEventListener('click', async () => {
+      await window.actas.deleteReminder(r.id);
+      await refreshReminders();
+    });
+
+    li.append(check, main, del);
+    remindersList.appendChild(li);
+  }
+}
+
+async function refreshReminders() {
+  const list = await window.actas.listReminders();
+  updateReminderCount(list);
+  if (!viewReminders.classList.contains('hidden')) renderReminders(list);
+}
+
+async function addReminderFromText(text, source) {
+  const t = (text || '').trim();
+  if (!t) return false;
+  await window.actas.addReminder(t, source || '');
+  await refreshReminders();
+  return true;
+}
+
+btnReminders.addEventListener('click', async () => {
+  stopSpeak();
+  showView('reminders');
+  const list = await window.actas.listReminders();
+  updateReminderCount(list);
+  renderReminders(list);
+});
+
+function submitNewReminder() {
+  const t = newReminderInput.value.trim();
+  if (!t) return;
+  newReminderInput.value = '';
+  addReminderFromText(t, '');
+}
+$('btn-add-reminder').addEventListener('click', submitNewReminder);
+newReminderInput.addEventListener('keydown', e => { if (e.key === 'Enter') submitNewReminder(); });
+
 // ---------- init ----------
 
 syncOptionControls();
 showView('record');
 refreshMeetingList();
+refreshReminders();
+
+(async () => {
+  await unlockMicLabels();
+  await populateMicSelect();
+})();
 
 (async () => {
   try {
