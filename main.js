@@ -143,7 +143,7 @@ function createWindow() {
     show: false,              // revealed by the splash hand-off
     autoHideMenuBar: true,
     title: 'Yapper',
-    icon: path.join(__dirname, 'build', 'yapper-mark.ico'),
+    icon: path.join(__dirname, 'build', 'yapper-icon.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -312,7 +312,7 @@ async function bootWithSplash() {
       alwaysOnTop: true,
       show: false,
       title: 'Yapper',
-      icon: path.join(__dirname, 'build', 'yapper-mark.ico'),
+      icon: path.join(__dirname, 'build', 'yapper-icon.ico'),
       webPreferences: { contextIsolation: true, nodeIntegration: false }
     });
     splash.setMenuBarVisibility(false);

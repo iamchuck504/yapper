@@ -26,6 +26,7 @@ build/shots/
 renderer/.pdf-export.html
 build/icon-candidates/
 build/icon-v*/
+build/icon-preview.png
 build/whisper/
 
 # whisper.cpp binaries and models (downloaded by setup, never committed)
