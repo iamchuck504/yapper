@@ -49,28 +49,27 @@
 }
 
 :root {
-  /* Palette: olive #3E3F29 · sage #7D8D86 · sand #BCA88D · cream #F1F0E4 */
+  /* Chapters: near-black ground, amber accent, hairline rules mark the clock */
+  --bg: #0C0D10;
+  --surface-1: #0A0B0E;   /* sidebar */
+  --surface-2: #14161B;   /* raised panels */
+  --surface-3: #14161B;   /* inputs */
+  --surface-4: #1C1F26;   /* active / strong hover */
+  --border: #191B20;
+  --border-2: #2A2E36;
+  --rule: #1E2126;        /* the chapter hairline */
 
-  /* dark: deep olive surfaces, cream text */
-  --bg: #1E1F16;
-  --surface-1: #24261A;   /* sidebar */
-  --surface-2: #2C2E20;   /* cards */
-  --surface-3: #343625;   /* inputs / hover */
-  --surface-4: #43452F;   /* active / strong hover */
-  --border: #3C3E2A;
-  --border-2: #545640;
+  --text: #E6E8EC;
+  --text-2: #9AA1AC;
+  --text-3: #5C626D;
 
-  --text: #F1F0E4;
-  --text-2: #C4C3AE;
-  --text-3: #8E9078;
-
-  --accent: #93A79C;
-  --accent-2: #BCA88D;
-  --accent-soft: rgba(125, 141, 134, 0.20);
-  --accent-text: #A8BBAF;
-  --rec: #C4705C;
-  --on-accent: #1E1F16;   /* text on accent fills (accent is light here) */
-  --on-rec: #F1F0E4;
+  --accent: #E0A458;
+  --accent-2: #9AA1AC;
+  --accent-soft: rgba(224, 164, 88, 0.16);
+  --accent-text: #E0A458;
+  --rec: #E0A458;
+  --on-accent: #0C0D10;
+  --on-rec: #0C0D10;
 
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28);
   --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.38);
@@ -83,50 +82,52 @@
   --font-sans: 'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: Consolas, 'Cascadia Mono', monospace;
 
-  /* section color coding — muted earth tones */
-  --c-summary: #93A79C;
-  --c-key: #86A3B4;
-  --c-decision: #9BB07C;
-  --c-action: #CBA871;
-  --c-question: #C093A0;
-  --c-risk: #CE8A74;
-  --c-next: #9A94B4;
-  --c-neutral: #9A9C82;
+  /* One accent, spent only on the sections that ask something of you. */
+  --c-summary: #E6E8EC;
+  --c-key: #E6E8EC;
+  --c-decision: #E6E8EC;
+  --c-action: #E0A458;
+  --c-question: #E6E8EC;
+  --c-risk: #E0A458;
+  --c-next: #E6E8EC;
+  --c-neutral: #E6E8EC;
 }
 
 body.light {
-  --bg: #E9E7D8;
-  --surface-1: #E3E0CE;
-  --surface-2: #F1F0E4;
-  --surface-3: #E6E4D4;
-  --surface-4: #D8D5C0;
-  --border: #D3CFB9;
-  --border-2: #BCA88D;
+  /* the accent is warm, so the paper is warm too */
+  --bg: #FBFAF8;
+  --surface-1: #F5F3EF;
+  --surface-2: #F2EFE9;
+  --surface-3: #F2EFE9;
+  --surface-4: #EEEBE4;
+  --border: #E9E5DD;
+  --border-2: #D8D3C8;
+  --rule: #E4E0D8;
 
-  --text: #3E3F29;
-  --text-2: #5D5F46;
-  --text-3: #8A8B71;
+  --text: #1A1815;
+  --text-2: #5A574F;
+  --text-3: #918D83;
 
-  --accent: #5C6E66;
-  --accent-2: #9C8663;
-  --accent-soft: rgba(125, 141, 134, 0.22);
-  --accent-text: #4E5F58;
-  --rec: #A05A45;
-  --on-accent: #F1F0E4;   /* accent is dark here, so light text */
-  --on-rec: #F1F0E4;
+  --accent: #A66A1E;      /* the amber, deepened so it reads on paper */
+  --accent-2: #5A574F;
+  --accent-soft: rgba(166, 106, 30, 0.13);
+  --accent-text: #A66A1E;
+  --rec: #A66A1E;
+  --on-accent: #FBFAF8;
+  --on-rec: #FBFAF8;
 
-  --shadow-1: 0 1px 2px rgba(62, 63, 41, 0.07);
-  --shadow-2: 0 6px 20px rgba(62, 63, 41, 0.10);
-  --shadow-pop: 0 12px 30px rgba(62, 63, 41, 0.16);
+  --shadow-1: 0 1px 2px rgba(26, 24, 21, 0.05);
+  --shadow-2: 0 6px 20px rgba(26, 24, 21, 0.08);
+  --shadow-pop: 0 12px 30px rgba(26, 24, 21, 0.14);
 
-  --c-summary: #5B6E64;
-  --c-key: #4F6879;
-  --c-decision: #5E7345;
-  --c-action: #91713A;
-  --c-question: #85606E;
-  --c-risk: #9A5340;
-  --c-next: #5F5A75;
-  --c-neutral: #7C7C66;
+  --c-summary: #1A1815;
+  --c-key: #1A1815;
+  --c-decision: #1A1815;
+  --c-action: #A66A1E;
+  --c-question: #1A1815;
+  --c-risk: #A66A1E;
+  --c-next: #1A1815;
+  --c-neutral: #1A1815;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -177,21 +178,8 @@ body, #sidebar, .options-card, .note-card, #status, #regen-status,
   gap: 10px;
   padding: 4px 6px 14px;
 }
-.brand-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 7px;
-  background: var(--accent);
-  color: var(--surface-1);
-  font-family: var(--font-sans);
-  font-weight: 700;
-  font-size: 17px;
-  box-shadow: var(--shadow-1);
-}
-.brand-name { font-size: 16px; font-weight: 600; letter-spacing: 0.3px; }
+.brand-name { font-size: 15.5px; font-weight: 650; letter-spacing: -0.01em; }
+.brand-name i { color: var(--accent); font-style: normal; margin-left: 1px; }
 
 .new-btn {
   display: flex;
@@ -201,15 +189,15 @@ body, #sidebar, .options-card, .note-card, #status, #regen-status,
   width: 100%;
   height: 38px;
   margin-bottom: 10px;
-  background: var(--accent-soft);
-  color: var(--accent-text);
-  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid var(--border-2);
   border-radius: var(--r-md);
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
 }
-.new-btn:hover { background: var(--accent); color: var(--on-accent); }
+.new-btn:hover { background: var(--surface-2); color: var(--text); border-color: var(--text-3); }
 .new-btn:active { transform: translateY(1px); }
 
 .nav-btn {
@@ -881,40 +869,74 @@ body.light #status.error, body.light #regen-status.error { color: var(--rec); }
 .voice-select:hover { border-color: var(--border-2); color: var(--text); }
 .voice-select:focus { outline: none; border-color: var(--accent); }
 
-/* ---- Color-coded note cards ---- */
-#notes { display: flex; flex-direction: column; gap: 11px; }
-.note-card {
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--sec, var(--c-neutral));
-  border-radius: var(--r-md);
-  padding: 15px 19px;
-  line-height: 1.65;
-  font-size: 14px;
-  box-shadow: var(--shadow-1);
-  animation: fadeUp 0.22s ease both;
+/* ---- Notes as chapters ----
+   No boxes: a hairline rule opens each section and carries the minute it began,
+   so the page reads like a document with time markers. */
+#notes { animation: fadeUp 0.22s ease both; }
+
+.note-sec { margin-bottom: 4px; }
+
+.note-rule {
+  position: relative;
+  height: 1px;
+  background: var(--rule);
+  margin: 26px 0 15px;
 }
+.note-sec:first-child .note-rule { margin-top: 4px; }
+.note-rule .at {
+  position: absolute;
+  left: 0;
+  top: -7px;
+  padding-right: 11px;
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  letter-spacing: 0.02em;
+}
+.note-sec.sec-action .note-rule,
+.note-sec.sec-risk .note-rule { background: var(--accent-soft); }
+.note-sec.sec-action .note-rule .at,
+.note-sec.sec-risk .note-rule .at { color: var(--accent); }
+
 .note-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11.5px;
-  font-weight: 700;
-  letter-spacing: 0.7px;
-  text-transform: uppercase;
-  color: var(--sec, var(--c-neutral));
-  margin-bottom: 9px;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--sec, var(--text));
+  margin-bottom: 6px;
 }
-.note-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--sec, var(--c-neutral)); }
-.note-card ul { padding-left: 20px; margin: 5px 0; }
-.note-card li { margin-bottom: 5px; }
-.note-card li::marker { color: var(--sec, var(--c-neutral)); }
+
+.note-sec p { margin: 4px 0; font-size: 14.5px; line-height: 1.62; color: var(--text-2); max-width: 74ch; }
+.note-sec ul { list-style: none; padding: 0; margin: 4px 0; max-width: 74ch; }
+.note-sec li {
+  position: relative;
+  padding-left: 15px;
+  margin-bottom: 5px;
+  font-size: 14.5px;
+  line-height: 1.62;
+  color: var(--text-2);
+}
+.note-sec li::before {
+  content: "";
+  position: absolute;
+  left: 1px;
+  top: 9px;
+  width: 4px;
+  height: 4px;
+  background: var(--text-3);
+}
+.note-sec.sec-action li::before,
+.note-sec.sec-risk li::before { background: var(--accent); }
+.note-sec strong { color: var(--text); font-weight: 650; }
+.note-sec h3 { font-size: 13px; margin: 12px 0 4px; color: var(--text); font-weight: 600; }
+
 .li-add {
   margin-left: 8px;
   border: 1px solid var(--border-2);
   background: transparent;
   color: var(--text-3);
-  border-radius: 5px;
+  border-radius: 4px;
   padding: 0 6px;
   font-size: 11px;
   line-height: 16px;
@@ -922,12 +944,9 @@ body.light #status.error, body.light #regen-status.error { color: var(--rec); }
   opacity: 0;
   transition: opacity 0.15s, background 0.15s, color 0.15s;
 }
-.note-card li:hover .li-add { opacity: 1; }
+.note-sec li:hover .li-add { opacity: 1; }
 .li-add:hover { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
-.li-add.added { opacity: 1; background: var(--c-decision); color: var(--on-accent); border-color: var(--c-decision); }
-.note-card p { margin: 5px 0; }
-.note-card strong { color: var(--text); font-weight: 650; }
-.note-card h3 { font-size: 13px; margin: 10px 0 4px; color: var(--text); }
+.li-add.added { opacity: 1; background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 
 .sec-summary  { --sec: var(--c-summary); }
 .sec-key      { --sec: var(--c-key); }

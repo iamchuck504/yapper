@@ -254,13 +254,15 @@ function bodyToHtml(lines) {
   return html;
 }
 
-function renderNotes(md) {
-  currentNotesMd = md || '';
-  notesEl.innerHTML = '';
-  if (!md || !md.trim()) {
-    notesEl.innerHTML = '<div class="note-card sec-neutral"><p>No notes yet — this meeting only has a verbatim transcript. Use Regenerate to create notes from it.</p></div>';
-    return;
-  }
+// Headings may carry the minute the topic started: "## Decisions [12:34]".
+// The stamp is optional so notes written before this existed still render.
+function splitStamp(title) {
+  const m = title.match(/\s*\[(\d{1,2}:\d{2}(?::\d{2})?)\]\s*$/);
+  if (!m) return { title: title.trim(), at: '' };
+  return { title: title.slice(0, m.index).trim(), at: m[1] };
+}
+
+function parseSections(md) {
   const sections = [];
   let cur = { title: '', body: [] };
   for (const line of md.split('\n')) {
@@ -273,21 +275,35 @@ function renderNotes(md) {
     }
   }
   if (cur.title || cur.body.some(l => l.trim())) sections.push(cur);
+  return sections;
+}
 
-  for (const sec of sections) {
-    const card = document.createElement('div');
+function renderNotes(md) {
+  currentNotesMd = md || '';
+  notesEl.innerHTML = '';
+  if (!md || !md.trim()) {
+    notesEl.innerHTML =
+      '<div class="note-sec sec-neutral"><p>No notes yet — this meeting only has a verbatim '
+      + 'transcript. Use Regenerate to create notes from it.</p></div>';
+    return;
+  }
+
+  for (const sec of parseSections(md)) {
+    const el = document.createElement('div');
     if (!sec.title) {
-      card.className = 'note-card sec-neutral';
-      card.innerHTML = bodyToHtml(sec.body);
+      el.className = 'note-sec sec-neutral';
+      el.innerHTML = bodyToHtml(sec.body);
     } else {
-      const meta = sectionMeta(sec.title);
-      card.className = `note-card ${meta.cls}`;
-      card.innerHTML =
-        `<div class="note-head"><span class="note-dot"></span>${escapeHtml(sec.title)}</div>` +
+      const { title, at } = splitStamp(sec.title);
+      const meta = sectionMeta(title);
+      el.className = `note-sec ${meta.cls}`;
+      el.innerHTML =
+        `<div class="note-rule">${at ? `<span class="at">${escapeHtml(at)}</span>` : ''}</div>` +
+        `<div class="note-head">${escapeHtml(title)}</div>` +
         bodyToHtml(sec.body);
-      if (meta.cls === 'sec-action' || meta.cls === 'sec-next') decorateAddButtons(card);
+      if (meta.cls === 'sec-action' || meta.cls === 'sec-next') decorateAddButtons(el);
     }
-    notesEl.appendChild(card);
+    notesEl.appendChild(el);
   }
 }
 
@@ -825,8 +841,10 @@ function openMeetingView(title, summary, transcript, hasRecording = true, partic
   btnRegen.disabled = !transcript;
   if (!transcript && hasRecording) {
     notesEl.innerHTML =
-      '<div class="note-card sec-risk"><div class="note-head"><span class="note-dot"></span>Not transcribed</div>' +
-      '<p>This meeting has a recording but no transcript yet (the transcription may have failed or been interrupted). Nothing is lost.</p>' +
+      '<div class="note-sec sec-risk"><div class="note-rule"></div>' +
+      '<div class="note-head">Not transcribed</div>' +
+      '<p>This meeting has a recording but no transcript yet (the transcription may have failed '
+      + 'or been interrupted). Nothing is lost.</p>' +
       '<button id="btn-transcribe" class="inline-action">Transcribe now</button></div>';
     currentNotesMd = '';
     $('btn-transcribe').addEventListener('click', retryTranscribe);
@@ -1117,44 +1135,53 @@ $('btn-save-notes').addEventListener('click', async () => {
   }
 });
 
-// print palette: the light-theme section colours (readable on paper)
+// print palette: neutral slate, with the accent reserved for what needs doing
 const SECTION_PDF_COLORS = {
-  'sec-summary': '#5B6E64', 'sec-key': '#4F6879', 'sec-decision': '#5E7345',
-  'sec-action': '#91713A', 'sec-question': '#85606E', 'sec-risk': '#9A5340',
-  'sec-next': '#5F5A75', 'sec-neutral': '#7C7C66'
+  'sec-summary': '#7A8A96', 'sec-key': '#7A8A96', 'sec-decision': '#7A8A96',
+  'sec-action': '#C0392B', 'sec-question': '#7A8A96', 'sec-risk': '#C0392B',
+  'sec-next': '#7A8A96', 'sec-neutral': '#7A8A96'
 };
 
 function buildPdfHtml(title) {
+  // Same chapter structure on paper: a rule carrying the minute, then the section.
   let body = '';
-  for (const card of notesEl.querySelectorAll('.note-card')) {
-    const cls = [...card.classList].find(c => c.startsWith('sec-')) || 'sec-neutral';
-    const color = SECTION_PDF_COLORS[cls] || '#7c8294';
-    const head = card.querySelector('.note-head');
-    const headHtml = head
-      ? `<div class="h" style="color:${color}">${escapeHtml(head.textContent.trim())}</div>`
-      : '';
-    // clone so we can strip interactive bits (the "+ reminder" buttons) without touching the UI
-    const clone = card.cloneNode(true);
-    clone.querySelectorAll('.li-add, button').forEach(el => el.remove());
-    const headClone = clone.querySelector('.note-head');
-    if (headClone) headClone.remove();
-    body += `<div class="card" style="border-color:${color}">${headHtml}${clone.innerHTML}</div>`;
+  for (const sec of notesEl.querySelectorAll('.note-sec')) {
+    const hot = sec.classList.contains('sec-action') || sec.classList.contains('sec-risk');
+    const head = sec.querySelector('.note-head');
+    const at = sec.querySelector('.note-rule .at');
+    const clone = sec.cloneNode(true);
+    clone.querySelectorAll('.li-add, button, .note-rule, .note-head').forEach(el => el.remove());
+
+    body += `<section class="${hot ? 'hot' : ''}">`
+      + `<div class="rule">${at ? `<span class="at">${escapeHtml(at.textContent)}</span>` : ''}</div>`
+      + (head ? `<h2>${escapeHtml(head.textContent.trim())}</h2>` : '')
+      + clone.innerHTML
+      + '</section>';
   }
   const css = `
     @font-face { font-family: 'Geist'; src: url('fonts/Geist-latin.woff2') format('woff2'); font-weight: 400; }
     @font-face { font-family: 'Geist'; src: url('fonts/Geist-latin.woff2') format('woff2'); font-weight: 600; }
     @font-face { font-family: 'Geist'; src: url('fonts/Geist-latin.woff2') format('woff2'); font-weight: 700; }
     * { box-sizing: border-box; }
-    body { font-family: 'Geist', system-ui, sans-serif; color: #3E3F29; margin: 0; font-size: 11pt; }
-    h1 { font-size: 18pt; margin: 0 0 4px; font-weight: 600; letter-spacing: -0.2px; }
-    .date { color: #8A8B71; font-size: 9.5pt; margin-bottom: 18px; }
-    .card { border-left: 3px solid #7C7C66; background: #F7F6EC; border-radius: 4px;
-            padding: 12px 16px; margin-bottom: 12px; page-break-inside: avoid; }
-    .h { font-size: 9pt; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; margin-bottom: 6px; }
-    ul { padding-left: 20px; margin: 4px 0; } li { margin-bottom: 4px; line-height: 1.5; }
-    p { margin: 4px 0; line-height: 1.55; } strong { color: #3E3F29; font-weight: 600; }
-    h3 { font-size: 11pt; margin: 8px 0 4px; }
-    .foot { margin-top: 22px; color: #A3A48C; font-size: 8pt; border-top: 1px solid #D3CFB9; padding-top: 8px; }`;
+    body { font-family: 'Geist', system-ui, sans-serif; color: #1A1815; margin: 0; font-size: 10.5pt; }
+    h1 { font-size: 17pt; margin: 0 0 3px; font-weight: 600; letter-spacing: -0.2px; }
+    .date { color: #918D83; font-size: 9pt; margin-bottom: 6px; }
+    section { page-break-inside: avoid; }
+    .rule { position: relative; height: 1px; background: #E4E0D8; margin: 20px 0 11px; }
+    .at { position: absolute; left: 0; top: -6px; background: #fff; padding-right: 9px;
+          font-family: Consolas, monospace; font-size: 8pt; color: #918D83; }
+    section.hot .rule { background: #EBD9BF; }
+    section.hot .at { color: #A66A1E; }
+    h2 { font-size: 11.5pt; font-weight: 600; margin: 0 0 5px; letter-spacing: -0.01em; }
+    section.hot h2 { color: #A66A1E; }
+    ul { list-style: none; padding: 0; margin: 4px 0; }
+    li { position: relative; padding-left: 13px; margin-bottom: 4px; line-height: 1.5; color: #3D3A34; }
+    li::before { content: ''; position: absolute; left: 0; top: 6px; width: 3.5px; height: 3.5px; background: #918D83; }
+    section.hot li::before { background: #A66A1E; }
+    p { margin: 4px 0; line-height: 1.55; color: #3D3A34; }
+    strong { color: #1A1815; font-weight: 600; }
+    h3 { font-size: 10.5pt; margin: 9px 0 4px; color: #1A1815; }
+    .foot { margin-top: 26px; color: #A8A49A; font-size: 8pt; border-top: 1px solid #E4E0D8; padding-top: 8px; }`;
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css}</style></head>` +
     `<body><h1>${escapeHtml(title)}</h1><div class="date">${escapeHtml(resultDateStr)}</div>` +
     `${body}<div class="foot">Generated with Yapper</div></body></html>`;

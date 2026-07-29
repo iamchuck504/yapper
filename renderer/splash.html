@@ -25,53 +25,54 @@
 
   .card {
     width: 100%; height: 100%;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 20px;
-    background: #1E1F16;
-    border: 1px solid rgba(241, 240, 228, 0.10);
-    border-radius: 14px;
-    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 0 40px;
+    background: #0C0D10;
+    border: 1px solid #191B20;
+    border-radius: 12px;
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
     opacity: 1;
     transform: scale(1);
     transition: opacity 260ms ease, transform 260ms ease;
   }
-  /* main flips this on to hand over to the app window */
   body.leaving .card { opacity: 0; transform: scale(0.96); }
 
-  /* the app icon, animated: cream bars on the sage -> olive squircle */
-  .mark {
-    width: 108px; height: 108px;
-    border-radius: 26px;
-    background: linear-gradient(135deg, #7D8D86 0%, #363724 100%);
-    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(241, 240, 228, 0.14);
-    display: flex; align-items: center; justify-content: center;
+  .mark { display: block; margin-bottom: 20px; border-radius: 12px; }
+  .wm { font-size: 26px; font-weight: 650; color: #E6E8EC; letter-spacing: -0.02em; }
+  .wm i { color: #E0A458; font-style: normal; margin-left: 1px; }
+
+  /* a chapter rule with a playhead running along it — the app's own motif */
+  .rule {
+    position: relative;
+    height: 1px;
+    background: #1E2126;
+    margin: 22px 0 14px;
+    overflow: visible;
   }
-  .wave { display: flex; align-items: center; gap: 4.5px; height: 56px; }
-  .wave i {
-    display: block;
-    width: 7px;
-    border-radius: 4px;
-    background: #F1F0E4;
-    transform-origin: center;
-    animation: wave 1.05s ease-in-out infinite;
+  .rule::after {
+    content: "";
+    position: absolute;
+    top: -1.5px;
+    left: 0;
+    width: 34px;
+    height: 4px;
+    background: #E0A458;
+    border-radius: 2px;
+    animation: sweep 2.1s cubic-bezier(.45,.05,.55,.95) infinite;
   }
-  /* peak heights trace the icon's silhouette */
-  .wave i:nth-child(1) { height: 34%; animation-delay: 0.00s; }
-  .wave i:nth-child(2) { height: 62%; animation-delay: 0.10s; }
-  .wave i:nth-child(3) { height: 92%; animation-delay: 0.20s; }
-  .wave i:nth-child(4) { height: 100%; animation-delay: 0.30s; }
-  .wave i:nth-child(5) { height: 72%; animation-delay: 0.40s; }
-  .wave i:nth-child(6) { height: 46%; animation-delay: 0.50s; }
-  .wave i:nth-child(7) { height: 28%; animation-delay: 0.60s; }
-  @keyframes wave {
-    0%, 100% { transform: scaleY(0.28); opacity: 0.8; }
-    50%      { transform: scaleY(1);    opacity: 1; }
+  @keyframes sweep {
+    0%   { left: 0;              opacity: 0; }
+    12%  { opacity: 1; }
+    88%  { opacity: 1; }
+    100% { left: calc(100% - 34px); opacity: 0; }
   }
 
-  .brand { font-size: 21px; font-weight: 600; color: #F1F0E4; letter-spacing: 0.2px; }
   #status {
-    font-size: 12.5px; color: #8E9078; letter-spacing: 0.02em;
-    min-height: 16px; margin-top: -10px;
+    font-family: Consolas, 'Cascadia Mono', monospace;
+    font-size: 11px;
+    color: #5C626D;
+    letter-spacing: 0.04em;
+    min-height: 15px;
   }
   .dots::after { content: ''; animation: dots 1.4s steps(4, end) infinite; }
   @keyframes dots {
@@ -82,17 +83,24 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .wave i { animation: none; }
+    .rule::after { animation: none; opacity: 1; }
     .dots::after { animation: none; content: '…'; }
   }
 </style>
 </head>
 <body>
   <div class="card">
-    <div class="mark">
-      <div class="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
-    </div>
-    <div class="brand">Yapper</div>
+    <!-- the app mark: two strokes merging into one -->
+    <svg class="mark" viewBox="0 0 100 100" width="54" height="54" aria-hidden="true">
+      <rect width="100" height="100" rx="22.5" fill="#E0A458"/>
+      <g stroke="#0C0D10" stroke-width="11.5" stroke-linecap="round" fill="none">
+        <path d="M27 28 L50 55"/>
+        <path d="M73 28 L50 55"/>
+        <path d="M50 55 L50 75"/>
+      </g>
+    </svg>
+    <div class="wm">Yapper<i>/</i></div>
+    <div class="rule"></div>
     <!-- main writes the boot status straight into this node -->
     <div id="status" class="dots">Starting</div>
   </div>

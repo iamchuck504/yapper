@@ -1,89 +1,57 @@
-"""Generate the Yapper app icon (.ico) — modern indigo->cyan gradient squircle
-with a clean white soundwave glyph (audio / transcription)."""
+"""Generate the Yapper app icon (.ico + preview .png).
+
+The mark is two strokes merging into one: several voices going in, a single set
+of notes coming out. It is deliberately not a picture of audio — the marks that
+stand out (Claude's burst, another meeting-notes app's spiral) are abstract, and the tile carries
+the accent colour so the icon does not vanish in a dock or taskbar.
+"""
 import os
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw
 
-S = 1024
-SS = 2  # supersample factor
-W = S * SS
 HERE = os.path.dirname(os.path.abspath(__file__))
 
+S = 512          # exported working size
+SS = 4           # supersample factor
+W = S * SS
 
-def lerp(a, b, t):
-    return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
+AMBER = (224, 164, 88, 255)
+INK = (12, 13, 16, 255)
 
-
-def diagonal_gradient(size, c1, c2):
-    """Smooth top-left -> bottom-right gradient."""
-    base = Image.new("RGB", (size, size))
-    px = base.load()
-    for y in range(size):
-        for x in range(size):
-            t = (x + y) / (2 * (size - 1))
-            px[x, y] = lerp(c1, c2, t)
-    return base
-
-
-def rounded_mask(size, radius):
-    m = Image.new("L", (size, size), 0)
-    ImageDraw.Draw(m).rounded_rectangle([0, 0, size - 1, size - 1], radius=radius, fill=255)
-    return m
+# glyph geometry, as fractions of the tile
+STROKE = 0.115
+ARM_L = (0.27, 0.28)
+ARM_R = (0.73, 0.28)
+JOIN = (0.50, 0.55)
+FOOT = (0.50, 0.75)
 
 
-# ---- background squircle ----
-# palette: sage #7D8D86 -> deep olive #3E3F29
-sage = (125, 141, 134)
-olive = (54, 55, 36)
-grad = diagonal_gradient(W, sage, olive).convert("RGBA")
+def bar(d, p0, p1, width, fill):
+    """A stroke with round caps, in tile fractions."""
+    a = (p0[0] * W, p0[1] * W)
+    b = (p1[0] * W, p1[1] * W)
+    d.line([a, b], fill=fill, width=width, joint="curve")
+    r = width // 2
+    for x, y in (a, b):
+        d.ellipse([x - r, y - r, x + r, y + r], fill=fill)
 
-# very soft sheen, top-left (keeps it sober, no glossy look)
-sheen = Image.new("L", (W, W), 0)
-ImageDraw.Draw(sheen).ellipse([W * 0.05, -W * 0.55, W * 0.95, W * 0.4], fill=38)
-sheen = sheen.filter(ImageFilter.GaussianBlur(W * 0.16))
-grad = Image.composite(Image.new("RGBA", (W, W), (241, 240, 228, 255)), grad, sheen)
 
-mask = rounded_mask(W, int(W * 0.235))
-icon = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-icon.paste(grad, (0, 0), mask)
+def render():
+    tile = Image.new("RGBA", (W, W), (0, 0, 0, 0))
+    mask = Image.new("L", (W, W), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, W - 1, W - 1], radius=int(W * 0.225), fill=255)
+    tile.paste(Image.new("RGBA", (W, W), AMBER), (0, 0), mask)
 
-# ---- soundwave glyph ----
-# bar heights as fraction of the glyph height, symmetric and lively
-heights = [0.34, 0.62, 0.92, 1.0, 0.72, 0.46, 0.28]
-n = len(heights)
-glyph_h = W * 0.46
-gap = W * 0.018
-bar_w = (W * 0.52 - gap * (n - 1)) / n
-total_w = bar_w * n + gap * (n - 1)
-x0 = (W - total_w) / 2
-cy = W * 0.5
+    d = ImageDraw.Draw(tile)
+    w = int(W * STROKE)
+    bar(d, ARM_L, JOIN, w, INK)
+    bar(d, ARM_R, JOIN, w, INK)
+    bar(d, JOIN, FOOT, w, INK)
 
-shadow = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-ds = ImageDraw.Draw(shadow)
-bars = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-db = ImageDraw.Draw(bars)
+    return tile.resize((S, S), Image.LANCZOS)
 
-for i, hf in enumerate(heights):
-    h = glyph_h * hf
-    x = x0 + i * (bar_w + gap)
-    rect = [x, cy - h / 2, x + bar_w, cy + h / 2]
-    r = bar_w / 2
-    ds.rounded_rectangle([rect[0], rect[1] + W * 0.012, rect[2], rect[3] + W * 0.012],
-                         radius=r, fill=(30, 31, 22, 95))
-    db.rounded_rectangle(rect, radius=r, fill=(241, 240, 228, 255))
 
-shadow = shadow.filter(ImageFilter.GaussianBlur(W * 0.012))
-icon = Image.alpha_composite(icon, shadow)
-icon = Image.alpha_composite(icon, bars)
-
-# subtle inner edge for crispness
-edge = Image.new("RGBA", (W, W), (0, 0, 0, 0))
-ImageDraw.Draw(edge).rounded_rectangle([2, 2, W - 3, W - 3], radius=int(W * 0.235),
-                                       outline=(241, 240, 228, 38), width=max(2, SS * 2))
-icon = Image.alpha_composite(icon, edge)
-
-# ---- downsample & export ----
-icon = icon.resize((S, S), Image.LANCZOS)
+icon = render()
 out_ico = os.path.join(HERE, "app.ico")
 out_png = os.path.join(HERE, "app.png")
 base = icon.resize((256, 256), Image.LANCZOS)
