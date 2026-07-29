@@ -36,10 +36,26 @@ if ($gpu) {
     Write-Host "[--] No NVIDIA GPU detected - transcription will run on CPU (slower but works)"
 }
 
-# --- 4. Whisper model (pre-download so the first meeting is not slow) ---
-Write-Host "Downloading Whisper model (~460 MB, one time)..." -ForegroundColor Yellow
+# --- 4. Whisper models (pre-download so the first meeting is not slow) ---
+# Which models are fetched depends on what this machine can actually run: the
+# live transcript only uses `medium` when there is a GPU to run it on.
+Write-Host "Downloading the Whisper model for this machine (~460 MB, one time)..." -ForegroundColor Yellow
 python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
-Write-Host "[OK] Whisper model ready"
+Write-Host "[OK] small model ready"
+
+$hasCuda = $false
+try {
+    $hasCuda = (python -c "import ctranslate2; print(ctranslate2.get_cuda_device_count())" 2>$null) -gt 0
+} catch { $hasCuda = $false }
+
+if ($hasCuda) {
+    Write-Host "GPU detected - downloading the live model too (~1.5 GB, one time)..." -ForegroundColor Yellow
+    python -c "from faster_whisper import WhisperModel; WhisperModel('medium', device='cpu', compute_type='int8')"
+    Write-Host "[OK] medium model ready (live transcript will use it)"
+} else {
+    Write-Host "[--] No GPU: the live transcript will run the small model, or step aside"
+    Write-Host "     if this machine cannot keep up. The final transcript is unaffected."
+}
 
 # --- 5. Node modules / Electron ---
 if (-not (Test-Path "$here\node_modules\electron\dist\electron.exe")) {

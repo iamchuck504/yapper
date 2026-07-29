@@ -25,3 +25,4 @@ Thumbs.db
 build/shots/
 renderer/.pdf-export.html
 build/icon-candidates/
+build/icon-v*/

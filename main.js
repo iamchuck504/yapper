@@ -1,4 +1,5 @@
-const { app, BrowserWindow, ipcMain, session, desktopCapturer, shell, dialog, screen, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, session, desktopCapturer, shell, dialog, screen,
+  Notification, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -50,7 +51,7 @@ function broadcast(channel, payload) {
 function createBubble() {
   if (bubble && !bubble.isDestroyed()) { bubble.showInactive(); return; }
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
-  const w = 420, h = 280;   // matches EXPANDED in bubble.js; it resizes itself if collapsed
+  const w = 470, h = 280;   // matches EXPANDED in bubble.js; it resizes itself if collapsed
   bubble = new BrowserWindow({
     width: w,
     height: h,
@@ -118,6 +119,9 @@ ipcMain.on('bubble-resize', (_e, size) => {
 // Bubble -> main window controls
 ipcMain.on('bubble-stop', () => {
   if (win && !win.isDestroyed()) win.webContents.send('remote-stop');
+});
+ipcMain.on('bubble-pause', () => {
+  if (win && !win.isDestroyed()) win.webContents.send('remote-pause');
 });
 ipcMain.on('bubble-focus-main', () => {
   if (win && !win.isDestroyed()) { win.show(); win.focus(); }
@@ -358,13 +362,58 @@ function readParticipants(folder) {
   return fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() : '';
 }
 
-ipcMain.handle('save-recording', async (_e, arrayBuffer, title, participants) => {
-  const folder = newMeetingFolder();
-  fs.writeFileSync(path.join(folder, 'recording.webm'), Buffer.from(arrayBuffer));
-  if (title) fs.writeFileSync(path.join(folder, 'title.txt'), title, 'utf8');
-  writeParticipants(folder, participants);
-  return folder;
+// ---------- recording to disk ----------
+// Chunks are appended as they arrive rather than held in memory until Stop, so
+// a crash or a power cut costs the tail of the meeting instead of all of it.
+// (Concatenated MediaRecorder chunks are exactly what the in-memory Blob used
+// to be, so the resulting file is identical.)
+
+let recStream = null;
+let recFolder = null;
+let recBytes = 0;
+
+function closeRecStream() {
+  return new Promise(resolve => {
+    if (!recStream) return resolve();
+    const s = recStream;
+    recStream = null;
+    s.end(resolve);
+  });
+}
+
+ipcMain.handle('recording-start', async (_e, participants) => {
+  await closeRecStream();
+  recFolder = newMeetingFolder();
+  recBytes = 0;
+  writeParticipants(recFolder, participants);
+  recStream = fs.createWriteStream(path.join(recFolder, 'recording.webm'));
+  recStream.on('error', err => console.error('[recording] write failed:', err.message));
+  return recFolder;
 });
+
+ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
+  if (!recStream || !recStream.writable) return;
+  const buf = Buffer.from(arrayBuffer);
+  recBytes += buf.length;
+  recStream.write(buf);
+});
+
+ipcMain.handle('recording-finish', async (_e, title, markers) => {
+  await closeRecStream();
+  const folder = recFolder;
+  const bytes = recBytes;
+  recFolder = null;
+  recBytes = 0;
+  if (!folder) return null;
+  if (title) fs.writeFileSync(path.join(folder, 'title.txt'), title, 'utf8');
+  if (markers && markers.length) {
+    fs.writeFileSync(path.join(folder, 'markers.txt'), markers.join('\n'), 'utf8');
+  }
+  return { folder, bytes };
+});
+
+// the app is going away mid-recording: flush what we have, keep the file
+app.on('before-quit', () => { closeRecStream(); });
 
 ipcMain.handle('import-audio', async (_e, participants) => {
   const res = await dialog.showOpenDialog(win, {
@@ -530,6 +579,11 @@ Do not invent anything that is not in the transcript. Reply only with the markdo
     const people = options.participants.trim().replace(/\n/g, ', ');
     prompt += `\n\nThe participants in this meeting are: ${people}.
 Attribute discussion points, decisions, and action items to specific people by name when the transcript makes it reasonably clear who said or owns what. The transcript has no speaker labels, so infer from context and do not guess when it is ambiguous. Correct obvious mis-transcriptions of these names.`;
+  }
+  if (options.markers && options.markers.length) {
+    prompt += `\n\nDuring the meeting the note-taker flagged these moments as important: `
+      + `${options.markers.join(', ')}. Make sure whatever was being discussed around each of `
+      + `those timestamps is covered.`;
   }
   if (options.custom && options.custom.trim()) {
     prompt += `\n\nAdditional instructions from the user:\n${options.custom.trim()}`;
@@ -794,12 +848,26 @@ let meetingCurrent = null;
 let autoDetectOn = false;
 let rendererRecording = false;
 
+let meetingGoneStreak = 0;
+
 async function pollMeetings() {
   if (process.platform !== 'win32') return;
   const users = await micUsersWindows();
   const hit = users.find(exe => MEETING_APPS[exe]);
+
+  // While recording, watch for the opposite signal: the meeting app letting go
+  // of the microphone. Two clear polls (~10 s) avoids reacting to a blip.
+  if (rendererRecording) {
+    meetingGoneStreak = hit ? 0 : meetingGoneStreak + 1;
+    if (meetingGoneStreak === 2 && win && !win.isDestroyed()) {
+      win.webContents.send('meeting-ended');
+    }
+    return;
+  }
+  meetingGoneStreak = 0;
+
   if (!hit) { meetingCurrent = null; return; }
-  if (meetingCurrent === hit || rendererRecording) return;
+  if (meetingCurrent === hit) return;
 
   meetingCurrent = hit;
   const label = MEETING_APPS[hit];
@@ -834,9 +902,29 @@ ipcMain.on('autodetect-set', (_e, enabled) => {
 
 ipcMain.on('recording-state', (_e, recording) => {
   rendererRecording = !!recording;
+  meetingGoneStreak = 0;
   // once a recording ends, allow the same app to trigger a fresh prompt later
   if (!rendererRecording) meetingCurrent = null;
 });
+
+// ---------- flag a moment without leaving the meeting ----------
+// A global shortcut is the point: you are looking at Zoom, not at Yapper.
+
+const MARK_ACCELERATOR = 'CommandOrControl+Shift+M';
+
+function enableMarkShortcut(on) {
+  try {
+    if (on) {
+      globalShortcut.register(MARK_ACCELERATOR, () => {
+        if (win && !win.isDestroyed()) win.webContents.send('mark-moment');
+      });
+    } else {
+      globalShortcut.unregister(MARK_ACCELERATOR);
+    }
+  } catch { /* another app owns the combo; marking from the UI still works */ }
+}
+
+ipcMain.on('mark-shortcut', (_e, on) => enableMarkShortcut(!!on));
 
 // ---------- live streaming transcription ----------
 // The renderer feeds raw 16 kHz mono PCM; the worker keeps a rolling buffer and

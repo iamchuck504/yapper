@@ -50,6 +50,15 @@ def add_nvidia_dll_dirs():
                 os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
 
 
+def has_cuda():
+    """True when ctranslate2 can actually use a GPU here."""
+    try:
+        import ctranslate2
+        return ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        return False
+
+
 def emit(obj):
     print(json.dumps(obj, ensure_ascii=False), flush=True)
 
@@ -131,13 +140,15 @@ def main() -> int:
     base_prompt = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else ""
 
     add_nvidia_dll_dirs()
-    # A GPU pass on `medium` costs ~0.3 s, well inside the 0.7 s cadence, and is
-    # clearly more accurate. CPU cannot keep up with it, so it drops to `small`.
-    try:
+    # Decide the device BEFORE constructing the model: faster-whisper downloads
+    # the weights inside the constructor, so a try/except on CUDA would pull
+    # 1.5 GB of `medium` onto a machine that then falls back to `small`.
+    if has_cuda():
+        # a GPU pass on `medium` costs ~0.3 s, well inside the 0.7 s cadence
         model = WhisperModel(model_size, device="cuda", compute_type="float16")
         device, beam = "cuda", 5
-    except Exception as e:
-        print(f"GPU unavailable for streaming worker ({e}); using CPU", file=sys.stderr)
+    else:
+        print("no CUDA device; streaming on CPU with the small model", file=sys.stderr)
         model = WhisperModel(CPU_MODEL, device="cpu", compute_type="int8")
         device, beam = "cpu", 1
 

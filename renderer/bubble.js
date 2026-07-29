@@ -4,8 +4,8 @@ const tentativeEl = document.getElementById('tentative');
 const placeholderEl = document.getElementById('placeholder');
 const textEl = document.getElementById('text');
 
-const EXPANDED = { w: 420, h: 280 };
-const COLLAPSED = { w: 216, h: 64 };   // header (44) + card margins + borders
+const EXPANDED = { w: 470, h: 280 };
+const COLLAPSED = { w: 266, h: 64 };   // header (44) + card margins + borders
 
 let collapsed = localStorage.getItem('yapper-bubble-collapsed') === 'yes';
 
@@ -45,7 +45,21 @@ window.yapper.onBubbleState(state => {
   if (!state) return;
   if (typeof state.timer === 'string') timerEl.textContent = state.timer;
   if (state.theme) document.body.classList.toggle('light', state.theme === 'light');
+  if (typeof state.paused === 'boolean') {
+    document.body.classList.toggle('paused', state.paused);
+    const b = document.getElementById('btn-pause');
+    b.classList.toggle('on', state.paused);
+    b.textContent = state.paused ? 'Resume' : 'Pause';
+  }
+  if (state.marked) {
+    const f = document.getElementById('flash');
+    f.classList.remove('go');
+    void f.offsetWidth;            // restart the animation
+    f.classList.add('go');
+  }
 });
+
+document.getElementById('btn-pause').addEventListener('click', () => window.yapper.bubblePause());
 
 document.getElementById('btn-toggle').addEventListener('click', () => {
   collapsed = !collapsed;
