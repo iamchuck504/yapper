@@ -1,6 +1,15 @@
-# Actas
+# Yapper
 
 Clon de Granola AI: graba tus reuniones, las transcribe **localmente** con Whisper y genera un acta en markdown (resumen, puntos clave, decisiones y pendientes) usando Claude Code con tu suscripción Max. Nada de audio sale de tu PC; solo la transcripción de texto se envía a Claude para el resumen.
+
+## En vivo (estilo Granola)
+
+- **Transcripción en streaming (~1-2 s de retraso).** El renderer envía PCM continuo a un worker persistente (`transcribe_stream.py`) que mantiene un buffer rodante y re-transcribe cada ~0.7 s. Una palabra solo se "confirma" cuando dos pasadas seguidas coinciden (LocalAgreement-2); la cola tentativa se muestra atenuada y se va corrigiendo sola. Las pausas largas abren párrafo nuevo.
+- **Modelo del vivo:** con GPU usa `medium` (~0.3 s por pasada en una RTX 4080, más preciso); sin GPU baja solo a `small`. Configurable con `YAPPER_LIVE_MODEL`.
+- **Burbuja flotante.** Ventana pequeña siempre visible, arrastrable, que sigue el tema claro/oscuro. Se **colapsa a un indicador compacto** (barras animadas + cronómetro) y se expande al transcript completo con un clic. Toggle "Floating bubble".
+- **Auto-detección de reuniones.** Detecta qué app está usando el micrófono (Zoom, Teams, Slack, Discord, Webex y llamadas en el navegador: Meet/Hangouts) y ofrece tomar notas con un aviso discreto. Toggle "Auto-detect meetings". Solo Windows por ahora; en Mac llega con el rework de audio.
+
+El preview en vivo es *solo un adelanto*: al detener, la transcripción final se rehace con una pasada completa de alta calidad, y de ahí salen las notas.
 
 ## Cómo funciona
 
@@ -18,7 +27,7 @@ Clon de Granola AI: graba tus reuniones, las transcribe **localmente** con Whisp
 npm start
 ```
 
-o el acceso directo **Actas** del Escritorio.
+o el acceso directo **Yapper** del Escritorio.
 
 ## Opciones de notas (UI en inglés)
 
@@ -26,6 +35,9 @@ o el acceso directo **Actas** del Escritorio.
 - **Detail**: Concise (bullets cortos) o Detailed (exhaustivo).
 - **Extra instructions**: contexto libre para Claude (asistentes, proyecto, en qué enfocarse).
 - **↻ Regenerate**: rehace las notas de cualquier reunión guardada con otro estilo/detalle.
+- **Título automático**: si no escribes título, Claude nombra la reunión según lo que se habló (2-6 palabras); si la grabación no da para tanto, cae a la fecha.
+- **Export** (menú): notas en PDF, notas en Markdown, transcripción completa en .txt, o notas + transcripción en un solo .md.
+- **Start with Windows**: arranca Yapper al iniciar sesión (encendido por defecto, se apaga desde el toggle).
 - Las notas salen **en inglés** y se muestran como tarjetas con código de color: Summary (violeta), Key points (cian), Decisions (verde), Action items (ámbar), Open questions (rosa), Blockers/Risks (rojo), Next steps (teal).
 
 ## Compartir con compañeros
@@ -45,8 +57,8 @@ La app avisa al arrancar si falta algún requisito. Si una transcripción falla 
 
 ## Configuración opcional (variables de entorno)
 
-- `ACTAS_MODEL` — modelo de Whisper: `tiny`, `base`, `small` (default), `medium`. Más grande = más preciso pero más lento.
-- `ACTAS_LANG` — fuerza el idioma de transcripción (`es`, `en`); por defecto se autodetecta.
+- `YAPPER_MODEL` — modelo de Whisper: `tiny`, `base`, `small` (default), `medium`. Más grande = más preciso pero más lento.
+- `YAPPER_LANG` — fuerza el idioma de transcripción (`es`, `en`); por defecto se autodetecta.
 
 ## Notas
 

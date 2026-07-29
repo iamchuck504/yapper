@@ -20,3 +20,7 @@ Meetings/
 .DS_Store
 Thumbs.db
 *.log
+
+# transient build/verification artifacts
+build/shots/
+renderer/.pdf-export.html

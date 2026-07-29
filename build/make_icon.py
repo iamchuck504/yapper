@@ -1,4 +1,4 @@
-"""Generate the Actas app icon (.ico) — modern indigo->cyan gradient squircle
+"""Generate the Yapper app icon (.ico) — modern indigo->cyan gradient squircle
 with a clean white soundwave glyph (audio / transcription)."""
 import os
 
@@ -32,15 +32,16 @@ def rounded_mask(size, radius):
 
 
 # ---- background squircle ----
-indigo = (99, 91, 240)   # deeper, richer indigo
-cyan = (34, 197, 230)    # vivid cyan
-grad = diagonal_gradient(W, indigo, cyan).convert("RGBA")
+# palette: sage #7D8D86 -> deep olive #3E3F29
+sage = (125, 141, 134)
+olive = (54, 55, 36)
+grad = diagonal_gradient(W, sage, olive).convert("RGBA")
 
-# soft radial sheen, top-center (subtle, keeps the colors saturated)
+# very soft sheen, top-left (keeps it sober, no glossy look)
 sheen = Image.new("L", (W, W), 0)
-ImageDraw.Draw(sheen).ellipse([W * 0.05, -W * 0.55, W * 0.95, W * 0.4], fill=55)
-sheen = sheen.filter(ImageFilter.GaussianBlur(W * 0.14))
-grad = Image.composite(Image.new("RGBA", (W, W), (255, 255, 255, 255)), grad, sheen)
+ImageDraw.Draw(sheen).ellipse([W * 0.05, -W * 0.55, W * 0.95, W * 0.4], fill=38)
+sheen = sheen.filter(ImageFilter.GaussianBlur(W * 0.16))
+grad = Image.composite(Image.new("RGBA", (W, W), (241, 240, 228, 255)), grad, sheen)
 
 mask = rounded_mask(W, int(W * 0.235))
 icon = Image.new("RGBA", (W, W), (0, 0, 0, 0))
@@ -68,8 +69,8 @@ for i, hf in enumerate(heights):
     rect = [x, cy - h / 2, x + bar_w, cy + h / 2]
     r = bar_w / 2
     ds.rounded_rectangle([rect[0], rect[1] + W * 0.012, rect[2], rect[3] + W * 0.012],
-                         radius=r, fill=(20, 30, 70, 90))
-    db.rounded_rectangle(rect, radius=r, fill=(255, 255, 255, 255))
+                         radius=r, fill=(30, 31, 22, 95))
+    db.rounded_rectangle(rect, radius=r, fill=(241, 240, 228, 255))
 
 shadow = shadow.filter(ImageFilter.GaussianBlur(W * 0.012))
 icon = Image.alpha_composite(icon, shadow)
@@ -78,7 +79,7 @@ icon = Image.alpha_composite(icon, bars)
 # subtle inner edge for crispness
 edge = Image.new("RGBA", (W, W), (0, 0, 0, 0))
 ImageDraw.Draw(edge).rounded_rectangle([2, 2, W - 3, W - 3], radius=int(W * 0.235),
-                                       outline=(255, 255, 255, 40), width=max(2, SS * 2))
+                                       outline=(241, 240, 228, 38), width=max(2, SS * 2))
 icon = Image.alpha_composite(icon, edge)
 
 # ---- downsample & export ----

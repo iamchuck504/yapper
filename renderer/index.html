@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; media-src blob:" />
-  <title>Actas</title>
+  <title>Yapper</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <aside id="sidebar">
     <div class="brand">
-      <span class="brand-mark">A</span>
-      <span class="brand-name">Actas</span>
+      <span class="brand-mark">Y</span>
+      <span class="brand-name">Yapper</span>
     </div>
 
     <button id="btn-new" class="new-btn">
@@ -46,6 +46,13 @@
         <p class="view-sub">Record live or import audio — transcribed on your machine, summarized by AI.</p>
       </div>
 
+      <div id="meeting-prompt" class="hidden">
+        <span class="mp-dot"></span>
+        <div class="mp-text"><strong>Meeting detected</strong><span id="mp-app"></span></div>
+        <button id="mp-start" class="btn-primary">Take notes</button>
+        <button id="mp-dismiss" class="btn-ghost">Dismiss</button>
+      </div>
+
       <input id="meeting-title" type="text" placeholder="Meeting title (optional)" autocomplete="off" spellcheck="false" />
 
       <div class="options-card">
@@ -79,6 +86,12 @@
         <div class="opt-row">
           <span class="opt-label">Participants</span>
           <input id="participants-rec" class="text-input" type="text" placeholder="Attendee names, comma-separated — improves name spelling &amp; attribution" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="opt-row">
+          <span class="opt-label">Live</span>
+          <label class="switch"><input type="checkbox" id="opt-bubble" /><span class="track"></span>Floating bubble</label>
+          <label class="switch"><input type="checkbox" id="opt-autodetect" /><span class="track"></span>Auto-detect meetings</label>
+          <label class="switch"><input type="checkbox" id="opt-startup" /><span class="track"></span>Start with Windows</label>
         </div>
         <div class="opt-row">
           <span class="opt-label">Instructions</span>
@@ -131,7 +144,13 @@
             </button>
           </div>
           <div id="live-wrap" class="hidden">
-            <div class="live-head"><span class="live-spinner"></span>Live preview</div>
+            <button id="live-head" class="live-head" title="Expand / collapse the live transcript">
+              <span class="eq"><i></i><i></i><i></i><i></i></span>
+              <span class="live-title">Live transcript</span>
+              <span class="live-chevron">
+                <svg viewBox="0 0 16 16" width="12" height="12"><path d="M4 10l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </span>
+            </button>
             <pre id="live-transcript"></pre>
           </div>
         </div>
@@ -184,7 +203,18 @@
             Edit
           </button>
           <button id="btn-copy" class="btn-ghost" title="Copy notes as markdown">Copy</button>
-          <button id="btn-pdf" class="btn-ghost" title="Export notes to PDF">Export PDF</button>
+          <div class="menu-wrap">
+            <button id="btn-export" class="btn-ghost" title="Export this meeting">
+              Export
+              <svg viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+            <div id="export-menu" class="menu hidden">
+              <button data-export="pdf">Notes as PDF</button>
+              <button data-export="md">Notes as Markdown</button>
+              <button data-export="txt">Full transcript (.txt)</button>
+              <button data-export="both">Notes + transcript (.md)</button>
+            </div>
+          </div>
           <button id="btn-open-folder" class="btn-ghost icon-only" title="Open meeting folder">
             <svg viewBox="0 0 16 16" width="15" height="15"><path d="M1.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h5.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
           </button>

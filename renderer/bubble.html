@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
+  <title>Yapper — live</title>
+  <style>
+    @font-face {
+      font-family: 'Geist';
+      src: url('fonts/Geist-latin.woff2') format('woff2');
+      font-weight: 400; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: 'Geist';
+      src: url('fonts/Geist-latin.woff2') format('woff2');
+      font-weight: 600; font-style: normal; font-display: swap;
+    }
+    @font-face {
+      font-family: 'Geist';
+      src: url('fonts/Geist-latin.woff2') format('woff2');
+      font-weight: 700; font-style: normal; font-display: swap;
+    }
+
+    :root {
+      --bg: rgba(36, 38, 26, 0.95);
+      --border: rgba(241, 240, 228, 0.13);
+      --hover: rgba(241, 240, 228, 0.08);
+      --hover-2: rgba(241, 240, 228, 0.15);
+      --text: #F1F0E4;
+      --text-2: #C4C3AE;
+      --text-3: #8E9078;
+      --accent: #93A79C;
+      --rec: #C4705C;
+      --on-rec: #F1F0E4;
+      --font-sans: 'Geist', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    }
+    body.light {
+      --bg: rgba(241, 240, 228, 0.97);
+      --border: rgba(62, 63, 41, 0.15);
+      --hover: rgba(62, 63, 41, 0.06);
+      --hover-2: rgba(62, 63, 41, 0.12);
+      --text: #3E3F29;
+      --text-2: #5D5F46;
+      --text-3: #8A8B71;
+      --accent: #5C6E66;
+      --rec: #A05A45;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: transparent;
+      font-family: var(--font-sans);
+      color: var(--text);
+      overflow: hidden;
+      user-select: none;
+    }
+    #card {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      margin: 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+      backdrop-filter: blur(14px);
+      overflow: hidden;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      -webkit-app-region: drag;
+      flex-shrink: 0;
+    }
+    body.collapsed header { border-bottom: none; }
+
+    /* level indicator — not a literal REC dot, just quiet motion */
+    .eq {
+      display: inline-flex;
+      align-items: center;
+      gap: 2.5px;
+      height: 16px;
+      flex-shrink: 0;
+    }
+    .eq i {
+      display: block;
+      width: 3px;
+      height: 100%;
+      border-radius: 2px;
+      background: var(--accent);
+      transform-origin: center;
+      animation: eq 1.15s ease-in-out infinite;
+    }
+    .eq i:nth-child(1) { animation-delay: 0s; }
+    .eq i:nth-child(2) { animation-delay: 0.16s; }
+    .eq i:nth-child(3) { animation-delay: 0.32s; }
+    .eq i:nth-child(4) { animation-delay: 0.48s; }
+    @keyframes eq {
+      0%, 100% { transform: scaleY(0.3); opacity: 0.65; }
+      50%      { transform: scaleY(1);   opacity: 1; }
+    }
+
+    #timer { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .label {
+      font-size: 10.5px; color: var(--text-3); letter-spacing: 0.9px;
+      text-transform: uppercase; font-family: var(--font-sans);
+    }
+    body.collapsed .label { display: none; }
+    .spacer { flex: 1; }
+
+    header button {
+      -webkit-app-region: no-drag;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 24px;
+      padding: 0 10px;
+      background: var(--hover);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text-2);
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    header button:hover { color: var(--text); background: var(--hover-2); }
+    #btn-toggle { padding: 0 7px; }
+    #btn-toggle svg { transition: transform 0.18s ease; }
+    body.collapsed #btn-toggle svg { transform: rotate(180deg); }
+    body.collapsed #btn-open { display: none; }
+    #btn-stop { color: var(--rec); border-color: color-mix(in srgb, var(--rec) 45%, transparent); }
+    #btn-stop:hover { background: var(--rec); color: var(--on-rec); border-color: var(--rec); }
+
+    #text {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 14px;
+      font-size: 14.5px;
+      line-height: 1.65;
+      user-select: text;
+    }
+    body.collapsed #text { display: none; }
+    #text::-webkit-scrollbar { width: 6px; }
+    #text::-webkit-scrollbar-thumb { background: var(--hover-2); border-radius: 3px; }
+    #tentative { color: var(--text-3); }
+    #placeholder { color: var(--text-3); font-style: italic; }
+    .para { height: 9px; }
+  </style>
+</head>
+<body>
+  <div id="card">
+    <header>
+      <span class="eq"><i></i><i></i><i></i><i></i></span>
+      <span id="timer">00:00</span>
+      <span class="label">Listening</span>
+      <span class="spacer"></span>
+      <button id="btn-toggle" title="Expand / collapse">
+        <svg viewBox="0 0 16 16" width="12" height="12"><path d="M4 10l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button id="btn-open" title="Open the main window">Open</button>
+      <button id="btn-stop" title="Stop recording and summarize">Stop</button>
+    </header>
+    <div id="text"><span id="placeholder">Listening…</span><span id="confirmed"></span> <span id="tentative"></span></div>
+  </div>
+  <script src="bubble.js"></script>
+</body>
+</html>
