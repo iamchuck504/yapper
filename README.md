@@ -114,6 +114,23 @@ La app avisa al arrancar si falta algún requisito. Si una transcripción falla 
 - `YAPPER_LANG` — fuerza el idioma de transcripción (`es`, `en`); por defecto se autodetecta.
 - `YAPPER_LIVE_DEBUG=1` — imprime una línea por pasada del vivo (costo, tamaño del buffer, cuántas palabras coincidieron y cuántas se confirmaron).
 
+## El icono
+
+El arte original viene con las esquinas rellenas de negro en vez de transparentes. `build/icon-cut.js` las recorta y genera todo lo que la app usa:
+
+```
+node_modules\electron\dist\electron.exe build\icon-cut.js [build\icon-source.png]
+node_modules\electron\dist\electron.exe build\icon-verify.js
+```
+
+- `build/yapper-icon.ico` — lo que usa la ventana y el acceso directo (16, 24, 32, 48, 64, 128 y 256 px, cada uno remuestreado del original, no escalado del grande).
+- `build/yapper-icon.png` — el arte recortado a tamaño completo.
+- `renderer/app-mark.png` — la marca del splash, para que no haya un dibujo aparte que se quede viejo.
+
+No borra "los píxeles negros": la marca es del mismo negro, así que eso la vaciaría. Rellena el negro **hacia adentro desde las cuatro esquinas**, lo que sigue la curva real del arte y no puede alcanzar la marca porque la marca no toca el borde. El borde antialiaseado se recalcula: cuánto color de cuerpo tiene cada píxel se convierte en su alfa, para no dejar un halo oscuro de un píxel.
+
+`icon-verify.js` comprueba las esquinas, que la marca siga intacta, que no haya halo, y que el `.ico` traiga todos los tamaños como PNG válidos; además deja una vista previa sobre fondo claro, oscuro y cuadrícula en `build/icon-preview.png`.
+
 ## Pruebas
 
 ```
@@ -136,6 +153,8 @@ node build\tune-live.js           # replay de audio real comparando configuracio
 Los que abren ventana van con Electron:
 
 ```
+node_modules\electron\dist\electron.exe build\icon-verify.js
+node_modules\electron\dist\electron.exe build\test-splash-mark.js
 node_modules\electron\dist\electron.exe build\test-bubble-fit.js
 node_modules\electron\dist\electron.exe build\test-keystore.js
 node_modules\electron\dist\electron.exe build\test-llm-ui.js

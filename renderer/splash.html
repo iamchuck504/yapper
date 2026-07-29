@@ -37,7 +37,8 @@
   }
   body.leaving .card { opacity: 0; transform: scale(0.96); }
 
-  .mark { display: block; margin-bottom: 20px; border-radius: 12px; }
+  /* the icon carries its own rounded corners now, so nothing is clipped here */
+  .mark { display: block; margin-bottom: 20px; }
   .wm { font-size: 26px; font-weight: 650; color: #E6E8EC; letter-spacing: -0.02em; }
   .wm i { color: #E0A458; font-style: normal; margin-left: 1px; }
 
@@ -90,15 +91,9 @@
 </head>
 <body>
   <div class="card">
-    <!-- the app mark: two strokes merging into one -->
-    <svg class="mark" viewBox="0 0 100 100" width="54" height="54" aria-hidden="true">
-      <rect width="100" height="100" rx="22.5" fill="#E0A458"/>
-      <g stroke="#0C0D10" stroke-width="11.5" stroke-linecap="round" fill="none">
-        <path d="M27 28 L50 55"/>
-        <path d="M73 28 L50 55"/>
-        <path d="M50 55 L50 75"/>
-      </g>
-    </svg>
+    <!-- the real app icon, not a redrawing of it: build/icon-cut.js writes this
+         file from the same source the .ico comes from -->
+    <img class="mark" src="app-mark.png" width="54" height="54" alt="" />
     <div class="wm">Yapper<i>/</i></div>
     <div class="rule"></div>
     <!-- main writes the boot status straight into this node -->
