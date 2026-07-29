@@ -2,6 +2,8 @@
 
 Clon de another meeting-notes app AI: graba tus reuniones, las transcribe **localmente** con Whisper y genera un acta en markdown (resumen, puntos clave, decisiones y pendientes) usando Claude Code con tu suscripción Max. Nada de audio sale de tu PC; solo la transcripción de texto se envía a Claude para el resumen.
 
+> Para revisar la arquitectura y la estructura de build: **[ARCHITECTURE.md](ARCHITECTURE.md)** (en inglés).
+
 ## En vivo (estilo another meeting-notes app)
 
 - **Transcripción en streaming.** El renderer manda PCM continuo; `live.js` mantiene un buffer rodante de 12 s y lo re-transcribe cada ~0.7 s. Una palabra solo se "confirma" cuando dos pasadas seguidas coinciden (LocalAgreement-2); la cola tentativa se muestra atenuada y se corrige sola. Las pausas largas abren párrafo nuevo.
