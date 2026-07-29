@@ -24,3 +24,4 @@ Thumbs.db
 # transient build/verification artifacts
 build/shots/
 renderer/.pdf-export.html
+build/icon-candidates/

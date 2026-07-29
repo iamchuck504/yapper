@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
+const { clampToArea } = require('./bounds');
 
 const MEETINGS_DIR = path.join(app.getPath('documents'), 'Meetings');
 
@@ -72,13 +73,27 @@ function createBubble() {
   bubble.setAlwaysOnTop(true, 'screen-saver');
   bubble.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   bubble.loadFile(path.join(__dirname, 'renderer', 'bubble.html'));
-  bubble.once('ready-to-show', () => bubble.showInactive());
+  bubble.once('ready-to-show', () => { bubble.showInactive(); keepBubbleOnScreen(); });
+  bubble.on('moved', keepBubbleOnScreen);          // after the user drags it
   bubble.on('closed', () => { bubble = null; });
 }
 
 function destroyBubble() {
   if (bubble && !bubble.isDestroyed()) bubble.close();
   bubble = null;
+}
+
+// The bubble is frameless, so Windows will happily let it be dragged off the
+// screen — and with its header gone there is no way to stop or close it. Pull
+// it back inside the work area of whichever display it mostly sits on.
+const BUBBLE_MARGIN = 8;
+
+function keepBubbleOnScreen() {
+  if (!bubble || bubble.isDestroyed()) return;
+  const b = bubble.getBounds();
+  const area = screen.getDisplayMatching(b).workArea;
+  const c = clampToArea(b, area, BUBBLE_MARGIN);
+  if (c.x !== b.x || c.y !== b.y) bubble.setBounds(c);
 }
 
 ipcMain.handle('bubble-show', async () => { createBubble(); });
@@ -98,6 +113,7 @@ ipcMain.on('bubble-resize', (_e, size) => {
     width: size.w,
     height: size.h
   });
+  keepBubbleOnScreen();   // expanding near an edge must not push it off
 });
 // Bubble -> main window controls
 ipcMain.on('bubble-stop', () => {
@@ -116,11 +132,11 @@ function createWindow() {
     height: 760,
     minWidth: 820,
     minHeight: 560,
-    backgroundColor: dark ? '#1E1F16' : '#E9E7D8',
+    backgroundColor: dark ? '#0C0D10' : '#FBFAF8',
     show: false,              // revealed by the splash hand-off
     autoHideMenuBar: true,
     title: 'Yapper',
-    icon: path.join(__dirname, 'build', 'yapper-icon.ico'),
+    icon: path.join(__dirname, 'build', 'yapper-mark.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -232,7 +248,7 @@ async function bootWithSplash() {
       alwaysOnTop: true,
       show: false,
       title: 'Yapper',
-      icon: path.join(__dirname, 'build', 'yapper-icon.ico'),
+      icon: path.join(__dirname, 'build', 'yapper-mark.ico'),
       webPreferences: { contextIsolation: true, nodeIntegration: false }
     });
     splash.setMenuBarVisibility(false);
@@ -306,6 +322,9 @@ async function bootWithSplash() {
 
 app.whenReady().then(() => {
   if (process.platform === 'win32') app.setAppUserModelId('com.yapper.meetingnotes');
+  // a monitor being unplugged or rescaled can strand the bubble off-screen too
+  screen.on('display-metrics-changed', keepBubbleOnScreen);
+  screen.on('display-removed', keepBubbleOnScreen);
   initOpenAtLogin();
   bootWithSplash();
 });
@@ -502,6 +521,9 @@ Write meeting notes in English, in markdown, with exactly these sections:
 ${sections}
 
 ${detail}
+The transcript is timestamped. End every "## " heading with the timestamp where that topic
+starts, in square brackets and mm:ss form — for example "## Decisions [24:05]". Use the
+timestamp of the first line that belongs to the section, and nothing else in the brackets.
 Write in neutral third person. Do not assume who led, organized, or called the meeting. The person who recorded this is just one of the participants and is NOT necessarily the leader, the main speaker, or the owner of the action items — do not center the notes on them or address the reader as "you". Assign ownership and roles only when the transcript itself makes them clear.
 Do not invent anything that is not in the transcript. Reply only with the markdown notes, no preamble.`;
   if (options.participants && options.participants.trim()) {

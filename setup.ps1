@@ -79,7 +79,7 @@ $s = $ws.CreateShortcut("$env:USERPROFILE\Desktop\Yapper.lnk")
 $s.TargetPath = "$here\node_modules\electron\dist\electron.exe"
 $s.Arguments = "`"$here`""
 $s.WorkingDirectory = $here
-$s.IconLocation = "$here\build\yapper-icon.ico,0"
+$s.IconLocation = "$here\build\yapper-mark.ico,0"
 $s.Description = "Yapper - AI meeting notes"
 $s.Save()
 Write-Host "[OK] Desktop shortcut created"
