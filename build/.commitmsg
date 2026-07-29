@@ -1,19 +1,32 @@
-Size the collapsed bubble to its contents instead of guessing
+Let each machine choose who writes the notes
 
-The collapsed pill was pinned to a hardcoded 266 px, which is 18 px narrower
-than the row of controls actually needs, so the Stop button was clipped by the
-edge of the card. The number could only ever have been right for one state:
-"Pause" becoming "Resume" needs 296, and a meeting past the hour mark grows the
-timer to 01:23:45 and needs 318.
+Transcription has been local for a while, but the notes were hardwired to the
+Claude Code CLI: a coworker without a Max subscription got a working recorder
+and nothing else. Notes now go through a provider layer - the CLI, an Anthropic
+key, an OpenRouter key, or any endpoint that speaks /chat/completions.
 
-The renderer now measures the header - children, gaps, padding, card margin and
-border - and asks for exactly that, re-fitting whenever the pause label or the
-timer changes width, and once more after Geist finishes loading, since
-measuring against the fallback font's metrics is another way to come up short.
-Header items no longer shrink, so a squeezed button cannot make the measurement
-lie about what fits.
+That last one is deliberate. If Yapper ever points at one official API for
+everybody, it is an entry in llm.js and nothing else: the three places that
+generate text (summarize, regenerate, auto-title) call one function and do not
+know who answers.
 
-build/test-bubble-fit.js opens the real bubble window and checks in all three
-states that the row fits its header and that Stop lands inside the card.
+The API key is sealed with the OS keystore (DPAPI on Windows, Keychain on
+macOS) instead of sitting readable in settings.json, and it never leaves the
+main process - the renderer only ever learns whether one is set. Where a
+platform has no keystore, the UI says the key is stored unencrypted rather than
+implying protection it does not have.
+
+Errors are translated into something worth reading: a 401 says the key was
+rejected, a 429 says rate limited or out of credit, a 404 says that model does
+not exist. A Test connection button makes a 16-token round trip so Settings can
+say "working" rather than "saved".
+
+Tests: test-llm.js runs the providers against a fake server, checking routing,
+payload shape and each error path. test-keystore.js proves the key does not
+appear in what gets stored, under both a stand-in and the real system keystore.
+test-llm-ui.js boots the actual app and drives the settings row end to end.
+test-ipc-wiring.js checks all 49 bridge channels have a counterpart, which is
+the failure that otherwise waits until someone clicks. npm test runs everything
+that needs neither a model nor a GPU.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

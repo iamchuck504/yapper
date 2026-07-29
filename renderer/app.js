@@ -152,6 +152,91 @@ autoDetectToggle.addEventListener('change', () => {
   window.yapper.setAutoDetect(autoDetectEnabled);
 });
 
+// ---------- who writes the notes ----------
+// Transcription is always local; the notes are not. Which model writes them is
+// a per-machine choice, so a coworker with an API key and no Claude Code
+// subscription can still use the app.
+
+const llmProviderSel = $('llm-provider');
+const llmKeyInput = $('llm-key');
+const llmModelInput = $('llm-model');
+const llmBaseInput = $('llm-baseurl');
+const llmHint = $('llm-hint');
+const llmStatus = $('llm-status');
+let llmProviders = [];
+let llmHasKey = false;
+
+function currentProvider() {
+  return llmProviders.find(p => p.id === llmProviderSel.value) || null;
+}
+
+function syncLlmControls() {
+  const p = currentProvider();
+  if (!p) return;
+  llmHint.textContent = p.hint;
+  // the key row doubles as the model row, so it shows for anything with a key
+  $('llm-key-row').classList.toggle('hidden', !p.needsKey);
+  $('llm-baseurl-row').classList.toggle('hidden', !p.needsBaseUrl);
+  $('llm-test-row').classList.toggle('hidden', !p.needsKey);
+  llmKeyInput.placeholder = llmHasKey ? 'saved — type to replace' : (p.keyHint || 'API key');
+  llmModelInput.placeholder = p.defaultModel || 'model';
+  llmBaseInput.placeholder = p.defaultBaseUrl || 'https://your-gateway/v1';
+}
+
+async function saveLlm() {
+  const typed = llmKeyInput.value.trim();
+  await window.yapper.setLlmSettings({
+    provider: llmProviderSel.value,
+    model: llmModelInput.value.trim(),
+    baseUrl: llmBaseInput.value.trim(),
+    // only send the key when one was typed, so switching providers back and
+    // forth does not wipe a key the user already saved
+    ...(typed ? { apiKey: typed } : {})
+  });
+  if (typed) { llmHasKey = true; llmKeyInput.value = ''; }
+  syncLlmControls();
+}
+
+(async () => {
+  const s = await window.yapper.getLlmSettings();
+  llmProviders = s.providers;
+  llmProviderSel.innerHTML = '';
+  for (const p of s.providers) {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = p.label;
+    llmProviderSel.appendChild(o);
+  }
+  llmProviderSel.value = s.provider;
+  llmModelInput.value = s.model;
+  llmBaseInput.value = s.baseUrl;
+  llmHasKey = s.hasKey;
+  syncLlmControls();
+  if (s.hasKey && !s.keyEncrypted) {
+    llmStatus.textContent = 'This system has no keystore, so the key is stored unencrypted.';
+  }
+})();
+
+llmProviderSel.addEventListener('change', () => { syncLlmControls(); saveLlm(); });
+for (const el of [llmKeyInput, llmModelInput, llmBaseInput]) {
+  el.addEventListener('change', saveLlm);
+}
+
+$('btn-llm-test').addEventListener('click', async () => {
+  const btn = $('btn-llm-test');
+  btn.disabled = true;
+  llmStatus.textContent = 'Testing…';
+  await saveLlm();
+  const res = await window.yapper.testLlm({
+    provider: llmProviderSel.value,
+    model: llmModelInput.value.trim(),
+    baseUrl: llmBaseInput.value.trim()
+  });
+  llmStatus.textContent = res.ok ? `Working — replied in ${res.ms} ms.` : res.error;
+  llmStatus.classList.toggle('bad', !res.ok);
+  btn.disabled = false;
+});
+
 // ---------- meeting detection prompt ----------
 
 const meetingPrompt = $('meeting-prompt');
@@ -1543,7 +1628,7 @@ refreshReminders();
     const env = await window.yapper.checkEnvironment();
     const issues = [];
     if (!env.whisper) issues.push('• The transcription engine is missing — transcription will not work. Run setup.ps1 from the app folder.');
-    if (!env.claude) issues.push('• Claude Code CLI was not found — note generation will not work. Install it from claude.com/code and sign in.');
+    if (env.notes && !env.notes.ok) issues.push(`• ${env.notes.reason} Recording and transcription still work.`);
     if (issues.length) {
       setStatus(statusEl, 'Setup needed:\n' + issues.join('\n'), true);
     } else if (env.tier === 'modest') {

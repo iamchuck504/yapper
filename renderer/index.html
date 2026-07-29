@@ -96,6 +96,25 @@
           <span class="opt-label">Instructions</span>
           <input id="custom-instructions" class="text-input" type="text" placeholder="Optional context, e.g. project, what to focus on" autocomplete="off" spellcheck="false" />
         </div>
+        <div class="opt-row">
+          <span class="opt-label">Notes by</span>
+          <select id="llm-provider"></select>
+          <span id="llm-hint" class="mic-hint"></span>
+        </div>
+        <div class="opt-row llm-detail hidden" id="llm-baseurl-row">
+          <span class="opt-label">Endpoint</span>
+          <input id="llm-baseurl" class="text-input" type="text" placeholder="https://your-gateway/v1" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="opt-row llm-detail hidden" id="llm-key-row">
+          <span class="opt-label">API key</span>
+          <input id="llm-key" class="text-input" type="password" placeholder="" autocomplete="off" spellcheck="false" />
+          <input id="llm-model" class="text-input model-input" type="text" placeholder="model" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="opt-row llm-detail hidden" id="llm-test-row">
+          <span class="opt-label"></span>
+          <button id="btn-llm-test" class="inline-action">Test connection</button>
+          <span id="llm-status" class="mic-hint"></span>
+        </div>
       </div>
 
       <div id="rec-zone">
