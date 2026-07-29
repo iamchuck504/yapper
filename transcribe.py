@@ -27,6 +27,15 @@ def add_nvidia_dll_dirs():
                 os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
 
 
+def has_cuda():
+    """True when ctranslate2 can actually use a GPU here."""
+    try:
+        import ctranslate2
+        return ctranslate2.get_cuda_device_count() > 0
+    except Exception:
+        return False
+
+
 def ts(seconds: float) -> str:
     s = int(seconds)
     h, rem = divmod(s, 3600)
@@ -65,13 +74,17 @@ def main() -> int:
 
     add_nvidia_dll_dirs()
     printed = {"n": 0}
-    try:
-        transcribe(model_size, "cuda", audio, language, printed, initial_prompt)
-    except Exception as e:
-        if printed["n"] > 0:
-            raise  # GPU died mid-transcription; retrying would duplicate output
-        print(f"GPU transcription unavailable ({e}); falling back to CPU", file=sys.stderr)
-        transcribe(model_size, "cpu", audio, language, printed, initial_prompt)
+    # Pick the device up front so a CPU-only machine never downloads GPU-sized
+    # weights just to fall back afterwards.
+    if has_cuda():
+        try:
+            transcribe(model_size, "cuda", audio, language, printed, initial_prompt)
+            return 0
+        except Exception as e:
+            if printed["n"] > 0:
+                raise  # GPU died mid-transcription; retrying would duplicate output
+            print(f"GPU transcription failed ({e}); falling back to CPU", file=sys.stderr)
+    transcribe(model_size, "cpu", audio, language, printed, initial_prompt)
     return 0
 
 

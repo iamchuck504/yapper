@@ -26,7 +26,6 @@ const regenStyle = $('regen-style');
 const regenDetail = $('regen-detail');
 
 let recorder = null;
-let chunks = [];
 let audioCtx = null;
 let dest = null;          // MediaStreamDestination feeding the recorder
 let micBus = null;        // GainNode summing all active mics
@@ -654,10 +653,89 @@ function drawWave(m) {
   ctx.stroke();
 }
 
+// ---------- pause, markers, end-of-meeting ----------
+
+let paused = false;
+let markers = [];
+let elapsedMs = 0;          // frozen time carried across pauses
+let runStart = 0;           // when the current run began
+let endedTimer = null;
+
+const btnPause = $('btn-pause');
+const btnMark = $('btn-mark');
+const endedPrompt = $('ended-prompt');
+
+function elapsed() {
+  return elapsedMs + (paused ? 0 : Date.now() - runStart);
+}
+
+function stamp(ms) {
+  const s = Math.floor(ms / 1000);
+  const p = n => String(n).padStart(2, '0');
+  return s >= 3600
+    ? `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`
+    : `${p(Math.floor(s / 60))}:${p(s % 60)}`;
+}
+
+function setPaused(on) {
+  if (!recorder || recorder.state === 'inactive') return;
+  paused = on;
+  if (on) {
+    elapsedMs += Date.now() - runStart;
+    try { recorder.pause(); } catch { /* already paused */ }
+    liveActive = false;                       // stop feeding the transcriber
+  } else {
+    runStart = Date.now();
+    try { recorder.resume(); } catch { /* already running */ }
+    liveActive = true;
+  }
+  recLive.classList.toggle('paused', on);
+  btnPause.classList.toggle('on', on);
+  btnPause.querySelector('.pause-label').textContent = on ? 'Resume' : 'Pause';
+  window.yapper.bubbleState({ paused: on });
+}
+
+function addMarker() {
+  if (!recorder || recorder.state === 'inactive') return;
+  const at = stamp(elapsed());
+  if (markers.includes(at)) return;
+  markers.push(at);
+  btnMark.classList.add('flash');
+  setTimeout(() => btnMark.classList.remove('flash'), 450);
+  window.yapper.bubbleState({ marked: at });
+}
+
+btnPause.addEventListener('click', () => setPaused(!paused));
+btnMark.addEventListener('click', addMarker);
+window.yapper.onMarkMoment(addMarker);
+window.yapper.onRemotePause(() => setPaused(!paused));
+
+// The meeting app let go of the microphone: offer to wrap up, and do it on our
+// own after a minute so a forgotten recording does not run for hours.
+function clearEndedPrompt() {
+  if (endedTimer) clearInterval(endedTimer);
+  endedTimer = null;
+  endedPrompt.classList.add('hidden');
+}
+
+window.yapper.onMeetingEnded(() => {
+  if (!recorder || recorder.state === 'inactive' || endedTimer) return;
+  let left = 60;
+  const tick = () => {
+    $('ep-count').textContent = `Stopping on its own in ${left}s`;
+    if (left-- <= 0) { clearEndedPrompt(); stopAndProcess(); }
+  };
+  endedPrompt.classList.remove('hidden');
+  tick();
+  endedTimer = setInterval(tick, 1000);
+});
+
+$('ep-keep').addEventListener('click', clearEndedPrompt);
+$('ep-stop').addEventListener('click', () => { clearEndedPrompt(); stopAndProcess(); });
+
 // ---------- recording ----------
 
 async function startRecording() {
-  chunks = [];
   try {
     // main.js answers this with Windows system-audio loopback (video must be requested even if unused)
     const sys = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
@@ -710,11 +788,17 @@ async function startRecording() {
     };
     updateLevels();
 
+    // open the file first: every chunk goes straight to disk from here on, so an
+    // interrupted meeting still leaves a playable recording behind
+    currentFolder = await window.yapper.recordingStart(options.participants);
+
     recorder = new MediaRecorder(dest.stream, {
       mimeType: 'audio/webm;codecs=opus',
       audioBitsPerSecond: 64000
     });
-    recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+    recorder.ondataavailable = async e => {
+      if (e.data.size > 0) window.yapper.recordingChunk(await e.data.arrayBuffer());
+    };
     recorder.start(1000);
     startLivePreview();
 
@@ -731,18 +815,22 @@ async function startRecording() {
     }
 
     window.yapper.setRecordingState(true);
+    window.yapper.markShortcut(true);
     if (bubbleEnabled) {
       await window.yapper.bubbleShow();
       window.yapper.bubbleState({ theme });
     }
 
-    const t0 = Date.now();
+    paused = false;
+    markers = [];
+    elapsedMs = 0;
+    runStart = Date.now();
+    recLive.classList.remove('paused');
+    btnPause.classList.remove('on');
+    btnPause.querySelector('.pause-label').textContent = 'Pause';
+
     timerInterval = setInterval(() => {
-      const s = Math.floor((Date.now() - t0) / 1000);
-      const p = n => String(n).padStart(2, '0');
-      const text = s >= 3600
-        ? `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`
-        : `${p(Math.floor(s / 60))}:${p(s % 60)}`;
+      const text = stamp(elapsed());
       timerEl.textContent = text;
       window.yapper.bubbleState({ timer: text });
     }, 500);
@@ -758,7 +846,11 @@ function cleanupCapture() {
   timerInterval = null;
   levelRaf = null;
   window.yapper.setRecordingState(false);
+  window.yapper.markShortcut(false);
   window.yapper.bubbleHide();
+  clearEndedPrompt();
+  paused = false;
+  recLive.classList.remove('paused');
   for (const key of [...micNodes.keys()]) dropMic(key);
   if (sysStream) { sysStream.getTracks().forEach(t => t.stop()); sysStream = null; }
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
@@ -786,12 +878,11 @@ async function stopAndProcess() {
   resetPipeline();
 
   try {
-    const blob = new Blob(chunks, { type: 'audio/webm' });
-    chunks = [];
-    if (blob.size < 5000) throw new Error('The recording is empty or too short.');
-
     setStep('save', 'active');
-    const folder = await window.yapper.saveRecording(await blob.arrayBuffer(), titleInput.value.trim(), options.participants);
+    const saved = await window.yapper.recordingFinish(titleInput.value.trim(), markers);
+    if (!saved) throw new Error('The recording could not be saved.');
+    if (saved.bytes < 5000) throw new Error('The recording is empty or too short.');
+    const folder = saved.folder;
     currentFolder = folder;
     setStep('save', 'done');
 
@@ -802,7 +893,7 @@ async function stopAndProcess() {
 
     setStep('notes', 'active');
     setStatus(statusEl, 'Generating notes with Claude…');
-    const summary = await window.yapper.summarize(folder, transcript, options);
+    const summary = await window.yapper.summarize(folder, transcript, { ...options, markers });
     setStep('notes', 'done');
 
     // No title typed? Name the meeting after what was actually discussed.

@@ -110,6 +110,15 @@
       text-transform: uppercase; font-family: var(--font-sans);
     }
     body.collapsed .label { display: none; }
+    body.paused .dot { animation: none; opacity: 0.35; }
+    body.paused #timer { color: var(--text-3); }
+    body.paused .label::after { content: ' · paused'; }
+    #btn-pause.on { color: var(--accent); border-color: var(--accent); }
+    /* brief confirmation that a moment was flagged */
+    .flash { position: absolute; inset: 0; background: var(--accent); opacity: 0;
+             pointer-events: none; border-radius: 11px; }
+    .flash.go { animation: flash .45s ease; }
+    @keyframes flash { 0% { opacity: .30; } 100% { opacity: 0; } }
     .spacer { flex: 1; }
 
     header button {
@@ -162,10 +171,12 @@
       <button id="btn-toggle" title="Expand / collapse">
         <svg viewBox="0 0 16 16" width="12" height="12"><path d="M4 10l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       </button>
+      <button id="btn-pause" title="Pause / resume">Pause</button>
       <button id="btn-open" title="Open the main window">Open</button>
       <button id="btn-stop" title="Stop recording and summarize">Stop</button>
     </header>
     <div id="text"><span id="placeholder">Listening…</span><span id="confirmed"></span> <span id="tentative"></span></div>
+    <div id="flash" class="flash"></div>
   </div>
   <script src="bubble.js"></script>
 </body>

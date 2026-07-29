@@ -1,7 +1,14 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('yapper', {
-  saveRecording: (buf, title, participants) => ipcRenderer.invoke('save-recording', buf, title, participants),
+  recordingStart: participants => ipcRenderer.invoke('recording-start', participants),
+  recordingChunk: buf => ipcRenderer.send('recording-chunk', buf),
+  recordingFinish: (title, markers) => ipcRenderer.invoke('recording-finish', title, markers),
+  markShortcut: on => ipcRenderer.send('mark-shortcut', on),
+  onMarkMoment: cb => ipcRenderer.on('mark-moment', () => cb()),
+  onMeetingEnded: cb => ipcRenderer.on('meeting-ended', () => cb()),
+  bubblePause: () => ipcRenderer.send('bubble-pause'),
+  onRemotePause: cb => ipcRenderer.on('remote-pause', () => cb()),
   importAudio: participants => ipcRenderer.invoke('import-audio', participants),
   transcribe: folder => ipcRenderer.invoke('transcribe', folder),
   summarize: (folder, transcript, options) => ipcRenderer.invoke('summarize', folder, transcript, options),
