@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('actas', {
+contextBridge.exposeInMainWorld('yapper', {
   saveRecording: (buf, title, participants) => ipcRenderer.invoke('save-recording', buf, title, participants),
   importAudio: participants => ipcRenderer.invoke('import-audio', participants),
   transcribe: folder => ipcRenderer.invoke('transcribe', folder),
