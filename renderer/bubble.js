@@ -7,18 +7,18 @@ const textEl = document.getElementById('text');
 const EXPANDED = { w: 420, h: 280 };
 const COLLAPSED = { w: 216, h: 64 };   // header (44) + card margins + borders
 
-let collapsed = localStorage.getItem('actas-bubble-collapsed') === 'yes';
+let collapsed = localStorage.getItem('yapper-bubble-collapsed') === 'yes';
 
 function applyCollapsed() {
   document.body.classList.toggle('collapsed', collapsed);
-  window.actas.bubbleResize(collapsed ? COLLAPSED : EXPANDED);
+  window.yapper.bubbleResize(collapsed ? COLLAPSED : EXPANDED);
 }
 
 function atBottom() {
   return textEl.scrollHeight - textEl.scrollTop - textEl.clientHeight < 40;
 }
 
-window.actas.onLiveTranscript(line => {
+window.yapper.onLiveTranscript(line => {
   let msg;
   try { msg = JSON.parse(line); } catch { return; }
   if (msg.status || msg.error) return;
@@ -41,7 +41,7 @@ window.actas.onLiveTranscript(line => {
   if (stick) textEl.scrollTop = textEl.scrollHeight;
 });
 
-window.actas.onBubbleState(state => {
+window.yapper.onBubbleState(state => {
   if (!state) return;
   if (typeof state.timer === 'string') timerEl.textContent = state.timer;
   if (state.theme) document.body.classList.toggle('light', state.theme === 'light');
@@ -49,10 +49,10 @@ window.actas.onBubbleState(state => {
 
 document.getElementById('btn-toggle').addEventListener('click', () => {
   collapsed = !collapsed;
-  localStorage.setItem('actas-bubble-collapsed', collapsed ? 'yes' : 'no');
+  localStorage.setItem('yapper-bubble-collapsed', collapsed ? 'yes' : 'no');
   applyCollapsed();
 });
-document.getElementById('btn-stop').addEventListener('click', () => window.actas.bubbleStop());
-document.getElementById('btn-open').addEventListener('click', () => window.actas.bubbleFocusMain());
+document.getElementById('btn-stop').addEventListener('click', () => window.yapper.bubbleStop());
+document.getElementById('btn-open').addEventListener('click', () => window.yapper.bubbleFocusMain());
 
 applyCollapsed();

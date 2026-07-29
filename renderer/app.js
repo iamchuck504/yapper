@@ -35,11 +35,11 @@ let micHP = null;         // high-pass filter (cuts low rumble/hum)
 let micLP = null;         // low-pass filter (tames hiss on Strong)
 let sysStream = null;     // system-audio loopback stream
 
-let noiseReduction = localStorage.getItem('actas-noise') || 'standard';
+let noiseReduction = localStorage.getItem('yapper-noise') || 'standard';
 
 const numOr = (v, d) => (isNaN(parseFloat(v)) ? d : parseFloat(v));
-let gainSys = numOr(localStorage.getItem('actas-gain-sys'), 1);
-let gainMic = numOr(localStorage.getItem('actas-gain-mic'), 1);
+let gainSys = numOr(localStorage.getItem('yapper-gain-sys'), 1);
+let gainMic = numOr(localStorage.getItem('yapper-gain-mic'), 1);
 const micStreams = new Map(); // deviceId|'default' -> MediaStream
 const micNodes = new Map();   // deviceId|'default' -> MediaStreamAudioSourceNode
 let analysers = { sys: null, mic: null };
@@ -60,7 +60,7 @@ const btnSpeak = $('btn-speak');
 const voiceSelect = $('voice-select');
 
 const micSelect = $('mic-select');
-let micSelection = localStorage.getItem('actas-mic') || 'default';
+let micSelection = localStorage.getItem('yapper-mic') || 'default';
 
 const liveWrap = $('live-wrap');
 const liveTranscriptEl = $('live-transcript');
@@ -68,17 +68,17 @@ const liveTranscriptEl = $('live-transcript');
 // ---------- theme (persisted) ----------
 
 const btnTheme = $('btn-theme');
-let theme = localStorage.getItem('actas-theme') || 'dark';
+let theme = localStorage.getItem('yapper-theme') || 'dark';
 
 function applyTheme() {
   document.body.classList.toggle('light', theme === 'light');
-  window.actas.bubbleState({ theme });   // keep the floating bubble in sync
-  window.actas.setTheme(theme);          // so the next launch paints the right bg
+  window.yapper.bubbleState({ theme });   // keep the floating bubble in sync
+  window.yapper.setTheme(theme);          // so the next launch paints the right bg
 }
 
 btnTheme.addEventListener('click', () => {
   theme = theme === 'dark' ? 'light' : 'dark';
-  localStorage.setItem('actas-theme', theme);
+  localStorage.setItem('yapper-theme', theme);
   applyTheme();
 });
 
@@ -91,13 +91,13 @@ const participantsMeet = $('participants-meet');
 
 const options = Object.assign(
   { style: 'general', detail: 'concise', custom: '', participants: '' },
-  JSON.parse(localStorage.getItem('actas-options') || '{}')
+  JSON.parse(localStorage.getItem('yapper-options') || '{}')
 );
 
 function saveOptions() {
   options.custom = customInput.value;
   options.participants = participantsRec.value;
-  localStorage.setItem('actas-options', JSON.stringify(options));
+  localStorage.setItem('yapper-options', JSON.stringify(options));
 }
 
 function syncOptionControls() {
@@ -127,37 +127,37 @@ participantsRec.addEventListener('change', saveOptions);
 const bubbleToggle = $('opt-bubble');
 const autoDetectToggle = $('opt-autodetect');
 const startupToggle = $('opt-startup');
-let bubbleEnabled = localStorage.getItem('actas-bubble') !== 'off';
-let autoDetectEnabled = localStorage.getItem('actas-autodetect') !== 'off';   // on by default
+let bubbleEnabled = localStorage.getItem('yapper-bubble') !== 'off';
+let autoDetectEnabled = localStorage.getItem('yapper-autodetect') !== 'off';   // on by default
 
 bubbleToggle.checked = bubbleEnabled;
 autoDetectToggle.checked = autoDetectEnabled;
-window.actas.setAutoDetect(autoDetectEnabled);
+window.yapper.setAutoDetect(autoDetectEnabled);
 
 // "start with Windows" lives in the main process (it writes the login item)
-window.actas.getOpenAtLogin().then(on => { startupToggle.checked = on; });
+window.yapper.getOpenAtLogin().then(on => { startupToggle.checked = on; });
 startupToggle.addEventListener('change', () => {
-  window.actas.setOpenAtLogin(startupToggle.checked);
+  window.yapper.setOpenAtLogin(startupToggle.checked);
 });
 
 bubbleToggle.addEventListener('change', () => {
   bubbleEnabled = bubbleToggle.checked;
-  localStorage.setItem('actas-bubble', bubbleEnabled ? 'on' : 'off');
-  if (!bubbleEnabled) window.actas.bubbleHide();
-  else if (liveActive) window.actas.bubbleShow();
+  localStorage.setItem('yapper-bubble', bubbleEnabled ? 'on' : 'off');
+  if (!bubbleEnabled) window.yapper.bubbleHide();
+  else if (liveActive) window.yapper.bubbleShow();
 });
 
 autoDetectToggle.addEventListener('change', () => {
   autoDetectEnabled = autoDetectToggle.checked;
-  localStorage.setItem('actas-autodetect', autoDetectEnabled ? 'on' : 'off');
-  window.actas.setAutoDetect(autoDetectEnabled);
+  localStorage.setItem('yapper-autodetect', autoDetectEnabled ? 'on' : 'off');
+  window.yapper.setAutoDetect(autoDetectEnabled);
 });
 
 // ---------- meeting detection prompt ----------
 
 const meetingPrompt = $('meeting-prompt');
 
-window.actas.onMeetingDetected(info => {
+window.yapper.onMeetingDetected(info => {
   if (recorder && recorder.state !== 'inactive') return;
   $('mp-app').textContent = `${info.app} is using your microphone.`;
   meetingPrompt.classList.remove('hidden');
@@ -171,7 +171,7 @@ $('mp-start').addEventListener('click', () => {
 $('mp-dismiss').addEventListener('click', () => meetingPrompt.classList.add('hidden'));
 
 // stop requested from the floating bubble
-window.actas.onRemoteStop(() => stopAndProcess());
+window.yapper.onRemoteStop(() => stopAndProcess());
 regenStyle.addEventListener('change', () => { options.style = regenStyle.value; saveOptions(); syncOptionControls(); });
 regenDetail.addEventListener('change', () => { options.detail = regenDetail.value; saveOptions(); syncOptionControls(); });
 
@@ -371,7 +371,7 @@ function applyNoiseFilter() {
 
 async function setNoiseReduction(level) {
   noiseReduction = level;
-  localStorage.setItem('actas-noise', level);
+  localStorage.setItem('yapper-noise', level);
   applyNoiseFilter();
   // the getUserMedia constraints differ per level, so re-acquire mics if recording
   if (audioCtx) {
@@ -414,7 +414,7 @@ async function applyMicSelection() {
 
 micSelect.addEventListener('change', async () => {
   micSelection = micSelect.value;
-  localStorage.setItem('actas-mic', micSelection);
+  localStorage.setItem('yapper-mic', micSelection);
   await applyMicSelection();
 });
 
@@ -435,14 +435,14 @@ function initGainSliders() {
 gainSysSlider.addEventListener('input', () => {
   gainSys = parseFloat(gainSysSlider.value);
   gainSysVal.textContent = gainSys.toFixed(1) + '×';
-  localStorage.setItem('actas-gain-sys', gainSys);
+  localStorage.setItem('yapper-gain-sys', gainSys);
   if (sysGainNode) sysGainNode.gain.value = gainSys;
 });
 
 gainMicSlider.addEventListener('input', () => {
   gainMic = parseFloat(gainMicSlider.value);
   gainMicVal.textContent = gainMic.toFixed(1) + '×';
-  localStorage.setItem('actas-gain-mic', gainMic);
+  localStorage.setItem('yapper-gain-mic', gainMic);
   if (micBus) micBus.gain.value = gainMic;
 });
 
@@ -502,13 +502,13 @@ function pushPcm(float32) {
   for (const p of pcmPending) { merged.set(p, o); o += p.length; }
   pcmPending = [];
   pcmPendingLen = 0;
-  window.actas.livePcm(merged.buffer);
+  window.yapper.livePcm(merged.buffer);
 }
 
 async function startLivePreview() {
   if (!audioCtx || !micBus) return;
   try {
-    if (!(await window.actas.liveStart(options.participants))) return;
+    if (!(await window.yapper.liveStart(options.participants))) return;
   } catch {
     return; // preview is best-effort; the final transcript is unaffected
   }
@@ -554,7 +554,7 @@ async function stopLivePreview() {
   pcmPending = [];
   pcmPendingLen = 0;
   liveWrap.classList.add('hidden');
-  try { await window.actas.liveStop(); } catch { /* ignore */ }
+  try { await window.yapper.liveStop(); } catch { /* ignore */ }
 }
 
 function renderLiveTranscript() {
@@ -588,7 +588,7 @@ function renderLiveTranscript() {
   if (stick) liveTranscriptEl.scrollTop = liveTranscriptEl.scrollHeight;
 }
 
-window.actas.onLiveTranscript(line => {
+window.yapper.onLiveTranscript(line => {
   let msg;
   try { msg = JSON.parse(line); } catch { return; }
   if (msg.status || msg.error) return;
@@ -603,9 +603,9 @@ window.actas.onLiveTranscript(line => {
 // collapse / expand the in-app live transcript
 $('live-head').addEventListener('click', () => {
   const collapsed = liveWrap.classList.toggle('collapsed');
-  localStorage.setItem('actas-live-collapsed', collapsed ? 'yes' : 'no');
+  localStorage.setItem('yapper-live-collapsed', collapsed ? 'yes' : 'no');
 });
-if (localStorage.getItem('actas-live-collapsed') === 'yes') liveWrap.classList.add('collapsed');
+if (localStorage.getItem('yapper-live-collapsed') === 'yes') liveWrap.classList.add('collapsed');
 
 // ---------- waveform visualizer ----------
 
@@ -714,10 +714,10 @@ async function startRecording() {
       setStatus(statusEl, 'Warning: no microphone could be captured; only system audio is being recorded.');
     }
 
-    window.actas.setRecordingState(true);
+    window.yapper.setRecordingState(true);
     if (bubbleEnabled) {
-      await window.actas.bubbleShow();
-      window.actas.bubbleState({ theme });
+      await window.yapper.bubbleShow();
+      window.yapper.bubbleState({ theme });
     }
 
     const t0 = Date.now();
@@ -728,7 +728,7 @@ async function startRecording() {
         ? `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`
         : `${p(Math.floor(s / 60))}:${p(s % 60)}`;
       timerEl.textContent = text;
-      window.actas.bubbleState({ timer: text });
+      window.yapper.bubbleState({ timer: text });
     }, 500);
   } catch (err) {
     cleanupCapture();
@@ -741,8 +741,8 @@ function cleanupCapture() {
   if (levelRaf) cancelAnimationFrame(levelRaf);
   timerInterval = null;
   levelRaf = null;
-  window.actas.setRecordingState(false);
-  window.actas.bubbleHide();
+  window.yapper.setRecordingState(false);
+  window.yapper.bubbleHide();
   for (const key of [...micNodes.keys()]) dropMic(key);
   if (sysStream) { sysStream.getTracks().forEach(t => t.stop()); sysStream = null; }
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
@@ -775,25 +775,25 @@ async function stopAndProcess() {
     if (blob.size < 5000) throw new Error('The recording is empty or too short.');
 
     setStep('save', 'active');
-    const folder = await window.actas.saveRecording(await blob.arrayBuffer(), titleInput.value.trim(), options.participants);
+    const folder = await window.yapper.saveRecording(await blob.arrayBuffer(), titleInput.value.trim(), options.participants);
     currentFolder = folder;
     setStep('save', 'done');
 
     setStep('transcribe', 'active');
     setStatus(statusEl, 'Transcribing locally with Whisper…\n');
-    const transcript = await window.actas.transcribe(folder);
+    const transcript = await window.yapper.transcribe(folder);
     setStep('transcribe', 'done');
 
     setStep('notes', 'active');
     setStatus(statusEl, 'Generating notes with Claude…');
-    const summary = await window.actas.summarize(folder, transcript, options);
+    const summary = await window.yapper.summarize(folder, transcript, options);
     setStep('notes', 'done');
 
     // No title typed? Name the meeting after what was actually discussed.
     let title = titleInput.value.trim();
     if (!title) {
       setStatus(statusEl, 'Naming the meeting…');
-      title = await window.actas.generateTitle(folder);
+      title = await window.yapper.generateTitle(folder);
     }
 
     statusEl.classList.add('hidden');
@@ -843,8 +843,8 @@ async function retryTranscribe() {
   if (btn) btn.disabled = true;
   setStatus(regenStatusEl, 'Transcribing with Whisper…\n');
   try {
-    await window.actas.transcribe(currentFolder);
-    const data = await window.actas.loadMeeting(currentFolder);
+    await window.yapper.transcribe(currentFolder);
+    const data = await window.yapper.loadMeeting(currentFolder);
     regenStatusEl.classList.add('hidden');
     openMeetingView(resultTitle.textContent, data.summary, data.transcript, data.hasRecording, data.participants);
     await refreshMeetingList();
@@ -912,7 +912,7 @@ function renderMeetingList() {
     li.append(dot, body);
     li.addEventListener('click', async () => {
       currentFolder = m.folder;
-      const data = await window.actas.loadMeeting(m.folder);
+      const data = await window.yapper.loadMeeting(m.folder);
       openMeetingView(data.title || formatMeetingDate(m.name), data.summary, data.transcript, data.hasRecording, data.participants);
       renderMeetingList();
     });
@@ -921,7 +921,7 @@ function renderMeetingList() {
 }
 
 async function refreshMeetingList() {
-  allMeetings = await window.actas.listMeetings();
+  allMeetings = await window.yapper.listMeetings();
   renderMeetingList();
 }
 
@@ -939,7 +939,7 @@ let speaking = false;
 function loadVoices() {
   voices = synth.getVoices();
   if (!voices.length) return;
-  const saved = localStorage.getItem('actas-voice') || '';
+  const saved = localStorage.getItem('yapper-voice') || '';
   const sorted = [...voices].sort((a, b) =>
     (b.lang.startsWith('en') - a.lang.startsWith('en')) || a.name.localeCompare(b.name));
   voiceSelect.innerHTML = '';
@@ -959,7 +959,7 @@ function loadVoices() {
 synth.addEventListener('voiceschanged', loadVoices);
 loadVoices();
 
-voiceSelect.addEventListener('change', () => localStorage.setItem('actas-voice', voiceSelect.value));
+voiceSelect.addEventListener('change', () => localStorage.setItem('yapper-voice', voiceSelect.value));
 
 function updateSpeakBtn() {
   btnSpeak.classList.toggle('speaking', speaking);
@@ -1011,7 +1011,7 @@ btnImport.addEventListener('click', async () => {
   btnImport.disabled = true;
   btnRecord.disabled = true;
   try {
-    const picked = await window.actas.importAudio(options.participants);
+    const picked = await window.yapper.importAudio(options.participants);
     if (!picked) return;
     currentFolder = picked.folder;
     pipelineEl.classList.remove('hidden');
@@ -1019,7 +1019,7 @@ btnImport.addEventListener('click', async () => {
     setStep('save', 'done');
     setStep('transcribe', 'active');
     setStatus(statusEl, 'Transcribing voice note verbatim with Whisper…\n');
-    const transcript = await window.actas.transcribe(picked.folder);
+    const transcript = await window.yapper.transcribe(picked.folder);
     setStep('transcribe', 'done');
     statusEl.classList.add('hidden');
     pipelineEl.classList.add('hidden');
@@ -1049,11 +1049,11 @@ btnRegen.addEventListener('click', async () => {
   btnRegen.disabled = true;
   // use the participants edited in this meeting's bar, and remember them as the default
   options.participants = participantsMeet.value;
-  localStorage.setItem('actas-options', JSON.stringify(options));
+  localStorage.setItem('yapper-options', JSON.stringify(options));
   participantsRec.value = participantsMeet.value;
   setStatus(regenStatusEl, 'Regenerating notes with Claude…');
   try {
-    const summary = await window.actas.regenerate(currentFolder, options);
+    const summary = await window.yapper.regenerate(currentFolder, options);
     regenStatusEl.classList.add('hidden');
     renderNotes(summary);
     await refreshMeetingList();
@@ -1105,7 +1105,7 @@ $('btn-save-notes').addEventListener('click', async () => {
   const btn = $('btn-save-notes');
   btn.disabled = true;
   try {
-    await window.actas.saveNotes(currentFolder, md);
+    await window.yapper.saveNotes(currentFolder, md);
     currentNotesMd = md;
     renderNotes(md);
     exitEditMode();
@@ -1188,18 +1188,18 @@ async function runExport(kind) {
   try {
     if (kind === 'pdf') {
       if (!currentNotesMd) throw new Error('This meeting has no notes yet.');
-      return await window.actas.exportPdf(buildPdfHtml(title), title);
+      return await window.yapper.exportPdf(buildPdfHtml(title), title);
     }
     if (kind === 'md') {
       if (!currentNotesMd) throw new Error('This meeting has no notes yet.');
-      return await window.actas.saveTextFile({
+      return await window.yapper.saveTextFile({
         defaultName: title, extension: 'md', description: 'Markdown',
         content: `${exportHeader()}\n${currentNotesMd}\n`
       });
     }
     if (kind === 'txt') {
       if (!hasTranscript) throw new Error('This meeting has no transcript.');
-      return await window.actas.saveTextFile({
+      return await window.yapper.saveTextFile({
         defaultName: `${title} - transcript`, extension: 'txt', description: 'Text',
         content: `${title}\n${resultDateStr}\n\n${transcript}\n`
       });
@@ -1209,7 +1209,7 @@ async function runExport(kind) {
       const parts = [exportHeader()];
       if (currentNotesMd) parts.push('\n' + currentNotesMd + '\n');
       if (hasTranscript) parts.push('\n---\n\n## Full transcript\n\n```\n' + transcript + '\n```\n');
-      return await window.actas.saveTextFile({
+      return await window.yapper.saveTextFile({
         defaultName: `${title} - full`, extension: 'md', description: 'Markdown',
         content: parts.join('')
       });
@@ -1234,10 +1234,10 @@ exportMenu.querySelectorAll('button').forEach(b => {
 });
 
 btnOpenFolder.addEventListener('click', () => {
-  if (currentFolder) window.actas.openFolder(currentFolder);
+  if (currentFolder) window.yapper.openFolder(currentFolder);
 });
 
-window.actas.onTranscribeProgress(text => {
+window.yapper.onTranscribeProgress(text => {
   for (const el of [statusEl, regenStatusEl]) {
     if (!el.classList.contains('hidden')) {
       el.textContent += text;
@@ -1278,7 +1278,7 @@ function renderReminders(list) {
     check.title = r.done ? 'Mark as not done' : 'Mark as done';
     check.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12"><path d="M3 8.5l3 3 7-7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     check.addEventListener('click', async () => {
-      await window.actas.updateReminder(r.id, { done: !r.done });
+      await window.yapper.updateReminder(r.id, { done: !r.done });
       await refreshReminders();
     });
 
@@ -1287,7 +1287,7 @@ function renderReminders(list) {
     const text = document.createElement('input');
     text.className = 'r-text';
     text.value = r.text;
-    text.addEventListener('change', () => window.actas.updateReminder(r.id, { text: text.value.trim() }));
+    text.addEventListener('change', () => window.yapper.updateReminder(r.id, { text: text.value.trim() }));
     text.addEventListener('keydown', e => { if (e.key === 'Enter') text.blur(); });
     main.appendChild(text);
     if (r.source) {
@@ -1302,7 +1302,7 @@ function renderReminders(list) {
     del.title = 'Delete';
     del.innerHTML = '<svg viewBox="0 0 16 16" width="13" height="13"><path d="M4 4l8 8M12 4l-8 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
     del.addEventListener('click', async () => {
-      await window.actas.deleteReminder(r.id);
+      await window.yapper.deleteReminder(r.id);
       await refreshReminders();
     });
 
@@ -1312,7 +1312,7 @@ function renderReminders(list) {
 }
 
 async function refreshReminders() {
-  const list = await window.actas.listReminders();
+  const list = await window.yapper.listReminders();
   updateReminderCount(list);
   if (!viewReminders.classList.contains('hidden')) renderReminders(list);
 }
@@ -1320,7 +1320,7 @@ async function refreshReminders() {
 async function addReminderFromText(text, source) {
   const t = (text || '').trim();
   if (!t) return false;
-  await window.actas.addReminder(t, source || '');
+  await window.yapper.addReminder(t, source || '');
   await refreshReminders();
   return true;
 }
@@ -1328,7 +1328,7 @@ async function addReminderFromText(text, source) {
 btnReminders.addEventListener('click', async () => {
   stopSpeak();
   showView('reminders');
-  const list = await window.actas.listReminders();
+  const list = await window.yapper.listReminders();
   updateReminderCount(list);
   renderReminders(list);
 });
@@ -1356,7 +1356,7 @@ refreshReminders();
 
 (async () => {
   try {
-    const env = await window.actas.checkEnvironment();
+    const env = await window.yapper.checkEnvironment();
     const issues = [];
     if (!env.whisper) issues.push('• Python with faster-whisper was not found — transcription will not work. Run setup.ps1 from the app folder.');
     if (!env.claude) issues.push('• Claude Code CLI was not found — note generation will not work. Install it from claude.com/code and sign in.');

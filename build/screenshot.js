@@ -8,7 +8,7 @@ const OUT = path.join(__dirname, 'shots');
 
 async function shoot(win, theme, name) {
   await win.webContents.executeJavaScript(
-    `localStorage.setItem('actas-theme', '${theme}'); location.reload();`
+    `localStorage.setItem('yapper-theme', '${theme}'); location.reload();`
   );
   await new Promise(r => setTimeout(r, 2500));
   const img = await win.webContents.capturePage();
