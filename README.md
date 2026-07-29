@@ -7,7 +7,7 @@ Clon de another meeting-notes app AI: graba tus reuniones, las transcribe **loca
 - **Transcripción en streaming.** El renderer manda PCM continuo; `live.js` mantiene un buffer rodante de 12 s y lo re-transcribe cada ~0.7 s. Una palabra solo se "confirma" cuando dos pasadas seguidas coinciden (LocalAgreement-2); la cola tentativa se muestra atenuada y se corrige sola. Las pausas largas abren párrafo nuevo.
 - **Qué tan atrás va.** Medido reproduciendo un minuto de reunión real a velocidad de reloj en una RTX 4080 SUPER: **2.6 s de mediana** entre lo que se dice y lo que queda confirmado (peor caso 4.8 s). La cola tentativa aparece antes, cerca de 1 s. Una válvula de seguridad confirma lo que lleve más de 1.5 s sin acuerdo, para que un pasaje difícil no congele el transcript.
 - **Burbuja flotante.** Ventana pequeña siempre visible, arrastrable, que sigue el tema claro/oscuro. Se **colapsa a un indicador compacto** (barras animadas + cronómetro) y se expande al transcript completo con un clic. Toggle "Floating bubble".
-- **Auto-detección de reuniones.** Detecta qué app está usando el micrófono (Zoom, Teams, Slack, Discord, Webex y llamadas en el navegador: Meet/Hangouts) y ofrece tomar notas con un aviso discreto. Toggle "Auto-detect meetings". Solo Windows por ahora; en Mac llega con el rework de audio.
+- **Auto-detección de reuniones.** Detecta qué app está usando el micrófono (Zoom, Teams, Slack, Discord, Webex y llamadas en el navegador: Meet/Hangouts) y **manda una notificación del sistema**: un clic empieza a grabar, sin tener que ir a buscar la ventana. Cuando Yapper ya está enfrente, el aviso aparece dentro de la app. Toggle "Auto-detect meetings". Solo Windows por ahora; en Mac llega con el rework de audio.
 
 El preview en vivo es *solo un adelanto*: al detener, la transcripción final se rehace con una pasada completa de más calidad, y de ahí salen las notas.
 
@@ -33,14 +33,22 @@ Si una máquina resulta más lenta de lo que midió (batería, CPU ocupada, otra
 
 La transcripción es siempre local. Las notas no, y no todo el mundo paga un modelo igual, así que el proveedor se elige en la app (**Notes by**):
 
-| Proveedor | Qué necesita |
-|---|---|
-| **Claude Code** | el CLI instalado y con sesión (la suscripción Max). Sin key, sin costo por reunión. |
-| **Anthropic API** | key propia de console.anthropic.com. |
-| **OpenRouter** | key propia de OpenRouter. |
-| **Other (OpenAI-compatible)** | cualquier endpoint que hable `/chat/completions`: un gateway de empresa, un modelo local, OpenAI. |
+| Proveedor | Qué necesita | Costo |
+|---|---|---|
+| **Claude Code** | el CLI instalado y con sesión (la suscripción Max) | incluido |
+| **Google Gemini** | key gratis de [aistudio.google.com](https://aistudio.google.com/apikey), **sin tarjeta**, ~1 min | gratis |
+| **OpenRouter** | key propia; sus modelos `:free` no cobran | gratis o de pago |
+| **Ollama** | Ollama instalado en la misma máquina | gratis y privado |
+| **Anthropic API** | key propia de console.anthropic.com | de pago |
+| **Other (OpenAI-compatible)** | cualquier endpoint que hable `/chat/completions` | según el endpoint |
 
 Esa última fila es a propósito la salida hacia adelante: si esto termina siendo un producto con una API oficial, se agrega una entrada en `llm.js` y ya — los tres lugares que generan notas (resumen, regenerar, título automático) no se tocan.
+
+**Por qué no hay una opción de cero configuración.** No existe. Toda API hospedada necesita una credencial, y esa credencial sale de uno de tres lugares: metida dentro de la app (la abusan en días y viola los términos de cualquier proveedor), servida por un backend que alguien paga, o la del propio usuario. Lo más cerca que se puede llegar honestamente es **Gemini**: gratis, sin tarjeta, y sacar la key toma alrededor de un minuto. La única alternativa realmente sin credencial es correr el modelo localmente — de ahí la opción de **Ollama** para quien ya lo tenga.
+
+**Ojo con los planes gratis:** casi todos entrenan con lo que les mandas. La app lo dice en pantalla al elegirlos, porque una transcripción de reunión no siempre es tuya para compartir. Para reuniones confidenciales, Claude Code, la API de pago u Ollama.
+
+Si el modelo configurado deja de existir (los proveedores retiran ids), **Test connection** le pregunta al endpoint qué modelos sí tiene y los lista en el error, en vez de dejarte adivinando.
 
 La key se guarda **cifrada con el llavero del sistema** (DPAPI en Windows, Keychain en macOS), no en texto plano dentro de `settings.json`, y nunca sale del proceso principal: el renderer solo se entera de si hay una o no. Si el sistema no tiene llavero, la app lo dice en vez de fingir que está protegida.
 
@@ -61,6 +69,10 @@ Hay un botón **Test connection** que hace una llamada mínima y responde "worki
 
 Cualquier formato que Chromium sepa decodificar (mp3, m4a, opus, flac, ogg, wav, mp4…) se convierte dentro de la app al WAV que usa el transcriptor. No hace falta ffmpeg ni ninguna dependencia extra: los códecs ya vienen dentro de Electron.
 
+Una nota de voz importada recibe **el mismo trato que una reunión grabada**: transcripción, notas y título automático. Si el archivo se llama algo genérico (`recording`, `New Recording 3`, `WhatsApp Audio…`, o solo una fecha), el título lo pone el modelo según lo que se habló, en vez de llamar a la reunión "recording".
+
+Medido con archivos reales: un `.m4a` de 2.5 min tarda 3 s en total; un `.webm` de 24 min, 27 s.
+
 ## Uso
 
 ```
@@ -78,7 +90,7 @@ o el acceso directo **Yapper** del Escritorio.
 - **Borrar reuniones**: cada fila de la barra lateral tiene una papelera que aparece al pasar el cursor. Las grabaciones fallidas (sin audio) se ven atenuadas y etiquetadas *Empty recording*. Siempre pregunta antes, enumerando lo que contiene, y va a la papelera del sistema — nunca borra audio de forma irreversible.
 - **↻ Regenerate**: rehace las notas de cualquier reunión guardada con otro estilo/detalle.
 - **Título automático**: si no escribes título, Claude nombra la reunión según lo que se habló (2-6 palabras); si la grabación no da para tanto, cae a la fecha.
-- **Export** (menú): notas en PDF, notas en Markdown, transcripción completa en .txt, o notas + transcripción en un solo .md.
+- **Export** (menú): notas en PDF, notas en Markdown, **transcripción completa en Markdown** (marcas de tiempo en negrita, párrafo nuevo tras un minuto de silencio), transcripción en .txt, o notas + transcripción en un solo .md.
 - **Start with Windows**: arranca Yapper al iniciar sesión (encendido por defecto, se apaga desde el toggle).
 - Las notas salen **en inglés** y se muestran como tarjetas con código de color: Summary (violeta), Key points (cian), Decisions (verde), Action items (ámbar), Open questions (rosa), Blockers/Risks (rojo), Next steps (teal).
 
@@ -113,6 +125,7 @@ node build\test-llm.js            # proveedores de notas, contra un servidor fal
 node build\test-keystore.js       # la key no queda legible (con electron usa el llavero real)
 node build\test-live-logic.js     # reglas de confirmación del vivo
 node build\test-meetings.js       # el borrado no puede salirse de la carpeta de reuniones
+node build\test-section-coverage.js  # cada estilo tiene botón y cada sección tiene color
 node build\test-ipc-wiring.js     # todo canal del preload tiene contraparte
 node build\test-bounds.js         # la burbuja nunca sale de la pantalla
 node build\test-engine.js         # arranca el servidor y mide una pasada
@@ -128,10 +141,17 @@ node_modules\electron\dist\electron.exe build\test-keystore.js
 node_modules\electron\dist\electron.exe build\test-llm-ui.js
 node_modules\electron\dist\electron.exe build\test-delete-ui.js
 node_modules\electron\dist\electron.exe build\test-options-ui.js
+node_modules\electron\dist\electron.exe build\test-import.js
 node_modules\electron\dist\electron.exe build\test-memo.js
+node_modules\electron\dist\electron.exe build\test-styles.js
+node_modules\electron\dist\electron.exe build\test-stamps.js
 ```
 
-Los `*-ui.js` arrancan la app de verdad contra carpetas temporales, nunca contra tus reuniones reales. `test-llm-ui.js` guarda una key y comprueba que no aparece ni en `settings.json` ni de vuelta en el renderer; `test-delete-ui.js` verifica que cancelar no borra, que se borra solo la fila elegida y que el aviso enumera lo que se perdería; `test-memo.js` sí gasta una llamada al modelo (~90 s) porque comprueba que el estilo Memo devuelve prosa y no viñetas.
+Los que arrancan la app lo hacen contra carpetas temporales, nunca contra tus reuniones reales. `test-llm-ui.js` guarda una key y comprueba que no aparece ni en `settings.json` ni de vuelta en el renderer; `test-delete-ui.js` verifica que cancelar no borra, que se borra solo la fila elegida y que el aviso enumera lo que se perdería; `test-import.js` importa un `.m4a` y un `.webm` reales y revisa que el WAV resultante sea de verdad reproducible (cabecera, 16 kHz mono, y que no salga en silencio).
+
+`test-memo.js`, `test-styles.js` y `test-stamps.js` sí gastan llamadas al modelo. `test-styles.js` es el chequeo de coherencia: corre **cada** estilo contra la misma transcripción y compara las secciones que devuelve con las que ese estilo pidió — que no invente ninguna, que empiece por la que corresponde, y que la interfaz sepa colorearlas todas. Fue el que descubrió que *Minutes* devolvía las secciones sin marca de tiempo; `test-stamps.js` repite los estilos más propensos varias veces para confirmar que ya no pasa.
+
+Ojo: escriben el avance a un `progress.log` además de a stdout, porque Electron en Windows no vacía su salida hasta que el proceso termina, y una corrida de siete llamadas al modelo tarda unos diez minutos.
 
 ## Notas
 

@@ -496,8 +496,11 @@ ipcMain.handle('import-audio', async (_e, participants) => {
   if (res.canceled || res.filePaths.length === 0) return null;
   const src = res.filePaths[0];
   const folder = newMeetingFolder();
-  const title = path.basename(src, path.extname(src));
-  fs.writeFileSync(path.join(folder, 'title.txt'), title, 'utf8');
+  // A phone voice note is called "recording" or "New Recording 4"; naming the
+  // meeting after that tells you nothing, so those fall through to the same
+  // auto-titling the recorder uses.
+  const title = meaningfulName(path.basename(src, path.extname(src)));
+  if (title) fs.writeFileSync(path.join(folder, 'title.txt'), title, 'utf8');
   writeParticipants(folder, participants);
   // The renderer decodes it — Chromium already ships codecs for every format in
   // that filter list, so mp3/m4a/opus/flac all become the same 16 kHz mono WAV
@@ -514,6 +517,16 @@ ipcMain.handle('legacy-audio', async (_e, folder) => {
     .find(f => /^recording\.(webm|m4a|mp3|ogg|opus|mp4|aac|flac)$/i.test(f));
   return legacy ? path.join(folder, legacy) : null;
 });
+
+const GENERIC_NAMES = /^(new\s+)?(recording|record|audio|voice[\s_-]*(note|memo|recording)?|sound|grabaci[oó]n|nota[\s_-]*de[\s_-]*voz|untitled|new\s+file|whatsapp\s+(audio|ptt).*|audio[\s_-]*\d*|clip)[\s_-]*\d*$/i;
+
+/** A filename worth using as a meeting title, or '' to let the model name it. */
+function meaningfulName(base) {
+  const name = base.replace(/[_-]+/g, ' ').trim();
+  if (!name || GENERIC_NAMES.test(name)) return '';
+  if (/^[\d\s.:_-]+$/.test(name)) return '';          // just a timestamp
+  return base.trim();
+}
 
 ipcMain.handle('import-read', async (_e, src) => {
   const buf = fs.readFileSync(src);
@@ -687,17 +700,23 @@ function buildPrompt(options = {}) {
   const detail = options.detail === 'detailed'
     ? 'Be thorough: capture every topic, nuance, name and number mentioned.'
     : 'Be concise: short bullets, only what matters.';
+  // The rules are a numbered list rather than a paragraph on purpose. When the
+  // timestamp instruction was buried mid-paragraph, styles whose sections
+  // carried their own strong wording (Minutes, whose every section says
+  // "Bullet points of…") came back with no timestamps at all — see
+  // build/test-styles.js, which is what caught it.
   let prompt = `What you receive is a meeting transcript (it may mix English and Spanish and contain transcription errors).
 Write meeting notes in English, in markdown, with exactly these sections:
 
 ${sections}
 
-${detail}
-The transcript is timestamped. End every "## " heading with the timestamp where that topic
-starts, in square brackets and mm:ss form — for example "## Decisions [24:05]". Use the
-timestamp of the first line that belongs to the section, and nothing else in the brackets.
-Write in neutral third person. Do not assume who led, organized, or called the meeting. The person who recorded this is just one of the participants and is NOT necessarily the leader, the main speaker, or the owner of the action items — do not center the notes on them or address the reader as "you". Assign ownership and roles only when the transcript itself makes them clear.
-Do not invent anything that is not in the transcript. Reply only with the markdown notes, no preamble.`;
+Rules, all of which apply regardless of what the section descriptions above say:
+
+1. ${detail}
+2. Write in neutral third person. Do not assume who led, organized, or called the meeting. The person who recorded this is just one of the participants and is NOT necessarily the leader, the main speaker, or the owner of the action items — do not center the notes on them or address the reader as "you". Assign ownership and roles only when the transcript itself makes them clear.
+3. Do not invent anything that is not in the transcript.
+4. Reply only with the markdown notes, no preamble.
+5. The transcript is timestamped. Every single "## " heading must end with the timestamp where that topic starts, in square brackets, mm:ss — for example "## Decisions [24:05]". Use the timestamp of the first transcript line belonging to that section, and put nothing else in the brackets. No heading may be written without its timestamp.`;
   if (options.participants && options.participants.trim()) {
     const people = options.participants.trim().replace(/\n/g, ', ');
     prompt += `\n\nThe participants in this meeting are: ${people}.
@@ -814,6 +833,10 @@ async function notesReady() {
       reason: 'Claude Code was not found. Install it from claude.com/code and sign in, or use an API key instead.'
     };
 }
+
+// What each style actually asks the model for. The UI uses it to stay in step
+// with the prompts instead of duplicating the list of styles.
+ipcMain.handle('style-sections', async () => ({ ...SECTION_SETS }));
 
 ipcMain.handle('check-environment', async () => checkEnvironment());
 
@@ -987,6 +1010,16 @@ ipcMain.handle('load-meeting', async (_e, folder) => {
 
 ipcMain.handle('open-folder', async (_e, folder) => shell.openPath(folder));
 
+// Only the sign-up pages the app itself offers: the renderer does not get to
+// name arbitrary URLs for the OS to open.
+const ALLOWED_LINKS = new Set(llm.providerList().map(p => p.keyUrl).filter(Boolean));
+
+ipcMain.handle('open-external', async (_e, url) => {
+  if (!ALLOWED_LINKS.has(url)) return false;
+  await shell.openExternal(url);
+  return true;
+});
+
 // ---------- reminders / action items ----------
 
 function remindersFile() {
@@ -1111,15 +1144,36 @@ async function pollMeetings() {
   meetingCurrent = hit;
   const label = MEETING_APPS[hit];
   if (win && !win.isDestroyed()) win.webContents.send('meeting-detected', { app: label });
-  if (Notification.isSupported() && (!win || !win.isFocused())) {
-    const n = new Notification({
-      title: 'Meeting detected',
-      body: `Yapper noticed ${label} using your microphone. Open Yapper to take notes.`,
-      silent: true
-    });
-    n.on('click', () => { if (win && !win.isDestroyed()) { win.show(); win.focus(); } });
-    n.show();
-  }
+  notifyMeeting(label);
+}
+
+// A meeting starts while you are looking at Zoom, not at Yapper, so the offer
+// has to come to you. On macOS the notification carries a real button; on
+// Windows the toast has no actions unless the app is installed with a shortcut,
+// so the whole toast is the button and the text says so.
+function notifyMeeting(label) {
+  if (!Notification.isSupported()) return;
+
+  const mac = process.platform === 'darwin';
+  const n = new Notification({
+    title: `${label} meeting started`,
+    body: mac
+      ? `Yapper can take notes on this one.`
+      : `Click to start recording and take notes.`,
+    silent: true,
+    timeoutType: 'default',
+    ...(mac ? { actions: [{ type: 'button', text: 'Start recording' }], closeButtonText: 'Ignore' } : {})
+  });
+
+  const start = () => {
+    if (!win || win.isDestroyed()) return;
+    win.show();
+    win.focus();
+    win.webContents.send('start-recording');   // the renderer owns the audio
+  };
+  n.on('click', start);
+  n.on('action', start);
+  n.show();
 }
 
 function startMeetingWatch() {

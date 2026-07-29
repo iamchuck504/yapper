@@ -102,6 +102,10 @@
           <select id="llm-provider"></select>
           <span id="llm-hint" class="mic-hint"></span>
         </div>
+        <div class="opt-row llm-detail hidden" id="llm-privacy-row">
+          <span class="opt-label"></span>
+          <span id="llm-privacy" class="privacy-note hidden"></span>
+        </div>
         <div class="opt-row llm-detail hidden" id="llm-baseurl-row">
           <span class="opt-label">Endpoint</span>
           <input id="llm-baseurl" class="text-input" type="text" placeholder="https://your-gateway/v1" autocomplete="off" spellcheck="false" />
@@ -109,7 +113,11 @@
         <div class="opt-row llm-detail hidden" id="llm-key-row">
           <span class="opt-label">API key</span>
           <input id="llm-key" class="text-input" type="password" placeholder="" autocomplete="off" spellcheck="false" />
-          <input id="llm-model" class="text-input model-input" type="text" placeholder="model" autocomplete="off" spellcheck="false" />
+          <a id="llm-key-link" class="key-link hidden" href="#">Get a key</a>
+        </div>
+        <div class="opt-row llm-detail hidden" id="llm-model-row">
+          <span class="opt-label">Model</span>
+          <input id="llm-model" class="text-input" type="text" placeholder="model" autocomplete="off" spellcheck="false" />
         </div>
         <div class="opt-row llm-detail hidden" id="llm-test-row">
           <span class="opt-label"></span>
@@ -246,6 +254,7 @@
             <div id="export-menu" class="menu hidden">
               <button data-export="pdf">Notes as PDF</button>
               <button data-export="md">Notes as Markdown</button>
+              <button data-export="transcript-md">Full transcript as Markdown</button>
               <button data-export="txt">Full transcript (.txt)</button>
               <button data-export="both">Notes + transcript (.md)</button>
             </div>

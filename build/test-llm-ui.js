@@ -45,6 +45,40 @@ app.whenReady().then(async () => {
     await $("document.getElementById('llm-key-row').classList.contains('hidden')"),
     'la fila de key está visible');
 
+  // --- the free option someone without a Claude subscription can actually use ---
+  const providers = await $('window.yapper.getLlmSettings().then(s => s.providers)');
+  const free = providers.filter(p => p.free);
+  check('ofrece al menos una opción gratis', free.length >= 1,
+    providers.map(p => p.id).join(', '));
+  check('la opción gratis dice dónde sacar la key',
+    free.every(p => p.keyUrl), free.map(p => `${p.id}:${p.keyUrl}`).join(', '));
+  check('la opción gratis advierte sobre privacidad',
+    free.every(p => p.privacy), free.map(p => `${p.id}:${p.privacy}`).join(', '));
+  check('hay una opción local sin key ni costo',
+    providers.some(p => p.id === 'ollama' && !p.needsKey),
+    providers.map(p => `${p.id}${p.needsKey ? '(key)' : ''}`).join(', '));
+
+  await $(`(() => {
+    const s = document.getElementById('llm-provider');
+    s.value = 'gemini';
+    s.dispatchEvent(new Event('change'));
+  })()`);
+  await new Promise(r => setTimeout(r, 400));
+  check('al elegir la gratis aparece el enlace para sacar la key',
+    !(await $("document.getElementById('llm-key-link').classList.contains('hidden')")),
+    'el enlace no aparece');
+  check('y aparece el aviso de privacidad',
+    !(await $("document.getElementById('llm-privacy-row').classList.contains('hidden')")),
+    'el aviso no aparece');
+  check('el enlace apunta a una URL permitida',
+    (await $("document.getElementById('llm-key-link').dataset.url")).startsWith('https://'),
+    await $("document.getElementById('llm-key-link').dataset.url"));
+  check('sugiere un modelo por defecto',
+    !!(await $("document.getElementById('llm-model').placeholder")), 'sin sugerencia');
+  check('el proceso principal rechaza URLs que no ofrece la app',
+    (await $("window.yapper.openExternal('https://example.com/evil')")) === false,
+    'la abrió');
+
   // switch to OpenRouter and type a key, exactly as a user would
   await $(`(() => {
     const s = document.getElementById('llm-provider');
