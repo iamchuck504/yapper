@@ -1,9 +1,9 @@
-# Actas - one-time setup for a new PC
+# Yapper - one-time setup for a new PC
 # Run from the app folder:  powershell -ExecutionPolicy Bypass -File setup.ps1
 
 $ErrorActionPreference = 'Continue'
 $here = $PSScriptRoot
-Write-Host "=== Actas setup ===" -ForegroundColor Cyan
+Write-Host "=== Yapper setup ===" -ForegroundColor Cyan
 
 # --- 1. Python ---
 $python = Get-Command python -ErrorAction SilentlyContinue
@@ -75,14 +75,14 @@ if (-not $claude -and -not (Test-Path "$env:USERPROFILE\.local\bin\claude.exe"))
 
 # --- 7. Desktop shortcut ---
 $ws = New-Object -ComObject WScript.Shell
-$s = $ws.CreateShortcut("$env:USERPROFILE\Desktop\Actas.lnk")
+$s = $ws.CreateShortcut("$env:USERPROFILE\Desktop\Yapper.lnk")
 $s.TargetPath = "$here\node_modules\electron\dist\electron.exe"
 $s.Arguments = "`"$here`""
 $s.WorkingDirectory = $here
-$s.IconLocation = "$here\build\app.ico,0"
-$s.Description = "Actas - AI meeting notes"
+$s.IconLocation = "$here\build\yapper-icon.ico,0"
+$s.Description = "Yapper - AI meeting notes"
 $s.Save()
 Write-Host "[OK] Desktop shortcut created"
 
 Write-Host ""
-Write-Host "=== Setup complete - launch Actas from the desktop shortcut ===" -ForegroundColor Green
+Write-Host "=== Setup complete - launch Yapper from the desktop shortcut ===" -ForegroundColor Green

@@ -1,5 +1,5 @@
 {
-  "name": "actas",
+  "name": "yapper",
   "version": "0.1.0",
   "description": "Graba reuniones, las transcribe localmente y genera resúmenes con IA",
   "main": "main.js",

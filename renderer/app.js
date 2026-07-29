@@ -43,10 +43,9 @@ let gainMic = numOr(localStorage.getItem('actas-gain-mic'), 1);
 const micStreams = new Map(); // deviceId|'default' -> MediaStream
 const micNodes = new Map();   // deviceId|'default' -> MediaStreamAudioSourceNode
 let analysers = { sys: null, mic: null };
-let segRecorder = null;   // cycled recorder producing ~20s segments for live preview
-let segTimeout = null;
 let liveActive = false;
-const LIVE_SEGMENT_MS = 20000;
+let liveParagraphs = []; // stable text, split into paragraphs on long pauses
+let liveTentative = '';  // unstable tail, still being refined
 let timerInterval = null;
 let levelRaf = null;
 let currentFolder = null;
@@ -73,6 +72,8 @@ let theme = localStorage.getItem('actas-theme') || 'dark';
 
 function applyTheme() {
   document.body.classList.toggle('light', theme === 'light');
+  window.actas.bubbleState({ theme });   // keep the floating bubble in sync
+  window.actas.setTheme(theme);          // so the next launch paints the right bg
 }
 
 btnTheme.addEventListener('click', () => {
@@ -120,6 +121,57 @@ document.querySelectorAll('#noise-seg .seg-btn').forEach(b =>
   b.addEventListener('click', () => { setNoiseReduction(b.dataset.noise); syncOptionControls(); }));
 customInput.addEventListener('change', saveOptions);
 participantsRec.addEventListener('change', saveOptions);
+
+// ---------- live behaviour toggles (persisted) ----------
+
+const bubbleToggle = $('opt-bubble');
+const autoDetectToggle = $('opt-autodetect');
+const startupToggle = $('opt-startup');
+let bubbleEnabled = localStorage.getItem('actas-bubble') !== 'off';
+let autoDetectEnabled = localStorage.getItem('actas-autodetect') !== 'off';   // on by default
+
+bubbleToggle.checked = bubbleEnabled;
+autoDetectToggle.checked = autoDetectEnabled;
+window.actas.setAutoDetect(autoDetectEnabled);
+
+// "start with Windows" lives in the main process (it writes the login item)
+window.actas.getOpenAtLogin().then(on => { startupToggle.checked = on; });
+startupToggle.addEventListener('change', () => {
+  window.actas.setOpenAtLogin(startupToggle.checked);
+});
+
+bubbleToggle.addEventListener('change', () => {
+  bubbleEnabled = bubbleToggle.checked;
+  localStorage.setItem('actas-bubble', bubbleEnabled ? 'on' : 'off');
+  if (!bubbleEnabled) window.actas.bubbleHide();
+  else if (liveActive) window.actas.bubbleShow();
+});
+
+autoDetectToggle.addEventListener('change', () => {
+  autoDetectEnabled = autoDetectToggle.checked;
+  localStorage.setItem('actas-autodetect', autoDetectEnabled ? 'on' : 'off');
+  window.actas.setAutoDetect(autoDetectEnabled);
+});
+
+// ---------- meeting detection prompt ----------
+
+const meetingPrompt = $('meeting-prompt');
+
+window.actas.onMeetingDetected(info => {
+  if (recorder && recorder.state !== 'inactive') return;
+  $('mp-app').textContent = `${info.app} is using your microphone.`;
+  meetingPrompt.classList.remove('hidden');
+  showView('record');
+});
+
+$('mp-start').addEventListener('click', () => {
+  meetingPrompt.classList.add('hidden');
+  startRecording();
+});
+$('mp-dismiss').addEventListener('click', () => meetingPrompt.classList.add('hidden'));
+
+// stop requested from the floating bubble
+window.actas.onRemoteStop(() => stopAndProcess());
 regenStyle.addEventListener('change', () => { options.style = regenStyle.value; saveOptions(); syncOptionControls(); });
 regenDetail.addEventListener('change', () => { options.detail = regenDetail.value; saveOptions(); syncOptionControls(); });
 
@@ -405,61 +457,155 @@ navigator.mediaDevices.addEventListener('devicechange', async () => {
   }
 });
 
-// ---------- semi-live preview ----------
+// ---------- live streaming preview ----------
+// Streams raw PCM to the worker continuously so the transcript trails speech by
+// ~1-2 s, instead of waiting for whole blocks to finish.
+
+const LIVE_RATE = 16000;
+let pcmNode = null;
+let pcmSink = null;
+let pcmTapGain = null;
+let pcmPending = [];
+let pcmPendingLen = 0;
+
+// 48k -> 16k. Integer ratios average (crude but real anti-aliasing); otherwise
+// fall back to linear interpolation.
+function downsampleToInt16(input, srcRate) {
+  const ratio = srcRate / LIVE_RATE;
+  const outLen = Math.floor(input.length / ratio);
+  const out = new Int16Array(outLen);
+  const clamp = s => Math.max(-32768, Math.min(32767, Math.round(s * 32767)));
+  if (Number.isInteger(ratio)) {
+    for (let i = 0; i < outLen; i++) {
+      let sum = 0;
+      for (let j = 0; j < ratio; j++) sum += input[i * ratio + j];
+      out[i] = clamp(sum / ratio);
+    }
+  } else {
+    for (let i = 0; i < outLen; i++) {
+      const pos = i * ratio;
+      const i0 = Math.floor(pos);
+      const frac = pos - i0;
+      out[i] = clamp(input[i0] * (1 - frac) + (input[i0 + 1] || 0) * frac);
+    }
+  }
+  return out;
+}
+
+function pushPcm(float32) {
+  if (!liveActive) return;
+  pcmPending.push(downsampleToInt16(float32, audioCtx.sampleRate));
+  pcmPendingLen += pcmPending[pcmPending.length - 1].length;
+  if (pcmPendingLen < LIVE_RATE / 5) return;   // batch ~200 ms per IPC message
+  const merged = new Int16Array(pcmPendingLen);
+  let o = 0;
+  for (const p of pcmPending) { merged.set(p, o); o += p.length; }
+  pcmPending = [];
+  pcmPendingLen = 0;
+  window.actas.livePcm(merged.buffer);
+}
 
 async function startLivePreview() {
+  if (!audioCtx || !micBus) return;
   try {
     if (!(await window.actas.liveStart(options.participants))) return;
   } catch {
-    return; // preview is best-effort; final transcript is unaffected
+    return; // preview is best-effort; the final transcript is unaffected
   }
-  liveTranscriptEl.textContent = '';
+
+  liveParagraphs = [];
+  liveTentative = '';
+  renderLiveTranscript();
   liveWrap.classList.remove('hidden');
   liveActive = true;
-  cycleSegment();
-}
 
-function cycleSegment() {
-  if (!liveActive || !dest) return;
-  const segChunks = [];
+  // Tap the same mix that gets recorded (post gain + noise filter).
+  pcmTapGain = audioCtx.createGain();
+  micLP.connect(pcmTapGain);
+  if (sysGainNode) sysGainNode.connect(pcmTapGain);
+
   try {
-    segRecorder = new MediaRecorder(dest.stream, { mimeType: 'audio/webm;codecs=opus' });
+    await audioCtx.audioWorklet.addModule('pcm-worklet.js');
+    pcmNode = new AudioWorkletNode(audioCtx, 'pcm-tap');
+    pcmNode.port.onmessage = e => pushPcm(e.data);
   } catch {
-    return;
+    // Older path: works everywhere, just runs on the main thread.
+    pcmNode = audioCtx.createScriptProcessor(4096, 1, 1);
+    pcmNode.onaudioprocess = e => pushPcm(e.inputBuffer.getChannelData(0));
   }
-  segRecorder.ondataavailable = e => { if (e.data.size) segChunks.push(e.data); };
-  segRecorder.onstop = async () => {
-    const blob = new Blob(segChunks, { type: 'audio/webm' });
-    if (blob.size > 3000) {
-      try { await window.actas.liveChunk(await blob.arrayBuffer()); } catch { /* worker gone */ }
-    }
-    if (liveActive && dest) cycleSegment();
-  };
-  segRecorder.start();
-  segTimeout = setTimeout(() => {
-    if (segRecorder && segRecorder.state !== 'inactive') segRecorder.stop();
-  }, LIVE_SEGMENT_MS);
+  pcmTapGain.connect(pcmNode);
+  // The graph is only pulled when it reaches the destination; keep it silent.
+  pcmSink = audioCtx.createGain();
+  pcmSink.gain.value = 0;
+  pcmNode.connect(pcmSink);
+  pcmSink.connect(audioCtx.destination);
 }
 
 async function stopLivePreview() {
   liveActive = false;
-  if (segTimeout) { clearTimeout(segTimeout); segTimeout = null; }
-  if (segRecorder && segRecorder.state !== 'inactive') {
-    try { segRecorder.stop(); } catch { /* already stopped */ }
+  for (const node of [pcmNode, pcmSink, pcmTapGain]) {
+    if (node) { try { node.disconnect(); } catch { /* already gone */ } }
   }
-  segRecorder = null;
+  if (pcmNode) {
+    pcmNode.onaudioprocess = null;
+    if (pcmNode.port) pcmNode.port.onmessage = null;
+  }
+  pcmNode = pcmSink = pcmTapGain = null;
+  pcmPending = [];
+  pcmPendingLen = 0;
   liveWrap.classList.add('hidden');
   try { await window.actas.liveStop(); } catch { /* ignore */ }
+}
+
+function renderLiveTranscript() {
+  const stick = liveTranscriptEl.scrollHeight - liveTranscriptEl.scrollTop
+    - liveTranscriptEl.clientHeight < 40;
+  liveTranscriptEl.innerHTML = '';
+  if (!liveParagraphs.length && !liveTentative) return;   // stays :empty so the hint shows
+
+  liveParagraphs.forEach((para, i) => {
+    const p = document.createElement('p');
+    p.className = 'live-para';
+    p.textContent = para;
+    if (i === liveParagraphs.length - 1 && liveTentative) {
+      const draft = document.createElement('span');
+      draft.className = 'live-tentative';
+      draft.textContent = (para ? ' ' : '') + liveTentative;
+      p.appendChild(draft);
+    }
+    liveTranscriptEl.appendChild(p);
+  });
+
+  if (!liveParagraphs.length && liveTentative) {
+    const p = document.createElement('p');
+    p.className = 'live-para';
+    const draft = document.createElement('span');
+    draft.className = 'live-tentative';
+    draft.textContent = liveTentative;
+    p.appendChild(draft);
+    liveTranscriptEl.appendChild(p);
+  }
+  if (stick) liveTranscriptEl.scrollTop = liveTranscriptEl.scrollHeight;
 }
 
 window.actas.onLiveTranscript(line => {
   let msg;
   try { msg = JSON.parse(line); } catch { return; }
-  if (msg.text) {
-    liveTranscriptEl.textContent += (liveTranscriptEl.textContent ? ' ' : '') + msg.text;
-    liveTranscriptEl.scrollTop = liveTranscriptEl.scrollHeight;
+  if (msg.status || msg.error) return;
+  if (msg.commit) {
+    if (msg.gap || !liveParagraphs.length) liveParagraphs.push(msg.commit);
+    else liveParagraphs[liveParagraphs.length - 1] += ' ' + msg.commit;
   }
+  liveTentative = msg.tentative || '';
+  renderLiveTranscript();
 });
+
+// collapse / expand the in-app live transcript
+$('live-head').addEventListener('click', () => {
+  const collapsed = liveWrap.classList.toggle('collapsed');
+  localStorage.setItem('actas-live-collapsed', collapsed ? 'yes' : 'no');
+});
+if (localStorage.getItem('actas-live-collapsed') === 'yes') liveWrap.classList.add('collapsed');
 
 // ---------- waveform visualizer ----------
 
@@ -568,13 +714,21 @@ async function startRecording() {
       setStatus(statusEl, 'Warning: no microphone could be captured; only system audio is being recorded.');
     }
 
+    window.actas.setRecordingState(true);
+    if (bubbleEnabled) {
+      await window.actas.bubbleShow();
+      window.actas.bubbleState({ theme });
+    }
+
     const t0 = Date.now();
     timerInterval = setInterval(() => {
       const s = Math.floor((Date.now() - t0) / 1000);
       const p = n => String(n).padStart(2, '0');
-      timerEl.textContent = s >= 3600
+      const text = s >= 3600
         ? `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`
         : `${p(Math.floor(s / 60))}:${p(s % 60)}`;
+      timerEl.textContent = text;
+      window.actas.bubbleState({ timer: text });
     }, 500);
   } catch (err) {
     cleanupCapture();
@@ -587,6 +741,8 @@ function cleanupCapture() {
   if (levelRaf) cancelAnimationFrame(levelRaf);
   timerInterval = null;
   levelRaf = null;
+  window.actas.setRecordingState(false);
+  window.actas.bubbleHide();
   for (const key of [...micNodes.keys()]) dropMic(key);
   if (sysStream) { sysStream.getTracks().forEach(t => t.stop()); sysStream = null; }
   if (audioCtx) { audioCtx.close(); audioCtx = null; }
@@ -633,9 +789,16 @@ async function stopAndProcess() {
     const summary = await window.actas.summarize(folder, transcript, options);
     setStep('notes', 'done');
 
+    // No title typed? Name the meeting after what was actually discussed.
+    let title = titleInput.value.trim();
+    if (!title) {
+      setStatus(statusEl, 'Naming the meeting…');
+      title = await window.actas.generateTitle(folder);
+    }
+
     statusEl.classList.add('hidden');
     pipelineEl.classList.add('hidden');
-    openMeetingView(titleInput.value.trim() || formatMeetingDate(folder.split(/[\\/]/).pop()), summary, transcript);
+    openMeetingView(title || formatMeetingDate(folder.split(/[\\/]/).pop()), summary, transcript);
     titleInput.value = '';
     await refreshMeetingList();
   } catch (err) {
@@ -954,10 +1117,11 @@ $('btn-save-notes').addEventListener('click', async () => {
   }
 });
 
+// print palette: the light-theme section colours (readable on paper)
 const SECTION_PDF_COLORS = {
-  'sec-summary': '#6356d6', 'sec-key': '#1d8cad', 'sec-decision': '#2c8f54',
-  'sec-action': '#aa7012', 'sec-question': '#b94570', 'sec-risk': '#bb373d',
-  'sec-next': '#1d8579', 'sec-neutral': '#7c8294'
+  'sec-summary': '#5B6E64', 'sec-key': '#4F6879', 'sec-decision': '#5E7345',
+  'sec-action': '#91713A', 'sec-question': '#85606E', 'sec-risk': '#9A5340',
+  'sec-next': '#5F5A75', 'sec-neutral': '#7C7C66'
 };
 
 function buildPdfHtml(title) {
@@ -977,37 +1141,96 @@ function buildPdfHtml(title) {
     body += `<div class="card" style="border-color:${color}">${headHtml}${clone.innerHTML}</div>`;
   }
   const css = `
+    @font-face { font-family: 'Geist'; src: url('fonts/Geist-latin.woff2') format('woff2'); font-weight: 400; }
+    @font-face { font-family: 'Geist'; src: url('fonts/Geist-latin.woff2') format('woff2'); font-weight: 600; }
+    @font-face { font-family: 'Geist'; src: url('fonts/Geist-latin.woff2') format('woff2'); font-weight: 700; }
     * { box-sizing: border-box; }
-    body { font-family: "Segoe UI", system-ui, sans-serif; color: #1c1f27; margin: 0; }
-    h1 { font-size: 20px; margin: 0 0 4px; }
-    .date { color: #646b7d; font-size: 12px; margin-bottom: 18px; }
-    .card { border-left: 4px solid #999; background: #fafbfc; border-radius: 6px;
+    body { font-family: 'Geist', system-ui, sans-serif; color: #3E3F29; margin: 0; font-size: 11pt; }
+    h1 { font-size: 18pt; margin: 0 0 4px; font-weight: 600; letter-spacing: -0.2px; }
+    .date { color: #8A8B71; font-size: 9.5pt; margin-bottom: 18px; }
+    .card { border-left: 3px solid #7C7C66; background: #F7F6EC; border-radius: 4px;
             padding: 12px 16px; margin-bottom: 12px; page-break-inside: avoid; }
-    .h { font-size: 12px; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; margin-bottom: 6px; }
+    .h { font-size: 9pt; font-weight: 700; letter-spacing: 0.7px; text-transform: uppercase; margin-bottom: 6px; }
     ul { padding-left: 20px; margin: 4px 0; } li { margin-bottom: 4px; line-height: 1.5; }
-    p { margin: 4px 0; line-height: 1.55; } strong { color: #000; }
-    h3 { font-size: 13px; margin: 8px 0 4px; }
-    .foot { margin-top: 22px; color: #9aa0b0; font-size: 10px; border-top: 1px solid #e3e6ec; padding-top: 8px; }`;
+    p { margin: 4px 0; line-height: 1.55; } strong { color: #3E3F29; font-weight: 600; }
+    h3 { font-size: 11pt; margin: 8px 0 4px; }
+    .foot { margin-top: 22px; color: #A3A48C; font-size: 8pt; border-top: 1px solid #D3CFB9; padding-top: 8px; }`;
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css}</style></head>` +
     `<body><h1>${escapeHtml(title)}</h1><div class="date">${escapeHtml(resultDateStr)}</div>` +
-    `${body}<div class="foot">Generated with Actas</div></body></html>`;
+    `${body}<div class="foot">Generated with Yapper</div></body></html>`;
 }
 
-const btnPdf = $('btn-pdf');
-btnPdf.addEventListener('click', async () => {
-  if (!currentNotesMd) return;
-  btnPdf.disabled = true;
+// ---------- export menu ----------
+
+const btnExport = $('btn-export');
+const exportMenu = $('export-menu');
+
+function closeExportMenu() { exportMenu.classList.add('hidden'); }
+
+btnExport.addEventListener('click', e => {
+  e.stopPropagation();
+  exportMenu.classList.toggle('hidden');
+});
+document.addEventListener('click', closeExportMenu);
+exportMenu.addEventListener('click', e => e.stopPropagation());
+
+function exportHeader() {
+  const title = resultTitle.textContent || 'Meeting';
+  return `# ${title}\n\n_${resultDateStr}_\n`;
+}
+
+async function runExport(kind) {
+  closeExportMenu();
+  const title = resultTitle.textContent || 'Meeting';
+  const transcript = transcriptEl.textContent || '';
+  const hasTranscript = transcript && transcript !== '(no transcript)';
+
   try {
-    const saved = await window.actas.exportPdf(buildPdfHtml(resultTitle.textContent), resultTitle.textContent);
-    if (saved) {
-      btnPdf.textContent = 'Saved';
-      setTimeout(() => { btnPdf.textContent = 'Export PDF'; }, 1500);
+    if (kind === 'pdf') {
+      if (!currentNotesMd) throw new Error('This meeting has no notes yet.');
+      return await window.actas.exportPdf(buildPdfHtml(title), title);
+    }
+    if (kind === 'md') {
+      if (!currentNotesMd) throw new Error('This meeting has no notes yet.');
+      return await window.actas.saveTextFile({
+        defaultName: title, extension: 'md', description: 'Markdown',
+        content: `${exportHeader()}\n${currentNotesMd}\n`
+      });
+    }
+    if (kind === 'txt') {
+      if (!hasTranscript) throw new Error('This meeting has no transcript.');
+      return await window.actas.saveTextFile({
+        defaultName: `${title} - transcript`, extension: 'txt', description: 'Text',
+        content: `${title}\n${resultDateStr}\n\n${transcript}\n`
+      });
+    }
+    if (kind === 'both') {
+      if (!currentNotesMd && !hasTranscript) throw new Error('Nothing to export yet.');
+      const parts = [exportHeader()];
+      if (currentNotesMd) parts.push('\n' + currentNotesMd + '\n');
+      if (hasTranscript) parts.push('\n---\n\n## Full transcript\n\n```\n' + transcript + '\n```\n');
+      return await window.actas.saveTextFile({
+        defaultName: `${title} - full`, extension: 'md', description: 'Markdown',
+        content: parts.join('')
+      });
     }
   } catch (err) {
-    setStatus(regenStatusEl, `PDF export failed: ${err.message}`, true);
-  } finally {
-    btnPdf.disabled = false;
+    setStatus(regenStatusEl, `Export failed: ${err.message}`, true);
+    return null;
   }
+}
+
+exportMenu.querySelectorAll('button').forEach(b => {
+  b.addEventListener('click', async () => {
+    btnExport.disabled = true;
+    const saved = await runExport(b.dataset.export);
+    btnExport.disabled = false;
+    if (saved) {
+      const label = btnExport.childNodes[0];
+      label.nodeValue = ' Saved ';
+      setTimeout(() => { label.nodeValue = ' Export '; }, 1500);
+    }
+  });
 });
 
 btnOpenFolder.addEventListener('click', () => {
