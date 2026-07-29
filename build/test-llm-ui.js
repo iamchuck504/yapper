@@ -4,6 +4,7 @@
 const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
+const { mainWindow } = require('./harness');
 
 const USER_DATA = path.join(app.getPath('temp'), 'yapper-llm-ui-test');
 app.setPath('userData', USER_DATA);
@@ -21,15 +22,7 @@ require('../main.js');
 const KEY = 'sk-or-test-abcdef0123456789';
 
 app.whenReady().then(async () => {
-  const win = await new Promise(resolve => {
-    const tick = setInterval(() => {
-      const w = require('electron').BrowserWindow.getAllWindows()
-        .find(x => x.webContents.getURL().includes('index.html'));
-      if (w) { clearInterval(tick); resolve(w); }
-    }, 200);
-  });
-  await new Promise(r => win.webContents.once('did-finish-load', r));
-  await new Promise(r => setTimeout(r, 1500));   // let the settings load
+  const win = await mainWindow();   // let the settings load
 
   const $ = js => win.webContents.executeJavaScript(js);
 

@@ -5,6 +5,7 @@
 const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
+const { mainWindow } = require('./harness');
 
 const REAL_MEETINGS = path.join(process.env.USERPROFILE, 'Documents', 'Meetings');
 const BASE = path.join(app.getPath('temp'), 'yapper-stamps-test');
@@ -43,15 +44,7 @@ let fails = 0;
 require('../main.js');
 
 app.whenReady().then(async () => {
-  const { BrowserWindow } = require('electron');
-  const win = await new Promise(resolve => {
-    const tick = setInterval(() => {
-      const w = BrowserWindow.getAllWindows().find(x => x.webContents.getURL().includes('index.html'));
-      if (w) { clearInterval(tick); resolve(w); }
-    }, 200);
-  });
-  await new Promise(r => win.webContents.once('did-finish-load', r));
-  await new Promise(r => setTimeout(r, 800));
+  const win = await mainWindow();
   const $ = js => win.webContents.executeJavaScript(js);
 
   say(`${STYLES.join(', ')} × ${ROUNDS} rondas\n`);

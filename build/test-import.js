@@ -5,6 +5,7 @@
 const path = require('path');
 const fs = require('fs');
 const { app, dialog } = require('electron');
+const { mainWindow } = require('./harness');
 
 const REAL = path.join(process.env.USERPROFILE, 'Documents', 'Meetings');
 const ROOT = path.join(app.getPath('temp'), 'yapper-import-test');
@@ -36,15 +37,7 @@ const engine = require('../engine');
 require('../main.js');
 
 app.whenReady().then(async () => {
-  const { BrowserWindow } = require('electron');
-  const win = await new Promise(resolve => {
-    const tick = setInterval(() => {
-      const w = BrowserWindow.getAllWindows().find(x => x.webContents.getURL().includes('index.html'));
-      if (w) { clearInterval(tick); resolve(w); }
-    }, 200);
-  });
-  await new Promise(r => win.webContents.once('did-finish-load', r));
-  await new Promise(r => setTimeout(r, 1200));
+  const win = await mainWindow();
   const $ = js => win.webContents.executeJavaScript(js);
 
   for (const ext of ['m4a', 'webm']) {
@@ -114,8 +107,13 @@ app.whenReady().then(async () => {
       console.log(`      "${text.slice(0, 120).replace(/\n/g, ' ')}"`);
     }
 
+    // The file is called "recording", which names nothing, so the meeting must
+    // NOT be called that — it gets a title from what was said, or falls back to
+    // its date.
     const title = await $(`document.getElementById('result-title').textContent`);
-    check(`.${ext}: usa el nombre del archivo como título`, title === 'recording', title);
+    check(`.${ext}: no se queda con el nombre genérico del archivo`,
+      title !== 'recording' && title.trim().length > 3, `título: "${title}"`);
+    console.log(`      título: "${title}"`);
 
     await $(`document.getElementById('btn-new').click()`);
     await new Promise(r => setTimeout(r, 300));
