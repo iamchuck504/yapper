@@ -884,7 +884,25 @@ $('ep-stop').addEventListener('click', () => { clearEndedPrompt(); stopAndProces
 
 // ---------- recording ----------
 
+/**
+ * Put everything back after a start that failed halfway. Without this, a throw
+ * anywhere past `recording = true` leaves the flag set: the record button comes
+ * back, but its guard sees a recording already running and refuses to start
+ * one, so the app looks fine and simply never records again.
+ */
+async function abortRecording(err) {
+  recording = false;
+  try { await stopLivePreview(); } catch { /* it may never have started */ }
+  stopPcmTap();
+  cleanupCapture();          // also tells main the recording is over
+  // close the file, so whatever was captured before the failure still plays
+  try { await window.yapper.recordingFinish('', []); } catch { /* nothing open */ }
+  currentFolder = null;
+  setStatus(statusEl, `Could not start recording: ${err.message}`, true);
+}
+
 async function startRecording() {
+  if (recording) return;
   try {
     // main.js answers this with Windows system-audio loopback (video must be requested even if unused)
     const sys = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
@@ -965,7 +983,6 @@ async function startRecording() {
       window.yapper.bubbleState({ theme });
     }
 
-    paused = false;
     markers = [];
     elapsedMs = 0;
     runStart = Date.now();
@@ -979,8 +996,7 @@ async function startRecording() {
       window.yapper.bubbleState({ timer: text });
     }, 500);
   } catch (err) {
-    cleanupCapture();
-    setStatus(statusEl, `Could not start recording: ${err.message}`, true);
+    await abortRecording(err);
   }
 }
 
@@ -1170,7 +1186,11 @@ function renderMeetingList() {
     body.className = 'm-body';
     const title = document.createElement('span');
     title.className = 'm-title';
-    title.textContent = m.title || (empty ? 'Empty recording' : 'Meeting');
+    // "Meeting" told you nothing, and a list of meetings all called Meeting told
+    // you less. Naming can legitimately come back empty — a recording too
+    // unintelligible to title — and that is worth saying plainly.
+    title.textContent = m.title || (empty ? 'Empty recording' : 'Untitled meeting');
+    if (!m.title) title.classList.add('untitled');
     const date = document.createElement('span');
     date.className = 'm-date';
     date.textContent = formatMeetingDate(m.name);

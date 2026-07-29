@@ -4,6 +4,7 @@
 const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
+const { mainWindow } = require('./harness');
 
 const REAL_MEETINGS = path.join(process.env.USERPROFILE, 'Documents', 'Meetings');
 const ROOT = path.join(app.getPath('temp'), 'yapper-memo-test');
@@ -39,15 +40,7 @@ function check(name, ok, detail) {
 require('../main.js');
 
 app.whenReady().then(async () => {
-  const { BrowserWindow } = require('electron');
-  const win = await new Promise(resolve => {
-    const tick = setInterval(() => {
-      const w = BrowserWindow.getAllWindows().find(x => x.webContents.getURL().includes('index.html'));
-      if (w) { clearInterval(tick); resolve(w); }
-    }, 200);
-  });
-  await new Promise(r => win.webContents.once('did-finish-load', r));
-  await new Promise(r => setTimeout(r, 1000));
+  const win = await mainWindow();
 
   console.log(`transcripción: ${src.p} (${(src.size / 1024).toFixed(0)} KB)\ngenerando…\n`);
   const t0 = Date.now();

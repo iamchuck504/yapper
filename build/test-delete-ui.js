@@ -5,6 +5,7 @@
 const path = require('path');
 const fs = require('fs');
 const { app, dialog } = require('electron');
+const { mainWindow } = require('./harness');
 
 const ROOT = path.join(app.getPath('temp'), 'yapper-delete-test');
 fs.rmSync(ROOT, { recursive: true, force: true });
@@ -43,15 +44,7 @@ dialog.showMessageBox = async (_win, opts) => {
 require('../main.js');
 
 app.whenReady().then(async () => {
-  const { BrowserWindow } = require('electron');
-  const win = await new Promise(resolve => {
-    const tick = setInterval(() => {
-      const w = BrowserWindow.getAllWindows().find(x => x.webContents.getURL().includes('index.html'));
-      if (w) { clearInterval(tick); resolve(w); }
-    }, 200);
-  });
-  await new Promise(r => win.webContents.once('did-finish-load', r));
-  await new Promise(r => setTimeout(r, 1200));
+  const win = await mainWindow();
 
   const $ = js => win.webContents.executeJavaScript(js);
   const rows = () => $(`[...document.querySelectorAll('#meeting-list .m-item')].map(li => ({

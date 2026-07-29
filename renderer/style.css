@@ -319,6 +319,8 @@ body, #sidebar, .options-card, .note-card, #status, #regen-status,
 
 /* a false start: the row is dimmed so it reads as something to clear out */
 .m-item.m-void .m-title { color: var(--text-3); font-style: italic; font-weight: 400; }
+/* named by nobody: still a real meeting, just quieter in the list */
+.m-title.untitled { color: var(--text-2); font-style: italic; font-weight: 400; }
 
 /* Delete stays out of the way until the row is pointed at — a destructive
    control sitting permanently next to every meeting invites the wrong click. */

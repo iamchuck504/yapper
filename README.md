@@ -157,6 +157,9 @@ node build\tune-live.js           # replay de audio real comparando configuracio
 Los que abren ventana van con Electron:
 
 ```
+node_modules\electron\dist\electron.exe build\test-record-cycle.js
+node_modules\electron\dist\electron.exe build\test-record-recovery.js
+node_modules\electron\dist\electron.exe build\test-smoke.js
 node_modules\electron\dist\electron.exe build\icon-verify.js
 node_modules\electron\dist\electron.exe build\test-splash-mark.js
 node_modules\electron\dist\electron.exe build\test-bubble-fit.js
@@ -170,7 +173,11 @@ node_modules\electron\dist\electron.exe build\test-styles.js
 node_modules\electron\dist\electron.exe build\test-stamps.js
 ```
 
-Los que arrancan la app lo hacen contra carpetas temporales, nunca contra tus reuniones reales. `test-llm-ui.js` guarda una key y comprueba que no aparece ni en `settings.json` ni de vuelta en el renderer; `test-delete-ui.js` verifica que cancelar no borra, que se borra solo la fila elegida y que el aviso enumera lo que se perdería; `test-import.js` importa un `.m4a` y un `.webm` reales y revisa que el WAV resultante sea de verdad reproducible (cabecera, 16 kHz mono, y que no salga en silencio).
+`test-record-cycle.js` es el ciclo completo de grabar: mete audio real por el mismo IPC que usa el micrófono, pausa a mitad para comprobar que en pausa **no se escribe nada**, y al parar verifica el WAV cerrado, la transcripción, las notas, el marcador y cómo queda en la barra lateral. Lo único que no cubre es el grafo de Web Audio, que necesita micrófono y una persona.
+
+`test-record-recovery.js` fuerza los dos fallos que van a pasar en la máquina de un compañero (captura denegada, y el dispositivo desapareciendo a mitad de arranque) y comprueba que la app se recupera. `test-smoke.js` recorre toda la interfaz escuchando errores del renderer, que de otro modo no se ven: un botón simplemente deja de funcionar.
+
+Los que arrancan la app lo hacen contra carpetas temporales, nunca contra tus reuniones reales. Comparten `build/harness.js`, que resuelve una carrera que tenían todos: esperar `did-finish-load` **después** de encontrar la ventana cuelga la prueba para siempre si la página ya había cargado. `test-llm-ui.js` guarda una key y comprueba que no aparece ni en `settings.json` ni de vuelta en el renderer; `test-delete-ui.js` verifica que cancelar no borra, que se borra solo la fila elegida y que el aviso enumera lo que se perdería; `test-import.js` importa un `.m4a` y un `.webm` reales y revisa que el WAV resultante sea de verdad reproducible (cabecera, 16 kHz mono, y que no salga en silencio).
 
 `test-memo.js`, `test-styles.js` y `test-stamps.js` sí gastan llamadas al modelo. `test-styles.js` es el chequeo de coherencia: corre **cada** estilo contra la misma transcripción y compara las secciones que devuelve con las que ese estilo pidió — que no invente ninguna, que empiece por la que corresponde, y que la interfaz sepa colorearlas todas. Fue el que descubrió que *Minutes* devolvía las secciones sin marca de tiempo; `test-stamps.js` repite los estilos más propensos varias veces para confirmar que ya no pasa.
 
