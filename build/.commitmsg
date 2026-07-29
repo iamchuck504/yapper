@@ -1,0 +1,19 @@
+Size the collapsed bubble to its contents instead of guessing
+
+The collapsed pill was pinned to a hardcoded 266 px, which is 18 px narrower
+than the row of controls actually needs, so the Stop button was clipped by the
+edge of the card. The number could only ever have been right for one state:
+"Pause" becoming "Resume" needs 296, and a meeting past the hour mark grows the
+timer to 01:23:45 and needs 318.
+
+The renderer now measures the header - children, gaps, padding, card margin and
+border - and asks for exactly that, re-fitting whenever the pause label or the
+timer changes width, and once more after Geist finishes loading, since
+measuring against the fallback font's metrics is another way to come up short.
+Header items no longer shrink, so a squeezed button cannot make the measurement
+lie about what fits.
+
+build/test-bubble-fit.js opens the real bubble window and checks in all three
+states that the row fits its header and that Stop lands inside the card.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>

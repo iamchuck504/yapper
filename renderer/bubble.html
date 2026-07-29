@@ -77,6 +77,10 @@
       flex-shrink: 0;
     }
     body.collapsed header { border-bottom: none; }
+    /* Nothing in the header may shrink: collapsed, the window is sized to fit
+       this row exactly, and a button that squeezes instead of keeping its width
+       would make that measurement lie. */
+    header > *:not(.spacer) { flex-shrink: 0; }
 
     /* level indicator — not a literal REC dot, just quiet motion */
     .eq {
