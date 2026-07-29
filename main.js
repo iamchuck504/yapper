@@ -143,13 +143,18 @@ function createWindow() {
     show: false,              // revealed by the splash hand-off
     autoHideMenuBar: true,
     title: 'Yapper',
-    icon: path.join(__dirname, 'build', 'yapper-icon.ico'),
+    icon: appIconPath(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false
     }
   });
+
+  // Belt and braces for the taskbar: running unpackaged, the process is
+  // electron.exe, and Windows will happily show its icon for the button unless
+  // the window says otherwise.
+  try { win.setIcon(appIconPath()); } catch { /* the constructor already tried */ }
 
   // Loopback de Windows: entrega el audio del sistema cuando el renderer pide getDisplayMedia
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
@@ -196,6 +201,48 @@ function initOpenAtLogin() {
 }
 
 ipcMain.handle('get-open-at-login', async () => readSettings().openAtLogin !== false);
+
+// ---------- keep the shortcuts showing the current icon ----------
+// A .lnk stores its own copy of the icon path, so changing the app's icon does
+// nothing to the desktop or the taskbar until the shortcut is rewritten — and
+// nobody re-runs setup.ps1 after an update. The app fixes its own shortcuts
+// instead, and only when they are actually out of date.
+
+const APP_ID = 'com.yapper.meetingnotes';
+
+function appIconPath() {
+  return path.join(__dirname, 'build', 'yapper-icon.ico');
+}
+
+function refreshShortcutIcons() {
+  if (process.platform !== 'win32') return;
+  const icon = appIconPath();
+  if (!fs.existsSync(icon)) return;
+
+  const appData = app.getPath('appData');
+  const links = [
+    path.join(app.getPath('desktop'), 'Yapper.lnk'),
+    // a pinned taskbar button is its own shortcut, kept here by Explorer
+    path.join(appData, 'Microsoft', 'Internet Explorer', 'Quick Launch',
+      'User Pinned', 'TaskBar', 'Yapper.lnk'),
+    path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Yapper.lnk')
+  ];
+
+  for (const lnk of links) {
+    if (!fs.existsSync(lnk)) continue;
+    try {
+      const cur = shell.readShortcutLink(lnk);
+      // The app id has to match what setAppUserModelId says, or Windows treats
+      // the running window and the pinned button as two different apps and the
+      // taskbar keeps showing its own guess of the icon.
+      if (cur.icon === icon && cur.iconIndex === 0 && cur.appUserModelId === APP_ID) continue;
+      shell.writeShortcutLink(lnk, 'update', { icon, iconIndex: 0, appUserModelId: APP_ID });
+      console.log(`[icon] updated ${path.basename(path.dirname(lnk))}\\${path.basename(lnk)}`);
+    } catch (err) {
+      console.log(`[icon] could not update ${lnk}: ${err.message}`);
+    }
+  }
+}
 
 // ---------- note provider (bring your own key) ----------
 // The key is encrypted with the OS keystore (DPAPI on Windows, Keychain on
@@ -312,7 +359,7 @@ async function bootWithSplash() {
       alwaysOnTop: true,
       show: false,
       title: 'Yapper',
-      icon: path.join(__dirname, 'build', 'yapper-icon.ico'),
+      icon: appIconPath(),
       webPreferences: { contextIsolation: true, nodeIntegration: false }
     });
     splash.setMenuBarVisibility(false);
@@ -385,7 +432,10 @@ async function bootWithSplash() {
 }
 
 app.whenReady().then(() => {
-  if (process.platform === 'win32') app.setAppUserModelId('com.yapper.meetingnotes');
+  if (process.platform === 'win32') {
+    app.setAppUserModelId(APP_ID);
+    refreshShortcutIcons();
+  }
   // a monitor being unplugged or rescaled can strand the bubble off-screen too
   screen.on('display-metrics-changed', keepBubbleOnScreen);
   screen.on('display-removed', keepBubbleOnScreen);

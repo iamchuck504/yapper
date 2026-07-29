@@ -79,9 +79,18 @@ app.whenReady().then(() => {
     const off = ico.readUInt32LE(at2 + 12);
     const len = ico.readUInt32LE(at2 + 8);
     const isPng = ico.slice(off, off + 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-    if (!isPng) { fails++; console.log(`FAIL  la entrada de ${s}px no es un PNG válido`); }
+    // the shell reads DIB everywhere and PNG only at 256, so that is how it is written
+    const isDib = ico.readUInt32LE(off) === 40
+      && ico.readInt32LE(off + 4) === s
+      && ico.readInt32LE(off + 8) === s * 2;
     if (off + len > ico.length) { fails++; console.log(`FAIL  la entrada de ${s}px apunta fuera del archivo`); }
-    if (s === 256) ok256 = true;
+    if (s === 256) {
+      ok256 = true;
+      if (!isPng) { fails++; console.log('FAIL  la entrada de 256px debería ser PNG'); }
+    } else if (!isDib) {
+      fails++;
+      console.log(`FAIL  la entrada de ${s}px no es un DIB de 32 bits que el shell entienda`);
+    }
   }
   check('trae los tamaños que Windows usa',
     [16, 24, 32, 48, 64, 128].every(s => sizes.includes(s)) && ok256, sizes.join(', '));
