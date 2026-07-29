@@ -1,4 +1,4 @@
-const $ = id => document.getElementById(id);
+﻿const $ = id => document.getElementById(id);
 
 const viewRecord = $('view-record');
 const viewMeeting = $('view-meeting');
@@ -89,14 +89,22 @@ const participantsRec = $('participants-rec');
 const participantsMeet = $('participants-meet');
 
 const options = Object.assign(
-  { style: 'general', detail: 'concise', custom: '', participants: '' },
+  { style: 'general', detail: 'concise', custom: '' },
   JSON.parse(localStorage.getItem('yapper-options') || '{}')
 );
+// Who attended is a fact about one meeting, not a preference: carrying it over
+// would quietly put last week's names into today's notes. (Older versions did
+// persist it, so drop anything left behind.)
+delete options.participants;
 
 function saveOptions() {
   options.custom = customInput.value;
-  options.participants = participantsRec.value;
   localStorage.setItem('yapper-options', JSON.stringify(options));
+}
+
+/** The attendees typed for the meeting about to be recorded. */
+function recParticipants() {
+  return participantsRec.value.trim();
 }
 
 function syncOptionControls() {
@@ -107,7 +115,6 @@ function syncOptionControls() {
   document.querySelectorAll('#noise-seg .seg-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.noise === noiseReduction));
   customInput.value = options.custom || '';
-  participantsRec.value = options.participants || '';
   regenStyle.value = options.style;
   regenDetail.value = options.detail;
 }
@@ -119,7 +126,7 @@ document.querySelectorAll('#detail-seg .seg-btn').forEach(b =>
 document.querySelectorAll('#noise-seg .seg-btn').forEach(b =>
   b.addEventListener('click', () => { setNoiseReduction(b.dataset.noise); syncOptionControls(); }));
 customInput.addEventListener('change', saveOptions);
-participantsRec.addEventListener('change', saveOptions);
+
 
 // ---------- live behaviour toggles (persisted) ----------
 
@@ -298,6 +305,8 @@ function formatMeetingDate(name) {
 
 const SECTION_META = [
   { match: /summary|tl;?dr|highlight|recap|overview/i, cls: 'sec-summary' },
+  { match: /background|context/i, cls: 'sec-neutral' },
+  { match: /what is needed|needed|ask/i, cls: 'sec-action' },
   { match: /key point|topic|discussion|discussed/i, cls: 'sec-key' },
   { match: /decision|agreement/i, cls: 'sec-decision' },
   { match: /action|commitment/i, cls: 'sec-action' },
@@ -659,7 +668,7 @@ function stopPcmTap() {
 async function startLivePreview() {
   if (!audioCtx) return;
   try {
-    if (!(await window.yapper.liveStart(options.participants))) return;
+    if (!(await window.yapper.liveStart(recParticipants()))) return;
   } catch {
     return; // preview is best-effort; the final transcript is unaffected
   }
@@ -890,7 +899,7 @@ async function startRecording() {
 
     // open the file first: every block of samples goes straight to disk from
     // here on, so an interrupted meeting still leaves a playable recording
-    currentFolder = await window.yapper.recordingStart(options.participants);
+    currentFolder = await window.yapper.recordingStart(recParticipants());
     paused = false;     // the tap reads this on its very first block
     recording = true;
 
@@ -986,8 +995,9 @@ async function stopAndProcess() {
     setStep('transcribe', 'done');
 
     setStep('notes', 'active');
-    setStatus(statusEl, 'Generating notes with Claude…');
-    const summary = await window.yapper.summarize(folder, transcript, { ...options, markers });
+    setStatus(statusEl, 'Generating the notes…');
+    const summary = await window.yapper.summarize(folder, transcript,
+      { ...options, participants: recParticipants(), markers });
     setStep('notes', 'done');
 
     // No title typed? Name the meeting after what was actually discussed.
@@ -999,8 +1009,10 @@ async function stopAndProcess() {
 
     statusEl.classList.add('hidden');
     pipelineEl.classList.add('hidden');
-    openMeetingView(title || formatMeetingDate(folder.split(/[\\/]/).pop()), summary, transcript);
+    openMeetingView(title || formatMeetingDate(folder.split(/[\\/]/).pop()), summary, transcript,
+      true, recParticipants());
     titleInput.value = '';
+    participantsRec.value = '';     // these people were in that meeting, not the next one
     await refreshMeetingList();
   } catch (err) {
     pipelineEl.querySelectorAll('.step.active').forEach(s => { s.classList.remove('active'); s.classList.add('error'); });
@@ -1021,7 +1033,7 @@ function openMeetingView(title, summary, transcript, hasRecording = true, partic
   resultTitle.textContent = title;
   resultDateStr = currentFolder ? formatMeetingDate(currentFolder.split(/[\\/]/).pop()) : '';
   resultDate.textContent = resultDateStr;
-  participantsMeet.value = participants != null ? participants : (options.participants || '');
+  participantsMeet.value = participants || '';
   transcriptEl.textContent = transcript || '(no transcript)';
   btnRegen.disabled = !transcript;
   if (!transcript && hasRecording) {
@@ -1106,6 +1118,10 @@ function renderMeetingList() {
     const li = document.createElement('li');
     li.className = 'm-item' + (m.folder === currentFolder ? ' active' : '');
 
+    // a meeting with no audio at all is a false start, and says so
+    const empty = m.audioSec === 0 && !m.hasTranscript && !m.hasSummary;
+    if (empty) li.classList.add('m-void');
+
     const dot = document.createElement('span');
     dot.className = 'm-status ' + (m.hasSummary ? 'done' : (m.hasTranscript ? 'partial' : 'pending'));
     dot.title = m.hasSummary ? 'Notes ready' : (m.hasTranscript ? 'Transcript only' : 'Not transcribed');
@@ -1114,13 +1130,33 @@ function renderMeetingList() {
     body.className = 'm-body';
     const title = document.createElement('span');
     title.className = 'm-title';
-    title.textContent = m.title || 'Meeting';
+    title.textContent = m.title || (empty ? 'Empty recording' : 'Meeting');
     const date = document.createElement('span');
     date.className = 'm-date';
     date.textContent = formatMeetingDate(m.name);
     body.append(title, date);
 
-    li.append(dot, body);
+    const del = document.createElement('button');
+    del.className = 'm-del';
+    del.title = 'Delete this meeting';
+    del.setAttribute('aria-label', 'Delete this meeting');
+    del.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">'
+      + '<path d="M3 4.5h10M6.5 4.5V3.2h3v1.3M4.4 4.5l.6 8.3h6l.6-8.3M6.6 6.8v4M9.4 6.8v4" '
+      + 'fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    del.addEventListener('click', async e => {
+      e.stopPropagation();          // deleting is not the same as opening
+      del.disabled = true;
+      const res = await window.yapper.deleteMeeting(m.folder);
+      if (res.deleted) {
+        if (currentFolder === m.folder) { currentFolder = null; showView('record'); }
+        await refreshMeetingList();
+      } else {
+        del.disabled = false;
+        if (res.reason) setStatus(statusEl, res.reason, true);
+      }
+    });
+
+    li.append(dot, body, del);
     li.addEventListener('click', async () => {
       currentFolder = m.folder;
       const data = await window.yapper.loadMeeting(m.folder);
@@ -1261,7 +1297,7 @@ btnImport.addEventListener('click', async () => {
   btnImport.disabled = true;
   btnRecord.disabled = true;
   try {
-    const picked = await window.yapper.importAudio(options.participants);
+    const picked = await window.yapper.importAudio(recParticipants());
     if (!picked) return;
     currentFolder = picked.folder;
     pipelineEl.classList.remove('hidden');
@@ -1294,6 +1330,7 @@ btnNew.addEventListener('click', () => {
   showView('record');
   statusEl.classList.add('hidden');
   pipelineEl.classList.add('hidden');
+  participantsRec.value = '';       // a new meeting starts with nobody in it
   refreshMeetingList();
   titleInput.focus();
 });
@@ -1301,13 +1338,11 @@ btnNew.addEventListener('click', () => {
 btnRegen.addEventListener('click', async () => {
   if (!currentFolder) return;
   btnRegen.disabled = true;
-  // use the participants edited in this meeting's bar, and remember them as the default
-  options.participants = participantsMeet.value;
-  localStorage.setItem('yapper-options', JSON.stringify(options));
-  participantsRec.value = participantsMeet.value;
-  setStatus(regenStatusEl, 'Regenerating notes with Claude…');
+  // the attendees edited in this meeting's own bar, and only for this meeting
+  setStatus(regenStatusEl, 'Regenerating the notes…');
   try {
-    const summary = await window.yapper.regenerate(currentFolder, options);
+    const summary = await window.yapper.regenerate(currentFolder,
+      { ...options, participants: participantsMeet.value.trim() });
     regenStatusEl.classList.add('hidden');
     renderNotes(summary);
     await refreshMeetingList();

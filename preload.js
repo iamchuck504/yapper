@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('yapper', {
   setOpenAtLogin: enabled => ipcRenderer.invoke('set-open-at-login', enabled),
   listMeetings: () => ipcRenderer.invoke('list-meetings'),
   loadMeeting: folder => ipcRenderer.invoke('load-meeting', folder),
+  deleteMeeting: folder => ipcRenderer.invoke('delete-meeting', folder),
   openFolder: folder => ipcRenderer.invoke('open-folder', folder),
   checkEnvironment: () => ipcRenderer.invoke('check-environment'),
   getLlmSettings: () => ipcRenderer.invoke('get-llm-settings'),

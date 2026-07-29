@@ -71,10 +71,11 @@ o el acceso directo **Yapper** del Escritorio.
 
 ## Opciones de notas (UI en inglés)
 
-- **Note style**: General, Stand-up, 1:1, Client call, Brainstorm — cambia las secciones del acta.
+- **Note style**: General, Minutes, **Memo**, Stand-up, 1:1, Client call, Brainstorm — cambia las secciones del acta. *Memo* está pensado para reenviar a alguien que no estuvo: prosa en vez de viñetas, lenguaje neutro, y dice explícitamente cuando algo se discutió pero no se decidió.
 - **Detail**: Concise (bullets cortos) o Detailed (exhaustivo).
 - **Extra instructions**: contexto libre para Claude (asistentes, proyecto, en qué enfocarse).
-- **Participants**: los nombres se le pasan a Whisper como prompt inicial, así deja de escribir "Ninfa" como "Nympho".
+- **Participants**: los nombres se le pasan a Whisper como prompt inicial, así deja de escribir "Ninfa" como "Nympho". Es un dato **de esa reunión**, no una preferencia: el campo arranca vacío cada vez, para que los nombres de la semana pasada no se cuelen en el acta de hoy.
+- **Borrar reuniones**: cada fila de la barra lateral tiene una papelera que aparece al pasar el cursor. Las grabaciones fallidas (sin audio) se ven atenuadas y etiquetadas *Empty recording*. Siempre pregunta antes, enumerando lo que contiene, y va a la papelera del sistema — nunca borra audio de forma irreversible.
 - **↻ Regenerate**: rehace las notas de cualquier reunión guardada con otro estilo/detalle.
 - **Título automático**: si no escribes título, Claude nombra la reunión según lo que se habló (2-6 palabras); si la grabación no da para tanto, cae a la fecha.
 - **Export** (menú): notas en PDF, notas en Markdown, transcripción completa en .txt, o notas + transcripción en un solo .md.
@@ -111,6 +112,7 @@ npm test                          # todo lo que corre sin modelo ni GPU
 node build\test-llm.js            # proveedores de notas, contra un servidor falso
 node build\test-keystore.js       # la key no queda legible (con electron usa el llavero real)
 node build\test-live-logic.js     # reglas de confirmación del vivo
+node build\test-meetings.js       # el borrado no puede salirse de la carpeta de reuniones
 node build\test-ipc-wiring.js     # todo canal del preload tiene contraparte
 node build\test-bounds.js         # la burbuja nunca sale de la pantalla
 node build\test-engine.js         # arranca el servidor y mide una pasada
@@ -124,9 +126,12 @@ Los que abren ventana van con Electron:
 node_modules\electron\dist\electron.exe build\test-bubble-fit.js
 node_modules\electron\dist\electron.exe build\test-keystore.js
 node_modules\electron\dist\electron.exe build\test-llm-ui.js
+node_modules\electron\dist\electron.exe build\test-delete-ui.js
+node_modules\electron\dist\electron.exe build\test-options-ui.js
+node_modules\electron\dist\electron.exe build\test-memo.js
 ```
 
-`test-llm-ui.js` arranca la app de verdad en un userData temporal, elige un proveedor, guarda una key y comprueba que no aparece ni en `settings.json` ni de vuelta en el renderer.
+Los `*-ui.js` arrancan la app de verdad contra carpetas temporales, nunca contra tus reuniones reales. `test-llm-ui.js` guarda una key y comprueba que no aparece ni en `settings.json` ni de vuelta en el renderer; `test-delete-ui.js` verifica que cancelar no borra, que se borra solo la fila elegida y que el aviso enumera lo que se perdería; `test-memo.js` sí gasta una llamada al modelo (~90 s) porque comprueba que el estilo Memo devuelve prosa y no viñetas.
 
 ## Notas
 
