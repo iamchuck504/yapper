@@ -10,6 +10,10 @@ contextBridge.exposeInMainWorld('yapper', {
   bubblePause: () => ipcRenderer.send('bubble-pause'),
   onRemotePause: cb => ipcRenderer.on('remote-pause', () => cb()),
   importAudio: participants => ipcRenderer.invoke('import-audio', participants),
+  importRead: src => ipcRenderer.invoke('import-read', src),
+  legacyAudio: folder => ipcRenderer.invoke('legacy-audio', folder),
+  importOpen: folder => ipcRenderer.invoke('import-open', folder),
+  importClose: () => ipcRenderer.invoke('import-close'),
   transcribe: folder => ipcRenderer.invoke('transcribe', folder),
   summarize: (folder, transcript, options) => ipcRenderer.invoke('summarize', folder, transcript, options),
   regenerate: (folder, options) => ipcRenderer.invoke('regenerate', folder, options),
@@ -30,7 +34,6 @@ contextBridge.exposeInMainWorld('yapper', {
   exportPdf: (html, suggestedName) => ipcRenderer.invoke('export-pdf', html, suggestedName),
   onTranscribeProgress: cb => ipcRenderer.on('transcribe-progress', (_e, text) => cb(text)),
   liveStart: participants => ipcRenderer.invoke('live-start', participants),
-  livePcm: buf => ipcRenderer.send('live-pcm', buf),
   liveStop: () => ipcRenderer.invoke('live-stop'),
   onLiveTranscript: cb => ipcRenderer.on('live-transcript', (_e, line) => cb(line)),
 

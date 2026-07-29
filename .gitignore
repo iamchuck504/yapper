@@ -1,10 +1,6 @@
 # Dependencies
 node_modules/
 
-# Python
-__pycache__/
-*.pyc
-
 # Build output
 dist/
 out/
@@ -16,6 +12,10 @@ Meetings/
 *.wav
 *.mp3
 
+# ...except the calibration sample, which the app needs to measure the machine
+# it is running on (11 s of public-domain speech, from whisper.cpp)
+!build/calibration.wav
+
 # OS / editor
 .DS_Store
 Thumbs.db
@@ -26,3 +26,8 @@ build/shots/
 renderer/.pdf-export.html
 build/icon-candidates/
 build/icon-v*/
+build/whisper/
+
+# whisper.cpp binaries and models (downloaded by setup, never committed)
+bin/
+models/

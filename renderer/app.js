@@ -25,9 +25,9 @@ const meetingList = $('meeting-list');
 const regenStyle = $('regen-style');
 const regenDetail = $('regen-detail');
 
-let recorder = null;
+let recording = false;
 let audioCtx = null;
-let dest = null;          // MediaStreamDestination feeding the recorder
+let dest = null;          // sink the mixed graph feeds
 let micBus = null;        // GainNode summing all active mics
 let sysGainNode = null;   // GainNode for system audio
 let micHP = null;         // high-pass filter (cuts low rumble/hum)
@@ -157,7 +157,7 @@ autoDetectToggle.addEventListener('change', () => {
 const meetingPrompt = $('meeting-prompt');
 
 window.yapper.onMeetingDetected(info => {
-  if (recorder && recorder.state !== 'inactive') return;
+  if (recording) return;
   $('mp-app').textContent = `${info.app} is using your microphone.`;
   meetingPrompt.classList.remove('hidden');
   showView('record');
@@ -472,9 +472,10 @@ navigator.mediaDevices.addEventListener('devicechange', async () => {
   }
 });
 
-// ---------- live streaming preview ----------
-// Streams raw PCM to the worker continuously so the transcript trails speech by
-// ~1-2 s, instead of waiting for whole blocks to finish.
+// ---------- the PCM tap ----------
+// One tap on the mixed graph is the only audio source in the app: the same
+// 16 kHz mono samples become the file on disk and the live transcript, so the
+// recording and what you read on screen can never drift apart.
 
 const LIVE_RATE = 16000;
 let pcmNode = null;
@@ -508,7 +509,7 @@ function downsampleToInt16(input, srcRate) {
 }
 
 function pushPcm(float32) {
-  if (!liveActive) return;
+  if (!recording || paused) return;              // pausing simply stops the flow
   pcmPending.push(downsampleToInt16(float32, audioCtx.sampleRate));
   pcmPendingLen += pcmPending[pcmPending.length - 1].length;
   if (pcmPendingLen < LIVE_RATE / 5) return;   // batch ~200 ms per IPC message
@@ -517,22 +518,11 @@ function pushPcm(float32) {
   for (const p of pcmPending) { merged.set(p, o); o += p.length; }
   pcmPending = [];
   pcmPendingLen = 0;
-  window.yapper.livePcm(merged.buffer);
+  window.yapper.recordingChunk(merged.buffer);   // main writes it and feeds live
 }
 
-async function startLivePreview() {
-  if (!audioCtx || !micBus) return;
-  try {
-    if (!(await window.yapper.liveStart(options.participants))) return;
-  } catch {
-    return; // preview is best-effort; the final transcript is unaffected
-  }
-
-  liveParagraphs = [];
-  liveTentative = '';
-  renderLiveTranscript();
-  liveWrap.classList.remove('hidden');
-  liveActive = true;
+async function startPcmTap() {
+  if (!audioCtx || pcmNode) return;
 
   // Tap the same mix that gets recorded (post gain + noise filter).
   pcmTapGain = audioCtx.createGain();
@@ -556,8 +546,15 @@ async function startLivePreview() {
   pcmSink.connect(audioCtx.destination);
 }
 
-async function stopLivePreview() {
-  liveActive = false;
+function stopPcmTap() {
+  // hand over the tail that never reached a full batch, or the last fifth of a
+  // second of the meeting would be missing from the file
+  if (pcmPendingLen) {
+    const merged = new Int16Array(pcmPendingLen);
+    let o = 0;
+    for (const p of pcmPending) { merged.set(p, o); o += p.length; }
+    window.yapper.recordingChunk(merged.buffer);
+  }
   for (const node of [pcmNode, pcmSink, pcmTapGain]) {
     if (node) { try { node.disconnect(); } catch { /* already gone */ } }
   }
@@ -568,6 +565,29 @@ async function stopLivePreview() {
   pcmNode = pcmSink = pcmTapGain = null;
   pcmPending = [];
   pcmPendingLen = 0;
+}
+
+// ---------- live streaming preview ----------
+// The samples are already flowing; this only asks the main process to run them
+// through the transcriber as they arrive, so the text trails speech by ~1-2 s.
+
+async function startLivePreview() {
+  if (!audioCtx) return;
+  try {
+    if (!(await window.yapper.liveStart(options.participants))) return;
+  } catch {
+    return; // preview is best-effort; the final transcript is unaffected
+  }
+
+  liveParagraphs = [];
+  liveTentative = '';
+  renderLiveTranscript();
+  liveWrap.classList.remove('hidden');
+  liveActive = true;
+}
+
+async function stopLivePreview() {
+  liveActive = false;
   liveWrap.classList.add('hidden');
   try { await window.yapper.liveStop(); } catch { /* ignore */ }
 }
@@ -678,17 +698,12 @@ function stamp(ms) {
 }
 
 function setPaused(on) {
-  if (!recorder || recorder.state === 'inactive') return;
+  if (!recording) return;
   paused = on;
-  if (on) {
-    elapsedMs += Date.now() - runStart;
-    try { recorder.pause(); } catch { /* already paused */ }
-    liveActive = false;                       // stop feeding the transcriber
-  } else {
-    runStart = Date.now();
-    try { recorder.resume(); } catch { /* already running */ }
-    liveActive = true;
-  }
+  // Pausing simply stops handing samples over: nothing is written to the file
+  // and nothing reaches the transcriber, so the recording has no silent gap.
+  if (on) elapsedMs += Date.now() - runStart;
+  else runStart = Date.now();
   recLive.classList.toggle('paused', on);
   btnPause.classList.toggle('on', on);
   btnPause.querySelector('.pause-label').textContent = on ? 'Resume' : 'Pause';
@@ -696,7 +711,7 @@ function setPaused(on) {
 }
 
 function addMarker() {
-  if (!recorder || recorder.state === 'inactive') return;
+  if (!recording) return;
   const at = stamp(elapsed());
   if (markers.includes(at)) return;
   markers.push(at);
@@ -719,7 +734,7 @@ function clearEndedPrompt() {
 }
 
 window.yapper.onMeetingEnded(() => {
-  if (!recorder || recorder.state === 'inactive' || endedTimer) return;
+  if (!recording || endedTimer) return;
   let left = 60;
   const tick = () => {
     $('ep-count').textContent = `Stopping on its own in ${left}s`;
@@ -788,18 +803,13 @@ async function startRecording() {
     };
     updateLevels();
 
-    // open the file first: every chunk goes straight to disk from here on, so an
-    // interrupted meeting still leaves a playable recording behind
+    // open the file first: every block of samples goes straight to disk from
+    // here on, so an interrupted meeting still leaves a playable recording
     currentFolder = await window.yapper.recordingStart(options.participants);
+    paused = false;     // the tap reads this on its very first block
+    recording = true;
 
-    recorder = new MediaRecorder(dest.stream, {
-      mimeType: 'audio/webm;codecs=opus',
-      audioBitsPerSecond: 64000
-    });
-    recorder.ondataavailable = async e => {
-      if (e.data.size > 0) window.yapper.recordingChunk(await e.data.arrayBuffer());
-    };
-    recorder.start(1000);
+    startPcmTap();      // the single audio source: file and live share it
     startLivePreview();
 
     btnRecord.classList.add('hidden');
@@ -866,11 +876,10 @@ function cleanupCapture() {
 }
 
 async function stopAndProcess() {
-  if (!recorder || recorder.state === 'inactive') return;
+  if (!recording) return;
+  recording = false;                 // no further samples reach the file
   await stopLivePreview();
-  const stopped = new Promise(res => { recorder.onstop = res; });
-  recorder.stop();
-  await stopped;
+  stopPcmTap();
   cleanupCapture();
   btnRecord.disabled = true;
   saveOptions();
@@ -950,8 +959,16 @@ function openMeetingView(title, summary, transcript, hasRecording = true, partic
 async function retryTranscribe() {
   const btn = $('btn-transcribe');
   if (btn) btn.disabled = true;
-  setStatus(regenStatusEl, 'Transcribing with Whisper…\n');
   try {
+    // recordings from before Yapper wrote WAV directly are converted first,
+    // so an old meeting is never left permanently untranscribable
+    const legacy = await window.yapper.legacyAudio(currentFolder);
+    if (legacy) {
+      setStatus(regenStatusEl, 'Converting the old recording…');
+      await decodeToRecordingWav(legacy, currentFolder, p =>
+        setStatus(regenStatusEl, `Converting the old recording… ${Math.round(p * 100)}%`));
+    }
+    setStatus(regenStatusEl, 'Transcribing with Whisper…\n');
     await window.yapper.transcribe(currentFolder);
     const data = await window.yapper.loadMeeting(currentFolder);
     regenStatusEl.classList.add('hidden');
@@ -1115,6 +1132,45 @@ btnSpeak.addEventListener('click', () => {
 btnRecord.addEventListener('click', startRecording);
 btnStop.addEventListener('click', stopAndProcess);
 
+// Turn any file the OS can hand us into the one format the transcriber reads.
+// Decoding at 16 kHz is not just convenient: it keeps a two-hour voice note at
+// a couple hundred megabytes instead of gigabytes of 48 kHz floats.
+async function decodeToRecordingWav(src, folder, onProgress) {
+  const raw = await window.yapper.importRead(src);
+  const ctx = new AudioContext({ sampleRate: LIVE_RATE });
+  let audio;
+  try {
+    audio = await ctx.decodeAudioData(raw);
+  } catch {
+    throw new Error('That file could not be decoded. Try exporting it as WAV or MP3.');
+  } finally {
+    ctx.close();
+  }
+
+  const chans = [];
+  for (let c = 0; c < audio.numberOfChannels; c++) chans.push(audio.getChannelData(c));
+  const total = audio.length;
+  const BLOCK = LIVE_RATE * 30;   // 30 s of samples per message
+
+  await window.yapper.importOpen(folder);
+  for (let start = 0; start < total; start += BLOCK) {
+    const end = Math.min(start + BLOCK, total);
+    const out = new Int16Array(end - start);
+    for (let i = start; i < end; i++) {
+      let sum = 0;
+      for (const ch of chans) sum += ch[i];
+      const s = sum / chans.length;
+      out[i - start] = Math.max(-32768, Math.min(32767, Math.round(s * 32767)));
+    }
+    window.yapper.recordingChunk(out.buffer);
+    if (onProgress) onProgress(end / total);
+    await new Promise(r => setTimeout(r, 0));   // let the UI breathe
+  }
+  const bytes = await window.yapper.importClose();
+  if (!bytes) throw new Error('That file contains no audio.');
+  return audio.duration;
+}
+
 const btnImport = $('btn-import');
 btnImport.addEventListener('click', async () => {
   btnImport.disabled = true;
@@ -1125,6 +1181,10 @@ btnImport.addEventListener('click', async () => {
     currentFolder = picked.folder;
     pipelineEl.classList.remove('hidden');
     resetPipeline();
+    setStep('save', 'active');
+    setStatus(statusEl, 'Reading the file…\n');
+    await decodeToRecordingWav(picked.src, picked.folder, p =>
+      setStatus(statusEl, `Converting the audio… ${Math.round(p * 100)}%`));
     setStep('save', 'done');
     setStep('transcribe', 'active');
     setStatus(statusEl, 'Transcribing voice note verbatim with Whisper…\n');
@@ -1357,10 +1417,16 @@ btnOpenFolder.addEventListener('click', () => {
 
 window.yapper.onTranscribeProgress(text => {
   for (const el of [statusEl, regenStatusEl]) {
-    if (!el.classList.contains('hidden')) {
+    if (el.classList.contains('hidden')) continue;
+    // a leading \r means "rewrite the last line", the way a terminal would —
+    // otherwise a percentage counter would print a hundred lines
+    if (text.startsWith('\r')) {
+      const keep = el.textContent.replace(/[^\n]*$/, '');
+      el.textContent = keep + text.slice(1);
+    } else {
       el.textContent += text;
-      el.scrollTop = el.scrollHeight;
     }
+    el.scrollTop = el.scrollHeight;
   }
 });
 
@@ -1476,8 +1542,14 @@ refreshReminders();
   try {
     const env = await window.yapper.checkEnvironment();
     const issues = [];
-    if (!env.whisper) issues.push('• Python with faster-whisper was not found — transcription will not work. Run setup.ps1 from the app folder.');
+    if (!env.whisper) issues.push('• The transcription engine is missing — transcription will not work. Run setup.ps1 from the app folder.');
     if (!env.claude) issues.push('• Claude Code CLI was not found — note generation will not work. Install it from claude.com/code and sign in.');
-    if (issues.length) setStatus(statusEl, 'Setup needed:\n' + issues.join('\n'), true);
+    if (issues.length) {
+      setStatus(statusEl, 'Setup needed:\n' + issues.join('\n'), true);
+    } else if (env.tier === 'modest') {
+      // not a failure: this machine simply gets the transcript after the
+      // meeting instead of during it
+      setStatus(statusEl, 'Live transcript is off on this machine — it is not fast enough to keep up. Recording and notes work as usual.');
+    }
   } catch { /* never block the app on the preflight check */ }
 })();

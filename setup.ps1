@@ -1,63 +1,103 @@
 # Yapper - one-time setup for a new PC
 # Run from the app folder:  powershell -ExecutionPolicy Bypass -File setup.ps1
+#
+# Everything Yapper needs to transcribe is downloaded here: the whisper.cpp
+# binaries for this machine and the models they load. There is no Python and no
+# native Node module, so nothing has to be compiled on the user's PC.
 
 $ErrorActionPreference = 'Continue'
 $here = $PSScriptRoot
+$ProgressPreference = 'SilentlyContinue'   # the progress bar makes downloads far slower
+
 Write-Host "=== Yapper setup ===" -ForegroundColor Cyan
 
-# --- 1. Python ---
-$python = Get-Command python -ErrorAction SilentlyContinue
-if (-not $python) {
-    Write-Host "[X] Python not found. Install it first:" -ForegroundColor Red
-    Write-Host "    winget install Python.Python.3.12"
-    Write-Host "    then re-run this script."
+$WHISPER_TAG = 'v1.9.1'
+$REL = "https://github.com/ggml-org/whisper.cpp/releases/download/$WHISPER_TAG"
+$MODEL_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main'
+
+function Get-File($url, $dest) {
+    if (Test-Path $dest) { return $true }
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+        return $true
+    } catch {
+        Write-Host "[X] Download failed: $url" -ForegroundColor Red
+        Write-Host "    $($_.Exception.Message)"
+        if (Test-Path $dest) { Remove-Item $dest -Force }
+        return $false
+    }
+}
+
+# --- 1. Transcription engine (whisper.cpp) ---
+# The CPU build always goes in; it is small and it is the fallback. The CUDA
+# build is added on top only when there is an NVIDIA GPU to use it, because it
+# is 646 MB of libraries that would sit unused otherwise.
+$binCpu = Join-Path $here 'bin\win-x64'
+$binGpu = Join-Path $here 'bin\win-x64-gpu'
+$tmp = Join-Path $env:TEMP 'yapper-setup'
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+
+if (-not (Test-Path "$binCpu\whisper-server.exe")) {
+    Write-Host "Downloading the transcription engine (8 MB)..." -ForegroundColor Yellow
+    $zip = Join-Path $tmp 'whisper-bin-x64.zip'
+    if (Get-File "$REL/whisper-bin-x64.zip" $zip) {
+        Expand-Archive -Path $zip -DestinationPath $tmp -Force
+        New-Item -ItemType Directory -Force -Path $binCpu | Out-Null
+        # the zip nests the files under Release\
+        $src = Get-ChildItem $tmp -Recurse -Filter 'whisper-server.exe' | Select-Object -First 1
+        if ($src) { Copy-Item "$($src.DirectoryName)\*" $binCpu -Force }
+    }
+}
+if (Test-Path "$binCpu\whisper-server.exe") {
+    Write-Host "[OK] Transcription engine ready"
+} else {
+    Write-Host "[X] Could not install the transcription engine" -ForegroundColor Red
     exit 1
 }
-Write-Host "[OK] Python: $((python --version) 2>&1)"
 
-# --- 2. faster-whisper ---
-python -c "import faster_whisper" 2>$null
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Installing faster-whisper (one time)..." -ForegroundColor Yellow
-    python -m pip install faster-whisper
-}
-Write-Host "[OK] faster-whisper installed"
-
-# --- 3. GPU acceleration (optional, NVIDIA only) ---
 $gpu = Get-Command nvidia-smi -ErrorAction SilentlyContinue
-if ($gpu) {
-    python -c "import nvidia" 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "NVIDIA GPU detected - installing CUDA libraries (~1.2 GB, one time)..." -ForegroundColor Yellow
-        python -m pip install nvidia-cublas-cu12 nvidia-cudnn-cu12 --no-cache-dir
+if ($gpu -and -not (Test-Path "$binGpu\whisper-server.exe")) {
+    Write-Host "NVIDIA GPU detected - downloading the CUDA build (646 MB, one time)..." -ForegroundColor Yellow
+    $zip = Join-Path $tmp 'whisper-cublas.zip'
+    if (Get-File "$REL/whisper-cublas-12.4.0-bin-x64.zip" $zip) {
+        $out = Join-Path $tmp 'cublas'
+        Expand-Archive -Path $zip -DestinationPath $out -Force
+        New-Item -ItemType Directory -Force -Path $binGpu | Out-Null
+        $src = Get-ChildItem $out -Recurse -Filter 'whisper-server.exe' | Select-Object -First 1
+        if ($src) { Copy-Item "$($src.DirectoryName)\*" $binGpu -Force }
     }
+}
+if (Test-Path "$binGpu\whisper-server.exe") {
     Write-Host "[OK] GPU acceleration ready"
-} else {
-    Write-Host "[--] No NVIDIA GPU detected - transcription will run on CPU (slower but works)"
+} elseif (-not $gpu) {
+    Write-Host "[--] No NVIDIA GPU - transcription will run on the CPU (slower, but it works)"
 }
 
-# --- 4. Whisper models (pre-download so the first meeting is not slow) ---
-# Which models are fetched depends on what this machine can actually run: the
-# live transcript only uses `medium` when there is a GPU to run it on.
-Write-Host "Downloading the Whisper model for this machine (~460 MB, one time)..." -ForegroundColor Yellow
-python -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
-Write-Host "[OK] small model ready"
+# --- 2. Models ---
+# Only two, on every machine: `small` writes the final transcript and the live
+# text where there is a GPU, `base` is what the calibration measures with and
+# what slower machines run live. `medium` is deliberately not downloaded - it
+# loops on real meeting audio, so it would be 1.5 GB of worse transcripts.
+$models = Join-Path $here 'models'
+New-Item -ItemType Directory -Force -Path $models | Out-Null
 
-$hasCuda = $false
-try {
-    $hasCuda = (python -c "import ctranslate2; print(ctranslate2.get_cuda_device_count())" 2>$null) -gt 0
-} catch { $hasCuda = $false }
+$wanted = @(
+    @{ name = 'base';  mb = 142 },
+    @{ name = 'small'; mb = 466 }
+)
 
-if ($hasCuda) {
-    Write-Host "GPU detected - downloading the live model too (~1.5 GB, one time)..." -ForegroundColor Yellow
-    python -c "from faster_whisper import WhisperModel; WhisperModel('medium', device='cpu', compute_type='int8')"
-    Write-Host "[OK] medium model ready (live transcript will use it)"
-} else {
-    Write-Host "[--] No GPU: the live transcript will run the small model, or step aside"
-    Write-Host "     if this machine cannot keep up. The final transcript is unaffected."
+foreach ($m in $wanted) {
+    $dest = Join-Path $models "ggml-$($m.name).bin"
+    if (Test-Path $dest) { Write-Host "[OK] $($m.name) model already here"; continue }
+    Write-Host "Downloading the $($m.name) model ($($m.mb) MB, one time)..." -ForegroundColor Yellow
+    if (Get-File "$MODEL_URL/ggml-$($m.name).bin" $dest) {
+        Write-Host "[OK] $($m.name) model ready"
+    }
 }
 
-# --- 5. Node modules / Electron ---
+Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+
+# --- 3. Node modules / Electron ---
 if (-not (Test-Path "$here\node_modules\electron\dist\electron.exe")) {
     Write-Host "Installing Electron..." -ForegroundColor Yellow
     npm install --prefix $here
@@ -80,7 +120,7 @@ if (Test-Path "$here\node_modules\electron\dist\electron.exe") {
     exit 1
 }
 
-# --- 6. Claude Code CLI (for note generation) ---
+# --- 4. Claude Code CLI (for note generation) ---
 $claude = Get-Command claude -ErrorAction SilentlyContinue
 if (-not $claude -and -not (Test-Path "$env:USERPROFILE\.local\bin\claude.exe")) {
     Write-Host "[!] Claude Code CLI not found. Transcription works without it, but" -ForegroundColor Yellow
@@ -89,7 +129,7 @@ if (-not $claude -and -not (Test-Path "$env:USERPROFILE\.local\bin\claude.exe"))
     Write-Host "[OK] Claude Code CLI found"
 }
 
-# --- 7. Desktop shortcut ---
+# --- 5. Desktop shortcut ---
 $ws = New-Object -ComObject WScript.Shell
 $s = $ws.CreateShortcut("$env:USERPROFILE\Desktop\Yapper.lnk")
 $s.TargetPath = "$here\node_modules\electron\dist\electron.exe"
@@ -100,5 +140,8 @@ $s.Description = "Yapper - AI meeting notes"
 $s.Save()
 Write-Host "[OK] Desktop shortcut created"
 
+Write-Host ""
+Write-Host "Yapper measures this machine the first time it starts, and picks how" -ForegroundColor Gray
+Write-Host "big a model the live transcript can afford from what it finds." -ForegroundColor Gray
 Write-Host ""
 Write-Host "=== Setup complete - launch Yapper from the desktop shortcut ===" -ForegroundColor Green

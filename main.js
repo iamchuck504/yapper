@@ -5,6 +5,8 @@ const fs = require('fs');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { clampToArea } = require('./bounds');
+const engine = require('./engine');
+const live = require('./live');
 
 const MEETINGS_DIR = path.join(app.getPath('documents'), 'Meetings');
 
@@ -35,7 +37,6 @@ function migrateOldData() {
     }
   }
 }
-const WHISPER_MODEL = process.env.YAPPER_MODEL || 'small';
 const CLAUDE_FALLBACK = path.join(app.getPath('home'), '.local', 'bin', 'claude.exe');
 
 let win;
@@ -302,7 +303,7 @@ async function bootWithSplash() {
 
   // Preflight runs alongside the window load; its result is cached for the
   // renderer so it does not pay for the checks a second time.
-  setStatus('Checking transcription engine');
+  setStatus(readSettings().tier ? 'Checking transcription engine' : 'Measuring this machine');
   const envPromise = checkEnvironment().then(env => {
     setStatus(env.claude ? 'Loading' : 'Claude Code not found');
     return env;
@@ -333,7 +334,9 @@ app.whenReady().then(() => {
   bootWithSplash();
 });
 app.on('window-all-closed', () => app.quit());
-app.on('before-quit', () => { liveStopInternal(); stopMeetingWatch(); });
+// the transcription server is a child process: shut it down explicitly rather
+// than leave it holding a model in memory after Yapper is gone
+app.on('before-quit', () => { liveStopInternal(); engine.stop(); stopMeetingWatch(); });
 
 function meetingFolderName(date) {
   const p = n => String(n).padStart(2, '0');
@@ -368,38 +371,45 @@ function readParticipants(folder) {
 // (Concatenated MediaRecorder chunks are exactly what the in-memory Blob used
 // to be, so the resulting file is identical.)
 
-let recStream = null;
+// The renderer sends 16 kHz mono PCM straight from the audio graph, so the file
+// on disk is already exactly what the transcriber consumes — no decoding step,
+// and therefore no platform-specific media dependency to ship.
+
+let recFd = null;
 let recFolder = null;
 let recBytes = 0;
 
-function closeRecStream() {
-  return new Promise(resolve => {
-    if (!recStream) return resolve();
-    const s = recStream;
-    recStream = null;
-    s.end(resolve);
-  });
+function closeRecFile() {
+  if (recFd === null) return;
+  try { engine.finishWav(recFd, recBytes); } catch { /* disk gone */ }
+  recFd = null;
 }
 
 ipcMain.handle('recording-start', async (_e, participants) => {
-  await closeRecStream();
+  closeRecFile();
   recFolder = newMeetingFolder();
   recBytes = 0;
   writeParticipants(recFolder, participants);
-  recStream = fs.createWriteStream(path.join(recFolder, 'recording.webm'));
-  recStream.on('error', err => console.error('[recording] write failed:', err.message));
+  recFd = engine.openWav(path.join(recFolder, 'recording.wav'));
   return recFolder;
 });
 
 ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
-  if (!recStream || !recStream.writable) return;
   const buf = Buffer.from(arrayBuffer);
-  recBytes += buf.length;
-  recStream.write(buf);
+  if (recFd !== null) {
+    try {
+      fs.writeSync(recFd, buf, 0, buf.length, engine.WAV_HEADER + recBytes);
+      recBytes += buf.length;
+    } catch (err) {
+      console.error('[recording] write failed:', err.message);
+    }
+  }
+  // the same samples feed the live transcript, so the renderer only sends once
+  if (liveOn) live.write(buf);
 });
 
 ipcMain.handle('recording-finish', async (_e, title, markers) => {
-  await closeRecStream();
+  closeRecFile();
   const folder = recFolder;
   const bytes = recBytes;
   recFolder = null;
@@ -412,8 +422,8 @@ ipcMain.handle('recording-finish', async (_e, title, markers) => {
   return { folder, bytes };
 });
 
-// the app is going away mid-recording: flush what we have, keep the file
-app.on('before-quit', () => { closeRecStream(); });
+// the app is going away mid-recording: close the file properly, keep the audio
+app.on('before-quit', () => closeRecFile());
 
 ipcMain.handle('import-audio', async (_e, participants) => {
   const res = await dialog.showOpenDialog(win, {
@@ -426,13 +436,44 @@ ipcMain.handle('import-audio', async (_e, participants) => {
   });
   if (res.canceled || res.filePaths.length === 0) return null;
   const src = res.filePaths[0];
-  const ext = path.extname(src).toLowerCase() || '.audio';
   const folder = newMeetingFolder();
-  fs.copyFileSync(src, path.join(folder, 'recording' + ext));
   const title = path.basename(src, path.extname(src));
   fs.writeFileSync(path.join(folder, 'title.txt'), title, 'utf8');
   writeParticipants(folder, participants);
-  return { folder, title };
+  // The renderer decodes it — Chromium already ships codecs for every format in
+  // that filter list, so mp3/m4a/opus/flac all become the same 16 kHz mono WAV
+  // the transcriber reads, and Yapper ships no media dependency of its own.
+  return { folder, title, src, bytes: fs.statSync(src).size };
+});
+
+// A meeting recorded before Yapper wrote WAV directly. The renderer can decode
+// it with the same codecs it uses for imports, so those recordings are not
+// stranded — they just get converted the first time they are transcribed.
+ipcMain.handle('legacy-audio', async (_e, folder) => {
+  if (fs.existsSync(path.join(folder, 'recording.wav'))) return null;
+  const legacy = fs.readdirSync(folder)
+    .find(f => /^recording\.(webm|m4a|mp3|ogg|opus|mp4|aac|flac)$/i.test(f));
+  return legacy ? path.join(folder, legacy) : null;
+});
+
+ipcMain.handle('import-read', async (_e, src) => {
+  const buf = fs.readFileSync(src);
+  return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+});
+
+// The decoded samples come back through 'recording-chunk', the same path the
+// microphone uses, so there is only one piece of code that writes a WAV.
+ipcMain.handle('import-open', async (_e, folder) => {
+  closeRecFile();
+  recFolder = folder;
+  recBytes = 0;
+  recFd = engine.openWav(path.join(folder, 'recording.wav'));
+  return true;
+});
+
+ipcMain.handle('import-close', async () => {
+  closeRecFile();
+  return recBytes;
 });
 
 // Whisper initial_prompt biasing: nudges the model toward spelling these names/terms correctly
@@ -442,31 +483,35 @@ function transcriptionHint(participants) {
 }
 
 ipcMain.handle('transcribe', async (_e, folder) => {
-  const audioFile = fs.readdirSync(folder).find(f => f.startsWith('recording.'));
-  if (!audioFile) throw new Error('No recording found in this meeting folder.');
-  const audio = path.join(folder, audioFile);
-  const hint = transcriptionHint(readParticipants(folder));
-  return new Promise((resolve, reject) => {
-    const py = spawn('python', [path.join(__dirname, 'transcribe.py'), audio, WHISPER_MODEL, process.env.YAPPER_LANG || 'auto', hint], {
-      env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' }
-    });
-    let transcript = '';
-    let errOut = '';
-    py.stdout.on('data', d => {
-      const text = d.toString('utf8');
-      transcript += text;
-      if (win && !win.isDestroyed()) win.webContents.send('transcribe-progress', text);
-    });
-    py.stderr.on('data', d => { errOut += d.toString('utf8'); });
-    py.on('error', reject);
-    py.on('close', code => {
-      if (code !== 0) return reject(new Error(`Whisper failed (code ${code}): ${errOut.slice(-800)}`));
-      transcript = transcript.trim();
-      if (!transcript) return reject(new Error('The transcript came out empty. Was any audio recorded?'));
-      fs.writeFileSync(path.join(folder, 'transcript.txt'), transcript, 'utf8');
-      resolve(transcript);
-    });
+  const wav = path.join(folder, 'recording.wav');
+  if (!fs.existsSync(wav)) {
+    // the renderer converts old recordings before calling this, so reaching
+    // here means the conversion did not happen or the folder is genuinely empty
+    throw new Error('No recording found in this meeting folder.');
+  }
+  // a meeting cut short by a crash still has a placeholder header
+  if (engine.repairWav(wav)) console.log('[transcribe] repaired an interrupted recording');
+
+  const tier = engine.tierConfig(readSettings().tier || engine.guessTier());
+  const send = text => {
+    if (win && !win.isDestroyed()) win.webContents.send('transcribe-progress', text);
+  };
+
+  const lines = await engine.transcribeFile(wav, {
+    model: tier.finalModel,
+    language: process.env.YAPPER_LANG || 'auto',
+    prompt: transcriptionHint(readParticipants(folder)),
+    onProgress: ({ done, total }) => {
+      send(`\rTranscribing… ${Math.round(done / total * 100)}%`);
+    }
   });
+  await engine.stop();
+
+  const transcript = lines.join('\n').trim();
+  if (!transcript) throw new Error('The transcript came out empty. Was any audio recorded?');
+  fs.writeFileSync(path.join(folder, 'transcript.txt'), transcript, 'utf8');
+  send('\n');
+  return transcript;
 });
 
 const SECTION_SETS = {
@@ -639,18 +684,49 @@ function runOk(cmd, args) {
   });
 }
 
-// Importing faster_whisper takes a second or two, so the result is cached:
-// the splash pays for it once and the renderer reuses it.
+// The splash pays for this once and the renderer reuses it. On a machine that
+// has never run Yapper it also includes the calibration pass, which is why it
+// belongs behind the splash rather than in front of the first recording.
+// The promise is cached, not its result: the splash and the renderer both ask,
+// and two calibrations running at once fight over the same server.
 let envCache = null;
 
-async function checkEnvironment() {
-  if (envCache) return envCache;
-  const [whisper, claude] = await Promise.all([
-    runOk('python', ['-c', 'import faster_whisper']),
-    runOk(resolveClaude(), ['--version'])
-  ]);
-  envCache = { whisper, claude };
+function checkEnvironment() {
+  if (!envCache) {
+    envCache = (async () => {
+      const whisper = engine.isInstalled() && engine.hasModel(engine.CALIBRATION_MODEL);
+      const claude = await runOk(resolveClaude(), ['--version']);
+      return { whisper, claude, tier: whisper ? await ensureTier() : 'modest' };
+    })().catch(err => {
+      envCache = null;                       // let a later caller retry
+      throw err;
+    });
+  }
   return envCache;
+}
+
+/**
+ * Decide once what this machine can promise, then remember it. The measurement
+ * is redone when the app is moved to different hardware, since the binaries it
+ * found there may not be the ones it was calibrated with.
+ */
+async function ensureTier() {
+  const s = readSettings();
+  const flavour = path.basename(engine.binDir());
+  if (s.tier && s.tierFor === flavour) return s.tier;
+  try {
+    const res = await engine.calibrate();
+    if (!res) return s.tier || engine.guessTier();
+    console.log(`[engine] calibrated: ${res.msPerPass} ms per pass -> ${res.tier} tier`);
+    s.tier = res.tier;
+    s.tierFor = flavour;
+    s.tierMs = res.msPerPass;
+    writeSettings(s);
+    return res.tier;
+  } catch (err) {
+    console.log('[engine] calibration failed:', err.message);
+    return s.tier || engine.guessTier();
+  }
 }
 
 ipcMain.handle('check-environment', async () => checkEnvironment());
@@ -927,50 +1003,43 @@ function enableMarkShortcut(on) {
 ipcMain.on('mark-shortcut', (_e, on) => enableMarkShortcut(!!on));
 
 // ---------- live streaming transcription ----------
-// The renderer feeds raw 16 kHz mono PCM; the worker keeps a rolling buffer and
-// emits confirmed/tentative text every ~0.7 s (see transcribe_stream.py).
+// The renderer feeds raw 16 kHz mono PCM on 'recording-chunk'; live.js keeps a
+// rolling window and confirms text as two passes agree on it. How big a model
+// and how often it runs come from this machine's measured tier — a laptop gets
+// a smaller model rather than a transcript that falls further behind by the
+// minute, and the `modest` tier skips the live pass entirely.
 
-let liveWorker = null;
+let liveOn = false;
 
 function liveStopInternal() {
-  if (liveWorker) {
-    try { liveWorker.stdin.end(); } catch { /* closed */ }
-    try { liveWorker.kill(); } catch { /* gone */ }
-    liveWorker = null;
-  }
+  liveOn = false;
+  return live.stop();
 }
 
 ipcMain.handle('live-start', async (_e, participants) => {
-  liveStopInternal();
-  // the live pass gets a larger model than the final one: on GPU it is still
-  // ~0.3 s per pass and noticeably more accurate (the worker drops to `small`
-  // by itself if it has to fall back to CPU)
-  const liveModel = process.env.YAPPER_LIVE_MODEL || 'medium';
-  liveWorker = spawn('python',
-    [path.join(__dirname, 'transcribe_stream.py'), liveModel, process.env.YAPPER_LANG || 'auto', transcriptionHint(participants)],
-    { env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUTF8: '1' } });
-
-  let buf = '';
-  liveWorker.stdout.on('data', d => {
-    buf += d.toString('utf8');
-    let idx;
-    while ((idx = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, idx).trim();
-      buf = buf.slice(idx + 1);
-      if (line) broadcast('live-transcript', line);
-    }
-  });
-  liveWorker.stderr.on('data', d => console.log('[stream]', d.toString('utf8').trim()));
-  liveWorker.on('error', () => {
-    broadcast('live-transcript', JSON.stringify({ error: 'streaming worker failed to start' }));
-  });
-  return true;
+  await liveStopInternal();
+  const tier = engine.tierConfig(readSettings().tier || engine.guessTier());
+  if (!tier.live) return false;
+  try {
+    const ok = await live.start({
+      model: tier.liveModel,
+      cadenceMs: tier.cadenceMs,
+      windowSec: tier.windowSec,
+      maxHoldSec: tier.maxHoldSec,
+      language: process.env.YAPPER_LANG || 'auto',
+      prompt: transcriptionHint(participants),
+      onLine: obj => broadcast('live-transcript', JSON.stringify(obj))
+    });
+    liveOn = ok;
+    return ok;
+  } catch (err) {
+    console.log('[live] could not start:', err.message);
+    return false;
+  }
 });
 
-ipcMain.on('live-pcm', (_e, arrayBuffer) => {
-  if (!liveWorker || !liveWorker.stdin.writable) return;
-  try { liveWorker.stdin.write(Buffer.from(arrayBuffer)); } catch { /* worker gone */ }
-});
+// (no separate PCM channel: the samples arrive on 'recording-chunk' and are
+// forwarded from there, so the file and the live text share one stream)
 
 ipcMain.handle('live-stop', async () => liveStopInternal());
 
