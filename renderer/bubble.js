@@ -4,14 +4,58 @@ const tentativeEl = document.getElementById('tentative');
 const placeholderEl = document.getElementById('placeholder');
 const textEl = document.getElementById('text');
 
+const headerEl = document.querySelector('header');
+const cardEl = document.getElementById('card');
+
 const EXPANDED = { w: 470, h: 280 };
-const COLLAPSED = { w: 266, h: 64 };   // header (44) + card margins + borders
+
+// Collapsed, the window is exactly this one row of controls, so its size is
+// measured rather than hardcoded. A fixed number cannot survive "Pause"
+// becoming "Resume", the timer growing an hours field, or a font that renders
+// wider than the one it was measured with — and when it is too small the card
+// clips its own Stop button.
+function collapsedSize() {
+  const cs = getComputedStyle(headerEl);
+  const gap = parseFloat(cs.columnGap || cs.gap) || 0;
+  let w = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+  let items = 0;
+  for (const el of headerEl.children) {
+    if (getComputedStyle(el).display === 'none') continue;
+    items++;
+    if (!el.classList.contains('spacer')) w += el.getBoundingClientRect().width;
+  }
+  w += gap * Math.max(0, items - 1);
+
+  // the card sits inside a margin and draws its own border
+  const card = getComputedStyle(cardEl);
+  const chrome = parseFloat(card.marginLeft) + parseFloat(card.marginRight)
+    + parseFloat(card.borderLeftWidth) + parseFloat(card.borderRightWidth);
+  const chromeY = parseFloat(card.marginTop) + parseFloat(card.marginBottom)
+    + parseFloat(card.borderTopWidth) + parseFloat(card.borderBottomWidth);
+
+  return {
+    w: Math.ceil(w + chrome) + 1,   // a pixel of slack for sub-pixel rounding
+    h: Math.ceil(headerEl.getBoundingClientRect().height + chromeY)
+  };
+}
 
 let collapsed = localStorage.getItem('yapper-bubble-collapsed') === 'yes';
+let sent = null;
+
+function resizeTo(size) {
+  if (sent && sent.w === size.w && sent.h === size.h) return;
+  sent = size;
+  window.yapper.bubbleResize(size);
+}
 
 function applyCollapsed() {
   document.body.classList.toggle('collapsed', collapsed);
-  window.yapper.bubbleResize(collapsed ? COLLAPSED : EXPANDED);
+  resizeTo(collapsed ? collapsedSize() : EXPANDED);
+}
+
+/** Re-fit after anything that can change how wide the row wants to be. */
+function refit() {
+  if (collapsed) resizeTo(collapsedSize());
 }
 
 function atBottom() {
@@ -43,6 +87,7 @@ window.yapper.onLiveTranscript(line => {
 
 window.yapper.onBubbleState(state => {
   if (!state) return;
+  const before = timerEl.textContent.length;
   if (typeof state.timer === 'string') timerEl.textContent = state.timer;
   if (state.theme) document.body.classList.toggle('light', state.theme === 'light');
   if (typeof state.paused === 'boolean') {
@@ -50,7 +95,10 @@ window.yapper.onBubbleState(state => {
     const b = document.getElementById('btn-pause');
     b.classList.toggle('on', state.paused);
     b.textContent = state.paused ? 'Resume' : 'Pause';
+    refit();                            // "Resume" is wider than "Pause"
   }
+  // the timer grows an hours field on long meetings
+  if (timerEl.textContent.length !== before) refit();
   if (state.marked) {
     const f = document.getElementById('flash');
     f.classList.remove('go');
@@ -70,3 +118,7 @@ document.getElementById('btn-stop').addEventListener('click', () => window.yappe
 document.getElementById('btn-open').addEventListener('click', () => window.yapper.bubbleFocusMain());
 
 applyCollapsed();
+
+// Geist loads asynchronously; measuring before it arrives sizes the window to
+// the fallback font's metrics, which is how the row ends up clipped.
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(refit);
