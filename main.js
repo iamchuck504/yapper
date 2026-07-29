@@ -633,6 +633,25 @@ Tasks or commitments, including owner and due date if mentioned. If none, write 
 
 ## Next steps
 What happens after this call.`,
+  // Written for someone who was not in the room and will not ask follow-up
+  // questions: prose, not bullets, and no invented certainty.
+  memo: `## Overview
+Two or three sentences of prose stating what the meeting was about and why it happened. No bullets.
+
+## Background
+A short prose paragraph with the context a reader who was not there would need. Omit this section if the transcript gives no context.
+
+## Discussion
+Flowing prose, in paragraphs, covering what was actually said and the reasoning behind it. Do not use bullet points here. Attribute positions to people only where the transcript makes it clear.
+
+## Decisions
+What was decided or agreed, in prose. Where something was discussed but not settled, say so plainly rather than implying it was agreed. If nothing was decided, write "No decisions were reached."
+
+## What is needed
+What the meeting concluded is required from someone: approvals, resources, information, a decision from elsewhere. Neutral wording, no promises on anyone's behalf. Omit this section if nothing was asked for.
+
+## Next steps
+A short prose paragraph on what happens after this, including owners and dates only where the transcript states them.`,
   minutes: `## TL;DR
 A few high-level bullet points capturing the essence of the meeting at a glance.
 
@@ -869,11 +888,88 @@ ipcMain.handle('list-meetings', async () => {
         title: fs.existsSync(titlePath) ? fs.readFileSync(titlePath, 'utf8').trim() : '',
         folder,
         hasSummary: fs.existsSync(path.join(folder, 'notes.md')),
-        hasTranscript: fs.existsSync(path.join(folder, 'transcript.txt'))
+        hasTranscript: fs.existsSync(path.join(folder, 'transcript.txt')),
+        audioSec: Math.round(audioSeconds(folder))
       };
     })
     .sort((a, b) => b.name.localeCompare(a.name));
 });
+
+/** How much audio a meeting holds, so the UI can tell a false start apart. */
+function audioSeconds(folder) {
+  try {
+    const wav = path.join(folder, 'recording.wav');
+    if (fs.existsSync(wav)) {
+      return Math.max(0, fs.statSync(wav).size - engine.WAV_HEADER) / engine.BYTES_PER_SEC;
+    }
+    // a legacy compressed recording: size is all we have, so only say "not empty"
+    const legacy = fs.readdirSync(folder).find(f => /^recording\./i.test(f));
+    return legacy && fs.statSync(path.join(folder, legacy)).size > 4096 ? -1 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+// ---------- deleting a meeting ----------
+// A false start leaves a folder with a few seconds of silence in it, and there
+// was no way to get rid of one. Deletion goes to the recycle bin rather than
+// straight out, because the one thing this app must never do is lose audio.
+
+function insideMeetings(folder) {
+  const root = path.resolve(MEETINGS_DIR) + path.sep;
+  const target = path.resolve(folder);
+  return target.startsWith(root) && target !== path.resolve(MEETINGS_DIR);
+}
+
+function describeMeeting(folder) {
+  const secs = audioSeconds(folder);
+  const bits = [];
+  if (secs > 0) {
+    const mins = Math.floor(secs / 60);
+    bits.push(mins >= 1 ? `${mins} min of audio` : `${Math.round(secs)} s of audio`);
+  } else if (secs < 0) {
+    bits.push('a recording');
+  }
+  if (fs.existsSync(path.join(folder, 'transcript.txt'))) bits.push('a transcript');
+  if (fs.existsSync(path.join(folder, 'notes.md'))) bits.push('notes');
+  return bits;
+}
+
+ipcMain.handle('delete-meeting', async (_e, folder) => {
+  if (!folder || !insideMeetings(folder) || !fs.existsSync(folder)) {
+    return { deleted: false, reason: 'That meeting is no longer there.' };
+  }
+
+  const bits = describeMeeting(folder);
+  const name = path.basename(folder);
+  const res = await dialog.showMessageBox(win, {
+    type: 'warning',
+    buttons: ['Delete', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Delete meeting',
+    message: `Delete the meeting from ${name}?`,
+    detail: bits.length
+      ? `It contains ${listPhrase(bits)}. It goes to the recycle bin, so it can still be recovered from there.`
+      : 'It is empty — nothing was recorded. It goes to the recycle bin.'
+  });
+  if (res.response !== 0) return { deleted: false };
+
+  // if this is the meeting being recorded right now, let go of the file first
+  if (recFolder && path.resolve(recFolder) === path.resolve(folder)) closeRecFile();
+
+  try {
+    await shell.trashItem(folder);
+  } catch (err) {
+    return { deleted: false, reason: `It could not be deleted: ${err.message}` };
+  }
+  return { deleted: true };
+});
+
+function listPhrase(items) {
+  if (items.length === 1) return items[0];
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
 
 ipcMain.handle('load-meeting', async (_e, folder) => {
   const read = f => {

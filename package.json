@@ -5,7 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node build/test-llm.js && node build/test-keystore.js && node build/test-live-logic.js && node build/test-bounds.js && node build/test-ipc-wiring.js"
+    "test": "node build/test-llm.js && node build/test-keystore.js && node build/test-live-logic.js && node build/test-bounds.js && node build/test-meetings.js && node build/test-ipc-wiring.js"
   },
   "devDependencies": {
     "electron": "^33.0.0"
