@@ -170,6 +170,7 @@ const llmModelInput = $('llm-model');
 const llmBaseInput = $('llm-baseurl');
 const llmHint = $('llm-hint');
 const llmStatus = $('llm-status');
+const llmPrivacy = $('llm-privacy');
 let llmProviders = [];
 let llmHasKey = false;
 
@@ -181,13 +182,25 @@ function syncLlmControls() {
   const p = currentProvider();
   if (!p) return;
   llmHint.textContent = p.hint;
-  // the key row doubles as the model row, so it shows for anything with a key
+  llmHint.classList.toggle('free', !!p.free);
   $('llm-key-row').classList.toggle('hidden', !p.needsKey);
   $('llm-baseurl-row').classList.toggle('hidden', !p.needsBaseUrl);
-  $('llm-test-row').classList.toggle('hidden', !p.needsKey);
+  // anything but the CLI is worth testing: a local model can be down too
+  const remote = p.id !== 'claude-cli';
+  $('llm-model-row').classList.toggle('hidden', !remote);
+  $('llm-test-row').classList.toggle('hidden', !remote);
   llmKeyInput.placeholder = llmHasKey ? 'saved — type to replace' : (p.keyHint || 'API key');
   llmModelInput.placeholder = p.defaultModel || 'model';
   llmBaseInput.placeholder = p.defaultBaseUrl || 'https://your-gateway/v1';
+
+  const link = $('llm-key-link');
+  link.classList.toggle('hidden', !p.keyUrl);
+  link.textContent = p.free ? 'Get a free key →' : 'Get a key →';
+  link.dataset.url = p.keyUrl || '';
+
+  // Say what a free tier costs instead, before a confidential meeting is sent.
+  llmPrivacy.textContent = p.privacy || '';
+  $('llm-privacy-row').classList.toggle('hidden', !p.privacy);
 }
 
 async function saveLlm() {
@@ -224,7 +237,21 @@ async function saveLlm() {
   }
 })();
 
-llmProviderSel.addEventListener('change', () => { syncLlmControls(); saveLlm(); });
+llmProviderSel.addEventListener('change', () => {
+  // a new provider's own defaults, not the last one's model or endpoint
+  llmModelInput.value = '';
+  llmBaseInput.value = '';
+  llmStatus.textContent = '';
+  llmStatus.classList.remove('bad');
+  syncLlmControls();
+  saveLlm();
+});
+
+$('llm-key-link').addEventListener('click', e => {
+  e.preventDefault();
+  const url = e.currentTarget.dataset.url;
+  if (url) window.yapper.openExternal(url);
+});
 for (const el of [llmKeyInput, llmModelInput, llmBaseInput]) {
   el.addEventListener('change', saveLlm);
 }
@@ -257,6 +284,14 @@ window.yapper.onMeetingDetected(info => {
 
 $('mp-start').addEventListener('click', () => {
   meetingPrompt.classList.add('hidden');
+  startRecording();
+});
+
+// the same offer, taken from the system notification instead of the window
+window.yapper.onStartRecording(() => {
+  if (recording) return;
+  meetingPrompt.classList.add('hidden');
+  showView('record');
   startRecording();
 });
 $('mp-dismiss').addEventListener('click', () => meetingPrompt.classList.add('hidden'));
@@ -318,9 +353,14 @@ const SECTION_META = [
   { match: /client|need/i, cls: 'sec-key' }
 ];
 
+/**
+ * `matched` tells a deliberate neutral heading apart from one nothing knew what
+ * to do with. They look the same on screen, but only the second is a bug — a
+ * style whose sections were changed without teaching the UI about them.
+ */
 function sectionMeta(title) {
-  for (const m of SECTION_META) if (m.match.test(title)) return m;
-  return { cls: 'sec-neutral' };
+  for (const m of SECTION_META) if (m.match.test(title)) return { ...m, matched: true };
+  return { cls: 'sec-neutral', matched: false };
 }
 
 function inlineMd(s) {
@@ -1308,12 +1348,37 @@ btnImport.addEventListener('click', async () => {
       setStatus(statusEl, `Converting the audio… ${Math.round(p * 100)}%`));
     setStep('save', 'done');
     setStep('transcribe', 'active');
-    setStatus(statusEl, 'Transcribing voice note verbatim with Whisper…\n');
+    setStatus(statusEl, 'Transcribing the voice note…\n');
     const transcript = await window.yapper.transcribe(picked.folder);
     setStep('transcribe', 'done');
-    statusEl.classList.add('hidden');
+
+    // An imported voice note gets the same treatment as a recorded meeting.
+    // It used to stop at the transcript, which left the whole point of the app
+    // — the notes — undone for anything that did not come from the recorder.
+    let summary = '';
+    setStep('notes', 'active');
+    try {
+      setStatus(statusEl, 'Generating the notes…');
+      summary = await window.yapper.summarize(picked.folder, transcript,
+        { ...options, participants: recParticipants() });
+      setStep('notes', 'done');
+    } catch (err) {
+      // the transcript is already saved, so this is a partial success, not a loss
+      setStep('notes', 'error');
+      setStatus(statusEl, `The transcript is saved, but the notes failed: ${err.message}`, true);
+    }
+
+    let title = picked.title;
+    if (!title) {
+      setStatus(statusEl, 'Naming it…');
+      title = await window.yapper.generateTitle(picked.folder);
+    }
+
+    if (summary) statusEl.classList.add('hidden');
     pipelineEl.classList.add('hidden');
-    openMeetingView(picked.title, '', transcript);
+    openMeetingView(title || formatMeetingDate(picked.folder.split(/[\\/]/).pop()),
+      summary, transcript, true, recParticipants());
+    participantsRec.value = '';
     await refreshMeetingList();
   } catch (err) {
     pipelineEl.querySelectorAll('.step.active').forEach(s => { s.classList.remove('active'); s.classList.add('error'); });
@@ -1477,6 +1542,45 @@ function exportHeader() {
   return `# ${title}\n\n_${resultDateStr}_\n`;
 }
 
+/**
+ * The transcript as readable Markdown rather than a wall of text: each line
+ * keeps its timestamp as bold, and a gap of a minute or more starts a new
+ * paragraph, which is roughly where a topic changes.
+ */
+const TRANSCRIPT_PARA_GAP = 60;   // seconds of silence that read as a new topic
+
+function transcriptToMd(text) {
+  const blocks = [];
+  let block = [];
+  let lastSec = null;
+
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^\[(\d+):(\d\d):(\d\d)\]\s*(.*)$/);
+    if (!m) { block.push(escapeMd(line)); continue; }
+
+    const sec = (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]);
+    if (lastSec !== null && sec - lastSec >= TRANSCRIPT_PARA_GAP && block.length) {
+      blocks.push(block);
+      block = [];
+    }
+    lastSec = sec;
+    const stamp = +m[1] > 0 ? `${m[1]}:${m[2]}:${m[3]}` : `${m[2]}:${m[3]}`;
+    block.push(`**[${stamp}]** ${escapeMd(m[4])}`);
+  }
+  if (block.length) blocks.push(block);
+
+  // two trailing spaces is a hard line break: lines stay on their own line
+  // inside a block, and blocks become real paragraphs
+  return blocks.map(b => b.join('  \n')).join('\n\n') + '\n';
+}
+
+// A transcript is verbatim, so anything Markdown would swallow gets escaped.
+function escapeMd(s) {
+  return s.replace(/([\\`*_[\]])/g, '\\$1');
+}
+
 async function runExport(kind) {
   closeExportMenu();
   const title = resultTitle.textContent || 'Meeting';
@@ -1495,6 +1599,13 @@ async function runExport(kind) {
         content: `${exportHeader()}\n${currentNotesMd}\n`
       });
     }
+    if (kind === 'transcript-md') {
+      if (!hasTranscript) throw new Error('This meeting has no transcript.');
+      return await window.yapper.saveTextFile({
+        defaultName: `${title} - transcript`, extension: 'md', description: 'Markdown',
+        content: `${exportHeader()}\n## Full transcript\n\n${transcriptToMd(transcript)}`
+      });
+    }
     if (kind === 'txt') {
       if (!hasTranscript) throw new Error('This meeting has no transcript.');
       return await window.yapper.saveTextFile({
@@ -1506,7 +1617,7 @@ async function runExport(kind) {
       if (!currentNotesMd && !hasTranscript) throw new Error('Nothing to export yet.');
       const parts = [exportHeader()];
       if (currentNotesMd) parts.push('\n' + currentNotesMd + '\n');
-      if (hasTranscript) parts.push('\n---\n\n## Full transcript\n\n```\n' + transcript + '\n```\n');
+      if (hasTranscript) parts.push('\n---\n\n## Full transcript\n\n' + transcriptToMd(transcript));
       return await window.yapper.saveTextFile({
         defaultName: `${title} - full`, extension: 'md', description: 'Markdown',
         content: parts.join('')

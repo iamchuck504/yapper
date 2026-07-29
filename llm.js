@@ -18,6 +18,12 @@ const TIMEOUT_MS = 180000;
 
 // ---------------------------------------------------------------- providers
 
+// A note on "free": there is no way to give someone working AI summaries with
+// no setup at all. Every hosted API needs a credential, and that credential is
+// either shipped inside the app (abused within days, and against every
+// provider's terms), brokered by a server someone pays for, or the user's own.
+// So the honest best is a free tier that takes about a minute to sign up for
+// and costs nothing after that — which is what `gemini` is here for.
 const PROVIDERS = {
   'claude-cli': {
     label: 'Claude Code',
@@ -25,22 +31,49 @@ const PROVIDERS = {
     needsKey: false,
     run: runClaudeCli
   },
+  gemini: {
+    label: 'Google Gemini (free)',
+    hint: 'Free, no credit card. Takes about a minute to get a key, then a few hundred meetings a day.',
+    free: true,
+    // Free tiers are free because the data is worth something: Google may
+    // train on what is sent here. Meeting transcripts are not always yours to
+    // share, so the UI says this out loud.
+    privacy: 'Google may use free-tier requests to improve its models. Not for confidential meetings.',
+    needsKey: true,
+    keyHint: 'AIza...',
+    keyUrl: 'https://aistudio.google.com/apikey',
+    defaultModel: 'gemini-3.5-flash-lite',
+    defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    run: runOpenAiCompatible
+  },
+  openrouter: {
+    label: 'OpenRouter',
+    hint: 'One key, many models — including free ones (their ids end in “:free”).',
+    free: true,
+    privacy: 'Free models route to providers that may log or train on requests.',
+    needsKey: true,
+    keyHint: 'sk-or-...',
+    keyUrl: 'https://openrouter.ai/keys',
+    defaultModel: 'google/gemma-4-31b-it:free',
+    defaultBaseUrl: 'https://openrouter.ai/api/v1',
+    run: runOpenAiCompatible
+  },
+  ollama: {
+    label: 'Ollama (on this computer)',
+    hint: 'Free and completely private: nothing leaves your machine. Needs Ollama installed and a model pulled.',
+    needsKey: false,
+    defaultModel: 'llama3.1',
+    defaultBaseUrl: 'http://localhost:11434/v1',
+    run: runOpenAiCompatible
+  },
   anthropic: {
     label: 'Anthropic API',
     hint: 'Your own key from console.anthropic.com. Billed per meeting.',
     needsKey: true,
     keyHint: 'sk-ant-...',
+    keyUrl: 'https://console.anthropic.com/settings/keys',
     defaultModel: 'claude-sonnet-5',
     run: runAnthropic
-  },
-  openrouter: {
-    label: 'OpenRouter',
-    hint: 'Your own OpenRouter key. Same shape as any OpenAI-compatible endpoint.',
-    needsKey: true,
-    keyHint: 'sk-or-...',
-    defaultModel: 'anthropic/claude-sonnet-4.5',
-    defaultBaseUrl: 'https://openrouter.ai/api/v1',
-    run: runOpenAiCompatible
   },
   // The seam for whatever comes next: a company gateway, a self-hosted model,
   // an official Yapper endpoint. Anything that speaks /chat/completions works
@@ -62,9 +95,12 @@ function providerList() {
     id,
     label: p.label,
     hint: p.hint,
+    free: !!p.free,
+    privacy: p.privacy || '',
     needsKey: !!p.needsKey,
     needsBaseUrl: !!p.needsBaseUrl,
     keyHint: p.keyHint || '',
+    keyUrl: p.keyUrl || '',
     defaultModel: p.defaultModel || '',
     defaultBaseUrl: p.defaultBaseUrl || ''
   }));
@@ -89,15 +125,43 @@ async function generate(config, { system, input, maxTokens = 8000 }) {
   return text;
 }
 
-/** A cheap round trip, so Settings can say "working" instead of "saved". */
+/**
+ * A cheap round trip, so Settings can say "working" instead of "saved". When
+ * the model name is the problem — which is what happens when a provider
+ * retires an id that shipped as a default — it asks the provider what it does
+ * have rather than leaving the user guessing.
+ */
 async function test(config) {
   const t = Date.now();
-  const out = await generate(config, {
-    system: 'Reply with exactly the word: ok',
-    input: 'ping',
-    maxTokens: 16
-  });
-  return { ok: true, ms: Date.now() - t, reply: out.slice(0, 40) };
+  try {
+    const out = await generate(config, {
+      system: 'Reply with exactly the word: ok',
+      input: 'ping',
+      maxTokens: 16
+    });
+    return { ok: true, ms: Date.now() - t, reply: out.slice(0, 40) };
+  } catch (err) {
+    if (!/does not exist|not found|no such model|unknown model/i.test(err.message)) throw err;
+    const models = await listModels(config).catch(() => []);
+    if (!models.length) throw err;
+    const err2 = new Error(`${err.message}\nAvailable here: ${models.slice(0, 6).join(', ')}`);
+    err2.models = models;
+    throw err2;
+  }
+}
+
+/** What this endpoint actually offers, for OpenAI-compatible providers. */
+async function listModels(config) {
+  const p = PROVIDERS[config.provider];
+  if (!p || p.run !== runOpenAiCompatible) return [];
+  const key = (config.apiKey || '').trim();
+  const res = await getJson(`${baseUrlFor(config)}/models`,
+    key ? { Authorization: `Bearer ${key}` } : {});
+  return (res.data || [])
+    .map(m => m.id)
+    .filter(Boolean)
+    // free-tier ids first: those are the ones a new user can actually run
+    .sort((a, b) => (b.endsWith(':free') ? 1 : 0) - (a.endsWith(':free') ? 1 : 0));
 }
 
 // ---------------------------------------------------------------- claude cli
@@ -122,11 +186,19 @@ function runClaudeCli(config, { system, input }) {
 
 // ---------------------------------------------------------------- http
 
+function getJson(url, headers) {
+  return request('GET', url, headers, null);
+}
+
 function postJson(url, headers, body) {
+  return request('POST', url, headers, body);
+}
+
+function request(method, url, headers, body) {
   return new Promise((resolve, reject) => {
     let u;
     try { u = new URL(url); } catch { return reject(new Error(`That endpoint is not a valid URL: ${url}`)); }
-    const payload = Buffer.from(JSON.stringify(body), 'utf8');
+    const payload = body === null ? null : Buffer.from(JSON.stringify(body), 'utf8');
     const mod = u.protocol === 'http:' ? http : https;
 
     const req = mod.request({
@@ -134,8 +206,10 @@ function postJson(url, headers, body) {
       hostname: u.hostname,
       port: u.port || (u.protocol === 'http:' ? 80 : 443),
       path: u.pathname + u.search,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': payload.length, ...headers }
+      method,
+      headers: payload
+        ? { 'Content-Type': 'application/json', 'Content-Length': payload.length, ...headers }
+        : { ...headers }
     }, res => {
       let raw = '';
       res.setEncoding('utf8');
@@ -159,7 +233,7 @@ function postJson(url, headers, body) {
       req.destroy(new Error('The request timed out. The transcript may be very long, or the network is down.'));
     });
     req.on('error', err => reject(new Error(err.message)));
-    req.end(payload);
+    req.end(payload || undefined);
   });
 }
 
@@ -189,10 +263,17 @@ async function runAnthropic(config, { system, input, maxTokens }) {
 
 // ------------------------------------------------- openai-compatible / router
 
+function baseUrlFor(config) {
+  const p = PROVIDERS[config.provider] || {};
+  return (config.baseUrl || p.defaultBaseUrl || '').trim().replace(/\/+$/, '');
+}
+
 async function runOpenAiCompatible(config, { system, input, maxTokens }) {
-  const base = (config.baseUrl || PROVIDERS[config.provider].defaultBaseUrl || '').trim().replace(/\/+$/, '');
+  const base = baseUrlFor(config);
+  const key = (config.apiKey || '').trim();
   const res = await postJson(`${base}/chat/completions`, {
-    Authorization: `Bearer ${config.apiKey.trim()}`
+    // a model running on this machine has nothing to authenticate
+    ...(key ? { Authorization: `Bearer ${key}` } : {})
   }, {
     model: config.model || PROVIDERS[config.provider].defaultModel,
     max_tokens: maxTokens,
@@ -205,4 +286,4 @@ async function runOpenAiCompatible(config, { system, input, maxTokens }) {
   return (choice && choice.message && choice.message.content) || '';
 }
 
-module.exports = { PROVIDERS, providerList, generate, test };
+module.exports = { PROVIDERS, providerList, generate, test, listModels };
