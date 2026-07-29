@@ -120,13 +120,18 @@ if (Test-Path "$here\node_modules\electron\dist\electron.exe") {
     exit 1
 }
 
-# --- 4. Claude Code CLI (for note generation) ---
+# --- 4. Who writes the notes ---
+# Transcription is entirely local and needs nothing else. The notes need a
+# model, and there is more than one way to pay for one, so this only reports
+# what it finds - the choice lives in the app's settings.
 $claude = Get-Command claude -ErrorAction SilentlyContinue
 if (-not $claude -and -not (Test-Path "$env:USERPROFILE\.local\bin\claude.exe")) {
-    Write-Host "[!] Claude Code CLI not found. Transcription works without it, but" -ForegroundColor Yellow
-    Write-Host "    note generation needs it: install from https://claude.com/code and sign in."
+    Write-Host "[--] Claude Code CLI not found. Recording and transcription work without it."
+    Write-Host "     For notes, either install it from https://claude.com/code and sign in,"
+    Write-Host "     or open Yapper's settings and paste an API key (Anthropic, OpenRouter,"
+    Write-Host "     or any OpenAI-compatible endpoint)."
 } else {
-    Write-Host "[OK] Claude Code CLI found"
+    Write-Host "[OK] Claude Code CLI found - notes will use it unless you pick otherwise"
 }
 
 # --- 5. Desktop shortcut ---

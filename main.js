@@ -1,5 +1,5 @@
-const { app, BrowserWindow, ipcMain, session, desktopCapturer, shell, dialog, screen,
-  Notification, globalShortcut } = require('electron');
+﻿const { app, BrowserWindow, ipcMain, session, desktopCapturer, shell, dialog, screen,
+  Notification, globalShortcut, safeStorage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -7,6 +7,8 @@ const { spawn } = require('child_process');
 const { clampToArea } = require('./bounds');
 const engine = require('./engine');
 const live = require('./live');
+const llm = require('./llm');
+const keystore = require('./keystore');
 
 const MEETINGS_DIR = path.join(app.getPath('documents'), 'Meetings');
 
@@ -195,6 +197,63 @@ function initOpenAtLogin() {
 
 ipcMain.handle('get-open-at-login', async () => readSettings().openAtLogin !== false);
 
+// ---------- note provider (bring your own key) ----------
+// The key is encrypted with the OS keystore (DPAPI on Windows, Keychain on
+// macOS) rather than sitting in a readable JSON file. It never leaves the main
+// process: the renderer only ever learns whether one is set.
+
+/** Everything llm.js needs, assembled from settings. */
+function llmConfig() {
+  const s = readSettings();
+  return {
+    provider: s.llmProvider || 'claude-cli',
+    apiKey: keystore.open(safeStorage, s.llmKey),
+    model: s.llmModel || '',
+    baseUrl: s.llmBaseUrl || '',
+    claudePath: resolveClaude()
+  };
+}
+
+ipcMain.handle('get-llm-settings', async () => {
+  const s = readSettings();
+  return {
+    providers: llm.providerList(),
+    provider: s.llmProvider || 'claude-cli',
+    model: s.llmModel || '',
+    baseUrl: s.llmBaseUrl || '',
+    hasKey: !!(s.llmKey && s.llmKey.v),
+    keyEncrypted: !!(s.llmKey && s.llmKey.enc),
+    encryptionAvailable: safeStorage.isEncryptionAvailable()
+  };
+});
+
+ipcMain.handle('set-llm-settings', async (_e, next) => {
+  const s = readSettings();
+  s.llmProvider = next.provider || 'claude-cli';
+  s.llmModel = (next.model || '').trim();
+  s.llmBaseUrl = (next.baseUrl || '').trim();
+  // an absent key means "leave the stored one alone"; an empty string clears it
+  if (typeof next.apiKey === 'string') {
+    s.llmKey = keystore.seal(safeStorage, next.apiKey);
+  }
+  writeSettings(s);
+  envCache = null;                   // the preflight answer just changed
+  return true;
+});
+
+ipcMain.handle('test-llm', async (_e, override) => {
+  const cfg = Object.assign(llmConfig(), override || {});
+  // a key typed but not yet saved is passed through directly
+  if (override && typeof override.apiKey === 'string' && override.apiKey.trim()) {
+    cfg.apiKey = override.apiKey.trim();
+  }
+  try {
+    return await llm.test(cfg);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 // Remembered only so the next launch can paint the right window background.
 ipcMain.on('set-theme', (_e, theme) => {
   const s = readSettings();
@@ -305,9 +364,9 @@ async function bootWithSplash() {
   // renderer so it does not pay for the checks a second time.
   setStatus(readSettings().tier ? 'Checking transcription engine' : 'Measuring this machine');
   const envPromise = checkEnvironment().then(env => {
-    setStatus(env.claude ? 'Loading' : 'Claude Code not found');
+    setStatus(env.notes && env.notes.ok ? 'Loading' : 'Notes need setup');
     return env;
-  }).catch(() => ({ whisper: false, claude: false }));
+  }).catch(() => ({ whisper: false, notes: { ok: false } }));
 
   migrateOldData();
   createWindow();
@@ -636,28 +695,14 @@ Attribute discussion points, decisions, and action items to specific people by n
   return prompt;
 }
 
-function runClaude(prompt, transcript) {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(resolveClaude(), ['-p', prompt, '--output-format', 'text'], {
-      env: { ...process.env }
-    });
-    let out = '';
-    let errOut = '';
-    proc.stdout.on('data', d => { out += d.toString('utf8'); });
-    proc.stderr.on('data', d => { errOut += d.toString('utf8'); });
-    proc.on('error', reject);
-    proc.on('close', code => {
-      if (code !== 0) return reject(new Error(`Claude failed (code ${code}): ${errOut.slice(-800)}`));
-      resolve(out.trim());
-    });
-    proc.stdin.write(transcript, 'utf8');
-    proc.stdin.end();
-  });
+/** Write text with whatever provider this machine is configured for. */
+function runModel(prompt, transcript, maxTokens) {
+  return llm.generate(llmConfig(), { system: prompt, input: transcript, maxTokens });
 }
 
 ipcMain.handle('summarize', async (_e, folder, transcript, options) => {
   writeParticipants(folder, options && options.participants);
-  const out = await runClaude(buildPrompt(options), transcript);
+  const out = await runModel(buildPrompt(options), transcript);
   fs.writeFileSync(path.join(folder, 'notes.md'), out, 'utf8');
   return out;
 });
@@ -667,7 +712,7 @@ ipcMain.handle('regenerate', async (_e, folder, options) => {
   if (!fs.existsSync(transcriptPath)) throw new Error('This meeting has no transcript to regenerate from.');
   writeParticipants(folder, options && options.participants);
   const transcript = fs.readFileSync(transcriptPath, 'utf8');
-  const out = await runClaude(buildPrompt(options), transcript);
+  const out = await runModel(buildPrompt(options), transcript);
   fs.writeFileSync(path.join(folder, 'notes.md'), out, 'utf8');
   return out;
 });
@@ -695,8 +740,8 @@ function checkEnvironment() {
   if (!envCache) {
     envCache = (async () => {
       const whisper = engine.isInstalled() && engine.hasModel(engine.CALIBRATION_MODEL);
-      const claude = await runOk(resolveClaude(), ['--version']);
-      return { whisper, claude, tier: whisper ? await ensureTier() : 'modest' };
+      const notes = await notesReady();
+      return { whisper, notes, tier: whisper ? await ensureTier() : 'modest' };
     })().catch(err => {
       envCache = null;                       // let a later caller retry
       throw err;
@@ -727,6 +772,28 @@ async function ensureTier() {
     console.log('[engine] calibration failed:', err.message);
     return s.tier || engine.guessTier();
   }
+}
+
+/**
+ * Can notes be generated at all? What counts depends on who is writing them:
+ * the CLI has to actually be installed, everything else needs a key.
+ */
+async function notesReady() {
+  const cfg = llmConfig();
+  const p = llm.PROVIDERS[cfg.provider];
+  if (!p) return { ok: false, provider: cfg.provider, reason: 'No note provider is configured.' };
+  if (p.needsKey) {
+    return cfg.apiKey
+      ? { ok: true, provider: cfg.provider, label: p.label }
+      : { ok: false, provider: cfg.provider, label: p.label, reason: `${p.label} has no API key yet.` };
+  }
+  const ok = await runOk(resolveClaude(), ['--version']);
+  return ok
+    ? { ok: true, provider: cfg.provider, label: p.label }
+    : {
+      ok: false, provider: cfg.provider, label: p.label,
+      reason: 'Claude Code was not found. Install it from claude.com/code and sign in, or use an API key instead.'
+    };
 }
 
 ipcMain.handle('check-environment', async () => checkEnvironment());
@@ -768,7 +835,7 @@ ipcMain.handle('generate-title', async (_e, folder) => {
   const excerpt = transcript.slice(0, 6000);
   let title = '';
   try {
-    title = cleanTitle(await runClaude(TITLE_PROMPT, excerpt));
+    title = cleanTitle(await runModel(TITLE_PROMPT, excerpt, 64));
   } catch {
     return '';                                          // titling is best-effort
   }

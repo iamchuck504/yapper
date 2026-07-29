@@ -29,6 +29,23 @@ Anclas medidas en la misma PC con la muestra de calibración: RTX 4080 SUPER **7
 
 Si una máquina resulta más lenta de lo que midió (batería, CPU ocupada, otra app en la GPU), el vivo **estira solo su cadencia** en vez de irse quedando cada vez más atrás.
 
+## Quién escribe las notas
+
+La transcripción es siempre local. Las notas no, y no todo el mundo paga un modelo igual, así que el proveedor se elige en la app (**Notes by**):
+
+| Proveedor | Qué necesita |
+|---|---|
+| **Claude Code** | el CLI instalado y con sesión (la suscripción Max). Sin key, sin costo por reunión. |
+| **Anthropic API** | key propia de console.anthropic.com. |
+| **OpenRouter** | key propia de OpenRouter. |
+| **Other (OpenAI-compatible)** | cualquier endpoint que hable `/chat/completions`: un gateway de empresa, un modelo local, OpenAI. |
+
+Esa última fila es a propósito la salida hacia adelante: si esto termina siendo un producto con una API oficial, se agrega una entrada en `llm.js` y ya — los tres lugares que generan notas (resumen, regenerar, título automático) no se tocan.
+
+La key se guarda **cifrada con el llavero del sistema** (DPAPI en Windows, Keychain en macOS), no en texto plano dentro de `settings.json`, y nunca sale del proceso principal: el renderer solo se entera de si hay una o no. Si el sistema no tiene llavero, la app lo dice en vez de fingir que está protegida.
+
+Hay un botón **Test connection** que hace una llamada mínima y responde "working" o el error real (key rechazada, sin saldo, modelo inexistente).
+
 ## Cómo funciona
 
 1. **Grabar reunión** — captura el audio del sistema (lo que escuchas: Meet, Zoom, Teams…) por loopback de Windows **y** tu micrófono, mezclados en un solo audio.
@@ -69,7 +86,7 @@ o el acceso directo **Yapper** del Escritorio.
 1. Copia la carpeta del proyecto (sin `node_modules`, `bin` ni `models` si quieres que pese poco: setup los baja).
 2. En la PC nueva: instala Node (`winget install OpenJS.NodeJS.LTS`) si no está.
 3. Corre `powershell -ExecutionPolicy Bypass -File setup.ps1` — baja el motor de whisper.cpp (y la build CUDA si hay GPU NVIDIA), los modelos, instala Electron y crea el acceso directo.
-4. Para la generación de notas cada quien necesita **su propia** sesión de Claude Code (claude.com/code). La transcripción funciona sin Claude.
+4. Para las notas cada quien elige su proveedor en la app: su propia sesión de Claude Code, o su propia key. La grabación y la transcripción funcionan sin nada de eso.
 
 La app avisa al arrancar si falta algún requisito. Si una transcripción falla o se interrumpe, la grabación nunca se pierde: la reunión queda como "not transcribed" en la sidebar y un botón **Transcribe now** la recupera.
 
@@ -77,7 +94,7 @@ La app avisa al arrancar si falta algún requisito. Si una transcripción falla 
 
 - Node + Electron (en `node_modules`)
 - whisper.cpp en `bin/` y modelos en `models/` (los baja `setup.ps1`)
-- Claude Code CLI con sesión iniciada (`claude`)
+- Para las notas: Claude Code con sesión iniciada, **o** una API key en ajustes
 
 ## Configuración opcional (variables de entorno)
 
@@ -87,11 +104,29 @@ La app avisa al arrancar si falta algún requisito. Si una transcripción falla 
 ## Pruebas
 
 ```
-node build\test-live-logic.js     # reglas de confirmación (sin modelo)
+npm test                          # todo lo que corre sin modelo ni GPU
+```
+
+```
+node build\test-llm.js            # proveedores de notas, contra un servidor falso
+node build\test-keystore.js       # la key no queda legible (con electron usa el llavero real)
+node build\test-live-logic.js     # reglas de confirmación del vivo
+node build\test-ipc-wiring.js     # todo canal del preload tiene contraparte
 node build\test-bounds.js         # la burbuja nunca sale de la pantalla
 node build\test-engine.js         # arranca el servidor y mide una pasada
+node build\test-steady-cpu.js     # el nivel steady se sostiene sin GPU
 node build\tune-live.js           # replay de audio real comparando configuraciones
 ```
+
+Los que abren ventana van con Electron:
+
+```
+node_modules\electron\dist\electron.exe build\test-bubble-fit.js
+node_modules\electron\dist\electron.exe build\test-keystore.js
+node_modules\electron\dist\electron.exe build\test-llm-ui.js
+```
+
+`test-llm-ui.js` arranca la app de verdad en un userData temporal, elige un proveedor, guarda una key y comprueba que no aparece ni en `settings.json` ni de vuelta en el renderer.
 
 ## Notas
 
