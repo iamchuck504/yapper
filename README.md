@@ -129,7 +129,11 @@ node_modules\electron\dist\electron.exe build\icon-verify.js
 
 No borra "los píxeles negros": la marca es del mismo negro, así que eso la vaciaría. Rellena el negro **hacia adentro desde las cuatro esquinas**, lo que sigue la curva real del arte y no puede alcanzar la marca porque la marca no toca el borde. El borde antialiaseado se recalcula: cuánto color de cuerpo tiene cada píxel se convierte en su alfa, para no dejar un halo oscuro de un píxel.
 
-`icon-verify.js` comprueba las esquinas, que la marca siga intacta, que no haya halo, y que el `.ico` traiga todos los tamaños como PNG válidos; además deja una vista previa sobre fondo claro, oscuro y cuadrícula en `build/icon-preview.png`.
+Dentro del `.ico`, los tamaños hasta 128 van como **DIB clásico** y solo el de 256 como PNG. Chromium lee PNG sin problema, pero el shell de Windows —lo que dibuja el escritorio y la barra de tareas— es más viejo y quisquilloso; con PNG en todos los tamaños el icono se ve dentro de la app y no fuera.
+
+`icon-verify.js` comprueba las esquinas, que la marca siga intacta, que no haya halo, y que cada entrada del `.ico` tenga el formato que le toca; además deja una vista previa sobre fondo claro, oscuro y cuadrícula en `build/icon-preview.png`.
+
+**Los accesos directos se reparan solos.** Un `.lnk` guarda su propia copia de la ruta del icono, así que cambiar el icono de la app no mueve nada en el escritorio ni en la barra de tareas hasta reescribirlo — y nadie vuelve a correr `setup.ps1` después de una actualización. Al arrancar, la app revisa el acceso directo del escritorio, el de la barra de tareas anclada y el del menú inicio, y solo los reescribe si están desactualizados. De paso les pone el mismo AppUserModelID que usa la ventana, para que Windows no trate al botón anclado y a la app en ejecución como dos programas distintos.
 
 ## Pruebas
 
