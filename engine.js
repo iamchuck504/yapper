@@ -481,12 +481,131 @@ async function transcribeFileNow(file, { language = 'auto', model, prompt = '', 
   } finally {
     fs.closeSync(fd);
   }
-  return lines;
+  return deduplicate(lines);
 }
 
 /** whisper.cpp reports either seconds or millisecond offsets, depending on build. */
 function parseOffset(ms) {
   return typeof ms === 'number' ? ms / 1000 : 0;
+}
+
+// ---------------------------------------------------------------- cleanup
+//
+// Every Whisper model sometimes stutters — it emits a phrase and then emits it
+// again. Measured across seven of Chuck's own recordings, `small` repeated 0.95%
+// of its words this way and `medium` 0.79%: it is not a property of one model,
+// so it is fixed here rather than avoided by choosing differently. The transcript
+// is the only record of a meeting now, and a record that says things twice is a
+// worse record.
+//
+// Only exact, back-to-back repeats of three or more words are touched. Real
+// speech does repeat — "no, no, no", "very very good" — but those are one-word
+// runs, and nobody says the same three words twice in a row by accident.
+
+const MIN_REPEAT_WORDS = 3;
+
+/** Remove a phrase that immediately repeats itself inside one line. */
+function undoStutter(text) {
+  const parts = text.split(/(\s+)/);                    // keep the spacing
+  const words = [];
+  for (let i = 0; i < parts.length; i += 2) words.push({ word: parts[i], sep: parts[i + 1] || '' });
+  const key = w => w.word.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+
+  for (let n = Math.floor(words.length / 2); n >= MIN_REPEAT_WORDS; n--) {
+    for (let i = 0; i + 2 * n <= words.length; i++) {
+      const a = words.slice(i, i + n).map(key).join(' ');
+      const b = words.slice(i + n, i + 2 * n).map(key).join(' ');
+      if (!a.trim() || a !== b) continue;
+      words.splice(i + n, n);                           // drop the second copy
+      return undoStutter(words.map(w => w.word + w.sep).join('').trim());
+    }
+  }
+  return text;
+}
+
+// Two words is enough at a seam. Inside a line "very good very good" could be
+// something a person said; across a segment boundary the same words with
+// adjacent timestamps are the decoder emitting them twice, and even when it is
+// not, dropping a duplicated "he's like" changes no meaning.
+const MIN_SEAM_WORDS = 2;
+
+// And only when the two lines are close in time. A window seam re-emits words
+// within a second or two; the same phrase half a minute later is a person
+// actually restating it, and that belongs in the record.
+const MAX_SEAM_GAP_SEC = 6;
+
+function stampSeconds(line) {
+  const m = line.match(/^\[(\d+):(\d\d):(\d\d)\]/);
+  return m ? +m[1] * 3600 + +m[2] * 60 + +m[3] : null;
+}
+
+/** Words of a line, without the timestamp, comparable but reconstructible. */
+function lineWords(line) {
+  const text = line.replace(/^\[[\d:]+\]\s*/, '');
+  const parts = text.split(/(\s+)/);
+  const words = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    if (parts[i]) words.push({ word: parts[i], sep: parts[i + 1] || ' ' });
+  }
+  return words;
+}
+
+const wordKey = w => w.word.toLowerCase().replace(/[^\p{L}\p{N}']/gu, '');
+
+/**
+ * Clean a whole transcript:
+ *  · a phrase that repeats itself inside one line loses the second copy
+ *  · a line that repeats the previous one entirely is dropped
+ *  · a line that *begins* with the words the previous one ended with loses that
+ *    opening — the seam artifact, which is the common one in practice
+ *
+ * Timestamps are kept as they are. The surviving copy is always the first, which
+ * is where the words were actually said.
+ */
+function deduplicate(lines) {
+  const out = [];
+  const bare = s => s.replace(/^\[[\d:]+\]\s*/, '');
+  const key = s => bare(s).toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, '').replace(/\s+/g, ' ').trim();
+
+  // The gap is measured against the previous *input* line, not the last one
+  // kept. In a run of six identical segments five seconds apart, dropping the
+  // second would otherwise put the third ten seconds from its reference, then
+  // fifteen, and the chain would escape the rule it was caught by.
+  let prevStamp = null;
+
+  for (const line of lines) {
+    const stamp = line.slice(0, line.indexOf(']') + 1);
+    const thisStamp = stampSeconds(line);
+    const gap = prevStamp === null || thisStamp === null ? null : thisStamp - prevStamp;
+    prevStamp = thisStamp;
+
+    let cleaned = undoStutter(bare(line));
+    if (!cleaned.trim()) continue;
+
+    const prevLine = out[out.length - 1];
+    if (out.length && (gap === null || Number.isNaN(gap) || gap <= MAX_SEAM_GAP_SEC)) {
+      const prev = lineWords(prevLine).map(wordKey).filter(Boolean);
+      let words = lineWords(`${stamp} ${cleaned}`);
+      const cur = words.map(wordKey);
+      const most = Math.min(prev.length, cur.filter(Boolean).length - 1);
+      for (let n = most; n >= MIN_SEAM_WORDS; n--) {
+        if (prev.slice(-n).join(' ') === cur.slice(0, n).join(' ')) {
+          words = words.slice(n);
+          cleaned = words.map(w => w.word + w.sep).join('').trim();
+          break;
+        }
+      }
+      if (!cleaned) continue;
+    }
+
+    const candidate = `${stamp} ${cleaned}`;
+    // Same rule for a wholly identical line: close together it is the decoder
+    // stuttering, far apart it is someone saying it again.
+    const near = out.length && (gap === null || Number.isNaN(gap) || gap <= MAX_SEAM_GAP_SEC);
+    if (near && key(candidate) === key(prevLine)) continue;
+    out.push(candidate);
+  }
+  return out;
 }
 
 module.exports = {
@@ -495,5 +614,6 @@ module.exports = {
   TIERS, tierConfig, guessTier, tierFromBenchmark, hasNvidiaGpu, isAppleSilicon,
   CALIBRATION_MODEL, calibrate,
   start, stop, transcribeWav, transcribeFile,
+  deduplicate, undoStutter,
   wavFromPcm, openWav, finishWav, repairWav, WAV_HEADER, BYTES_PER_SEC
 };

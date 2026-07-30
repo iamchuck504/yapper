@@ -719,8 +719,105 @@ ipcMain.handle('transcribe', async (_e, folder) => {
   const transcript = lines.join('\n').trim();
   if (!transcript) throw new Error('The transcript came out empty. Was any audio recorded?');
   fs.writeFileSync(path.join(folder, 'transcript.txt'), transcript, 'utf8');
+  releaseAudio(folder);
   send('\n');
   return transcript;
+});
+
+// ---------- the audio's job ends with the transcript ----------
+// The transcript is the record; the notes are written from it, and it is what
+// gets read, searched and exported. The audio exists to produce it and to
+// survive a crash on the way — 110 MB an hour, which is 4.8 GB a month for one
+// two-hour meeting a day, and a recording of colleagues is more sensitive than
+// its transcript. So once there is a transcript, the audio has done its job.
+//
+// Note the ordering: the transcript is written first, then the audio is
+// released. A crash between the two costs nothing.
+
+function releaseAudio(folder) {
+  if (readSettings().keepAudio === true) return;      // opted out
+  const transcript = path.join(folder, 'transcript.txt');
+  // never on a guess: only when the transcript is really there and has content
+  if (!fs.existsSync(transcript) || fs.statSync(transcript).size < 40) return;
+
+  for (const f of fs.readdirSync(folder)) {
+    if (!/^recording\./i.test(f)) continue;
+    const p = path.join(folder, f);
+    try {
+      const size = fs.statSync(p).size;
+      fs.unlinkSync(p);
+      console.log(`[audio] released ${f} (${(size / 1024 / 1024).toFixed(0)} MB) — the transcript is saved`);
+    } catch (err) {
+      console.log(`[audio] could not release ${f}: ${err.message}`);
+    }
+  }
+}
+
+ipcMain.handle('get-keep-audio', async () => readSettings().keepAudio === true);
+
+ipcMain.handle('set-keep-audio', async (_e, keep) => {
+  const s = readSettings();
+  s.keepAudio = !!keep;
+  writeSettings(s);
+  return s.keepAudio;
+});
+
+/** Audio still held by meetings that already have a transcript. */
+function heldAudio() {
+  if (!fs.existsSync(MEETINGS_DIR)) return { bytes: 0, files: [] };
+  const files = [];
+  let bytes = 0;
+  for (const d of fs.readdirSync(MEETINGS_DIR, { withFileTypes: true })) {
+    if (!d.isDirectory()) continue;
+    const folder = path.join(MEETINGS_DIR, d.name);
+    const transcript = path.join(folder, 'transcript.txt');
+    if (!fs.existsSync(transcript) || fs.statSync(transcript).size < 40) continue;
+    for (const f of fs.readdirSync(folder)) {
+      if (!/^recording\./i.test(f)) continue;
+      const p = path.join(folder, f);
+      try { bytes += fs.statSync(p).size; files.push(p); } catch { /* gone */ }
+    }
+  }
+  return { bytes, files };
+}
+
+ipcMain.handle('held-audio', async () => {
+  const { bytes, files } = heldAudio();
+  return { bytes, count: files.length };
+});
+
+// Reclaiming space on meetings recorded before this changed is the user's call,
+// not something to do to their files on their behalf at launch.
+ipcMain.handle('release-held-audio', async () => {
+  const { bytes, files } = heldAudio();
+  if (!files.length) return { released: 0, bytes: 0 };
+
+  const res = await dialog.showMessageBox(win, {
+    type: 'warning',
+    buttons: ['Move to recycle bin', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Free up audio',
+    message: `Release the audio from ${files.length} transcribed meeting${files.length === 1 ? '' : 's'}?`,
+    detail: `That frees ${(bytes / 1024 / 1024).toFixed(0)} MB. Their transcripts and notes are kept — `
+      + 'only the audio goes, and it goes to the recycle bin, so it can still be recovered from there.\n\n'
+      + 'You will not be able to re-transcribe those meetings afterwards.'
+  });
+  if (res.response !== 0) return { released: 0, bytes: 0, cancelled: true };
+
+  let released = 0, freed = 0;
+  for (const p of files) {
+    try {
+      const size = fs.statSync(p).size;
+      await shell.trashItem(p);
+      released++;
+      freed += size;
+    } catch (err) {
+      console.log(`[audio] could not release ${p}: ${err.message}`);
+    }
+  }
+  console.log(`[audio] released ${released} files, ${(freed / 1024 / 1024).toFixed(0)} MB`);
+  return { released, bytes: freed };
 });
 
 const SECTION_SETS = {

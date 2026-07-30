@@ -94,6 +94,12 @@
           <label class="switch"><input type="checkbox" id="opt-startup" /><span class="track"></span>Start with Windows</label>
         </div>
         <div class="opt-row">
+          <span class="opt-label">Audio</span>
+          <label class="switch"><input type="checkbox" id="opt-keep-audio" /><span class="track"></span>Keep audio after transcribing</label>
+          <span id="audio-held" class="mic-hint hidden"></span>
+          <button id="btn-free-audio" class="inline-action hidden">Free it up</button>
+        </div>
+        <div class="opt-row">
           <span class="opt-label">Instructions</span>
           <input id="custom-instructions" class="text-input" type="text" placeholder="Optional context, e.g. project, what to focus on" autocomplete="off" spellcheck="false" />
         </div>

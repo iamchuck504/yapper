@@ -159,6 +159,46 @@ autoDetectToggle.addEventListener('change', () => {
   window.yapper.setAutoDetect(autoDetectEnabled);
 });
 
+// ---------- what happens to the audio ----------
+// The transcript is the record. The audio exists to produce it and to survive a
+// crash on the way there, and at 110 MB an hour keeping it afterwards costs
+// gigabytes a month for something almost never opened again.
+
+const keepAudioToggle = $('opt-keep-audio');
+const audioHeldEl = $('audio-held');
+const btnFreeAudio = $('btn-free-audio');
+
+async function refreshHeldAudio() {
+  const { bytes, count } = await window.yapper.heldAudio();
+  const show = bytes > 5 * 1024 * 1024;      // not worth mentioning below this
+  audioHeldEl.textContent = show
+    ? `${count} transcribed meeting${count === 1 ? '' : 's'} still hold ${(bytes / 1024 / 1024).toFixed(0)} MB of audio.`
+    : '';
+  audioHeldEl.classList.toggle('hidden', !show);
+  btnFreeAudio.classList.toggle('hidden', !show);
+}
+
+window.yapper.getKeepAudio().then(keep => { keepAudioToggle.checked = keep; });
+refreshHeldAudio();
+
+keepAudioToggle.addEventListener('change', async () => {
+  await window.yapper.setKeepAudio(keepAudioToggle.checked);
+  await refreshHeldAudio();
+});
+
+btnFreeAudio.addEventListener('click', async () => {
+  btnFreeAudio.disabled = true;
+  const res = await window.yapper.releaseHeldAudio();
+  if (res.released) {
+    audioHeldEl.textContent = `Freed ${(res.bytes / 1024 / 1024).toFixed(0)} MB.`;
+    audioHeldEl.classList.remove('hidden');
+    btnFreeAudio.classList.add('hidden');
+    await refreshMeetingList();
+  }
+  btnFreeAudio.disabled = false;
+  if (!res.released && !res.cancelled) await refreshHeldAudio();
+});
+
 // ---------- who writes the notes ----------
 // Transcription is always local; the notes are not. Which model writes them is
 // a per-machine choice, so a coworker with an API key and no Claude Code

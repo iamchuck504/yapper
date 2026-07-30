@@ -18,7 +18,7 @@ npm test                                               # no model or GPU needed
 
 Reading order for a review, shortest useful path first:
 
-1. **`preload.js`** (76 lines) — the entire boundary between the privileged and
+1. **`preload.js`** (80 lines) — the entire boundary between the privileged and
    unprivileged halves. If something is not in here, the UI cannot do it.
 2. **`engine.js` §"tiers"** — the performance contract, with the measurements it
    is based on in the comments.
@@ -46,7 +46,7 @@ These shaped most of the decisions below, so they are worth stating first.
 | Constraint | Consequence |
 |---|---|
 | **Audio never leaves the machine** | Transcription is local (whisper.cpp). The only thing that goes out is the transcript, to generate notes. |
-| **Never lose a recording** | Audio is written to disk as it arrives, already in the format the transcriber reads. A power cut costs the tail of a meeting, not the meeting. Deleting a meeting goes to the recycle bin. |
+| **Never lose a transcript** | Audio is written to disk as it arrives, already in the format the transcriber reads, so a power cut costs the tail of a meeting rather than the meeting. Once a transcript exists the audio has done its job and is released (§9b). Deleting a meeting goes to the recycle bin. |
 | **Nothing to compile on the user's machine** | No native Node modules, no Python, no bundler, no transpiler. One npm devDependency. |
 | **It has to work on a laptop, not just a workstation** | The app measures the machine on first launch and picks what it can promise from the result (§7). |
 
@@ -95,13 +95,13 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1428 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
-| `engine.js` | 500 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
+| `main.js` | 1525 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
+| `engine.js` | 620 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `llm.js` | 322 | Note providers (§6) behind one `generate()` call |
 | `live.js` | 287 | Live transcription: rolling window, LocalAgreement-2 confirmation |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
-| `preload.js` | 76 | The only bridge between renderer and main |
+| `preload.js` | 80 | The only bridge between renderer and main |
 
 `keystore.js` and `bounds.js` are separate files for one reason: they are pure
 functions, so they can be tested without booting Electron, and `keystore.js`
@@ -112,9 +112,9 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 1828 | Main window: capture graph, views, notes rendering, exports, reminders, settings |
+| `renderer/app.js` | 1868 | Main window: capture graph, views, notes rendering, exports, reminders, settings |
 | `renderer/style.css` | 1218 | Everything visual, light and dark |
-| `renderer/index.html` | 312 | Main window markup |
+| `renderer/index.html` | 318 | Main window markup |
 | `renderer/bubble.html` | 188 | The always-on-top live transcript overlay |
 | `renderer/bubble.js` | 125 | Its behaviour, including sizing itself to its own controls |
 | `renderer/splash.html` | 104 | Boot screen, including the first-run calibration status |
@@ -179,12 +179,12 @@ phrase and a word lost on the seam.
 
 ## 5. IPC surface
 
-53 channels, all declared in `preload.js` — that file is the complete list of
+57 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
 
-**Request/response (34)** — recording lifecycle (`recording-start`,
+**Request/response (38)** — recording lifecycle (`recording-start`,
 `recording-finish`), import (`import-audio`, `import-read`, `import-open`,
 `import-close`, `legacy-audio`), processing (`transcribe`, `summarize`,
 `regenerate`, `generate-title`, `save-notes`), meetings (`list-meetings`,
@@ -277,11 +277,8 @@ pipeline was run at that length rather than extrapolated to it
 | Exports | .md 8 KB, .txt 159 KB, transcript .md 161 KB, PDF 133 KB in 497 ms |
 | Process memory | 107 MB → 125 MB across the entire run |
 
-**Storage is the one number worth deciding about.** Audio is kept as 16 kHz mono
-WAV — 110 MB per hour — because that is exactly what the transcriber reads, with
-no decode step and no codec dependency. One two-hour meeting a day is about
-4.8 GB a month. Nothing deletes or compresses it today; the audio is kept
-indefinitely so a meeting can always be re-transcribed.
+Storage was the one number that needed a decision rather than a test, and it was
+made: see §9b.
 
 ---
 
@@ -289,12 +286,26 @@ indefinitely so a meeting can always be re-transcribed.
 
 Each of these was measured, and each is the opposite of the obvious choice.
 
-**`medium` is used nowhere**, despite being the better transcriber on paper. Live,
-its passes are slow enough that consecutive windows drift apart, so less text
-gets confirmed and it arrives later. On the final pass it falls into repetition
-loops on real meeting audio — on one noisy minute it returned the same sentence
-six times, with and without beam search, where `small` transcribed it cleanly.
-Both handle clean speech fine; meetings are not clean speech.
+**`small` is used everywhere, because `medium` buys nothing measurable.** Across
+seven of the user's own recordings, two runs each (`build/tune-transcript.js`):
+`small` 114 words per minute at 0.95% repetition, `medium` 109 at 0.79%, and
+`medium` 1.4x slower. Equivalent, so the cheaper one wins. `medium` is a clearly
+worse choice for the **live** loop, where its slower passes make consecutive
+windows drift apart and less text gets confirmed.
+
+*Correction: an earlier version of this document said `medium` falls into
+repetition loops on real meeting audio. That came from one observation on one
+clip. Across seven clips and two runs each it did not reproduce, and on that same
+clip it now transcribes cleanly. The claim was not supported.*
+
+**Stutters are removed from the transcript, not avoided by choosing a model.**
+Every model sometimes emits a phrase and then emits it again, most often at a
+window seam — it is not a property of one of them, so it is cleaned afterwards:
+a phrase repeating itself inside a line, a line repeating the one before it, and
+a line opening with the words the previous one closed with. Only within a few
+seconds, because the same phrase half a minute later is a person restating it and
+that belongs in the record. Measured on the same seven recordings, repetition
+went from 0.95% of words to **0.00%** on both models.
 
 **A short window beats a fast model.** Re-decoding 26 seconds every pass makes
 the model resegment the whole thing, and two passes that disagree confirm
@@ -363,6 +374,35 @@ Documents\Meetings\YYYY-MM-DD_HHMM\
 The meeting folder is the unit of everything: exports read from it, deletion
 moves it to the recycle bin, and a folder that only has audio is picked up as
 "not transcribed" with a retry button.
+
+## 9b. The audio's job ends with the transcript
+
+**The transcript is the record.** The notes are written from it, it is what gets
+read, searched and exported, and it is what is kept. The audio exists to produce
+it and to survive a crash on the way there. Once a transcript is on disk, the
+recording is deleted.
+
+The reasoning: 16 kHz mono WAV is 110 MB an hour — 4.8 GB a month for one
+two-hour meeting a day — and a recording of colleagues is more sensitive than
+its transcript. What keeping it buys is re-transcription with a better model and
+verifying a disputed quote, and both matter for days rather than years. This is
+also the posture another meeting-notes app takes: it never stores audio at all.
+
+Order matters and is deliberate: the transcript is written first, then the audio
+is released, so a crash between the two costs nothing. Release happens only when
+the transcript really exists and has content — a failed transcription keeps the
+audio so it can be retried, which is the whole reason to have it.
+
+- `Keep audio after transcribing` in settings turns this off for anyone who wants
+  the recording.
+- Meetings recorded before this changed still hold their audio. The app reports
+  how much and offers to release it, to the recycle bin, on request — it does not
+  delete a user's existing recordings on their behalf at launch.
+- Compression was measured as an alternative and rejected for now: Opus at
+  24 kbps is 10.2 MB an hour, 11x smaller, and WebCodecs encodes at 135x real
+  time, but it needs an Ogg muxer written by hand and only makes sense if the
+  audio is being kept at all. (`MediaRecorder` cannot do it — it is bound to real
+  time, so a two-hour recording would take two hours to compress.)
 
 ---
 
@@ -454,6 +494,7 @@ three groups.
 | `test-key-leaks.js` | Adversarial: treats the renderer as hostile and tries to make a stored key reach a server it was not issued for, come back through the bridge, or appear in an error message |
 | `test-provider-keys.js` | Each provider keeps its own key, model and endpoint; switching neither inherits nor loses one; a legacy single-slot profile migrates |
 | `test-live-logic.js` | The confirmation rules — prefix agreement, repeat stripping, degenerate-output detection |
+| `test-dedup.js` | Transcript cleanup: which repeats are removed, which survive, and the time window that separates a seam artefact from a person restating something |
 | `test-bounds.js` | The bubble stays on screen, including multi-monitor negative origins |
 | `test-meetings.js` | The delete path guard |
 | `test-section-coverage.js` | Every note style has a button, every section has a colour rule |
@@ -469,6 +510,7 @@ run can never touch a real meeting):
 | `test-faults.js` | Fault injection: the transcription server killed mid-pass, two transcriptions at once, a meeting deleted under a running job, a missing model, and file handles or child processes left behind across repeated cycles |
 | `test-extremes.js` | Boundary values and scale: the clock past an hour, a 75-minute recording transcribed for real, accents and emoji and HTML-looking text, an empty WAV, notes with no headings, 300 meetings in the sidebar, and the live loop given 20 minutes of audio at once |
 | `test-two-hours.js` | The expected real length, every stage, measured — see §7b. `MINUTES=60` for the shorter end of the range |
+| `test-audio-release.js` | The audio is released only after a real transcript, never on a failure, never when the user asked to keep it, and reclaiming older meetings' audio touches only the transcribed ones |
 | `test-smoke.js` | Every view, control and export, while listening for renderer errors |
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
 | `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |

@@ -77,10 +77,16 @@ for (const tier of Object.keys(engine.TIERS)) {
 const fast = engine.tierConfig('fast');
 check('la cadencia del nivel fast concuerda',
   doc.includes(`every ${fast.cadenceMs / 1000} s`), `el código dice ${fast.cadenceMs} ms`);
-check('el documento dice que medium no se usa',
-  /`medium` is used nowhere/.test(doc)
+check('lo que el documento dice de medium coincide con el código',
+  /`small` is used everywhere/.test(doc)
   && !Object.values(engine.TIERS).some(t => t.liveModel === 'medium' || t.finalModel === 'medium'),
-  'el código sí usa medium en algún nivel');
+  'el documento y la tabla de niveles no dicen lo mismo');
+check('el documento describe la limpieza de repeticiones',
+  /Stutters are removed/.test(doc) && typeof engine.deduplicate === 'function',
+  'falta en el documento o en el código');
+check('el documento describe la política del audio',
+  /## 9b\./.test(doc) && /audio.s job ends with the transcript/i.test(doc),
+  'falta la sección del audio');
 
 // --- the security claims ---
 const main = read('main.js');
