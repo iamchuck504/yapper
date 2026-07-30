@@ -66,12 +66,16 @@ and then dropped as not worth the dependency; see the history of
 
 1. **Microphone only.** Electron's system-audio loopback is Windows-only
    (their docs: *"currently only supported on Windows"*). On speakers the mic
-   hears both sides of a call; on headphones it hears only this side. The
-   existing warning ("only the mic is being recorded") states it in-app.
-   Closing this needs a native ScreenCaptureKit capture path — real work, not
-   configuration. Virtual audio drivers (BlackHole et al.) would also work but
-   install system audio devices, and this project does not do that to people's
-   machines by default.
+   hears both sides of a call; on headphones it hears only this side. The app
+   says so on screen when recording starts. Closing this needs a native
+   ScreenCaptureKit capture path — real work, not configuration. Virtual audio
+   drivers (BlackHole et al.) would also work but install system audio devices,
+   and this project does not do that to people's machines by default.
+
+   macOS does not even get asked for it: requesting `getDisplayMedia` there
+   costs a Screen Recording permission and returns no system audio, and a
+   refusal used to reject and take the whole recording down with it — the app
+   could not record at all unless you granted a permission it had no use for.
 2. **Unsigned: Gatekeeper blocks the first open.** No Apple Developer account
    ($99/year). The user right-clicks the app → Open → Open, once. Distribution
    without that friction needs the account plus notarization.
@@ -79,12 +83,23 @@ and then dropped as not worth the dependency; see the history of
    updates, so the app checks the same feed, and the sidebar pill becomes
    "New version — download", opening the releases page. Auto-install arrives
    with signing.
-4. **No meeting auto-detection.** The Windows implementation reads a Windows
-   registry surface. A macOS equivalent (mic-in-use via CoreAudio) is
-   possible but does not exist yet — the card and toast simply never fire.
-5. **Intel Macs are not built.** arm64 only; an x64/universal build would need
+4. **Intel Macs are not built.** arm64 only; an x64/universal build would need
    a second engine compile and doubles the artifact size for a shrinking
    audience.
+
+Meeting auto-detection used to be on this list and no longer is: CoreAudio
+answers the same question the Windows registry does, through
+`mac/mic-probe.swift`. Note that the answer names a helper process — a Slack
+huddle reports `com.tinyspeck.slackmacgap.helper` — so `meetings.js` matches
+the app the helper belongs to, not the id itself.
+
+Notifications were broken here too, and silently: electron-builder left the
+ad-hoc signature Electron ships with, so the bundle's id said
+`com.yapper.meetingnotes` while its signature said `Electron`. macOS keys
+notification authorisation on the signature, so the app was never registered
+and never asked. `identity: "-"` fixes it, and `hardenedRuntime` is off
+alongside it — it is only worth carrying for notarisation, and it would have
+demanded a microphone entitlement the defaults do not include.
 
 ## What has actually run on a Mac
 
