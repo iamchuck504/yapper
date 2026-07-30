@@ -22,21 +22,37 @@ is about using it and judging it.
 > (the code repo stays private; that public repo hosts only installers and the
 > update feed)
 
-`Yapper-Setup-<version>.exe` (~83 MB) installs
-per-user — no admin rights — creates the shortcuts, and on first launch the app
-downloads the transcription engine itself, with progress on screen: ~650 MB on
-a CPU-only machine, ~1.3 GB when an NVIDIA GPU is detected (the CUDA build).
-Recording stays disabled until that lands. Installed copies then **keep
-themselves updated** from the release feed: checked at launch and every four
-hours, downloaded in the background, applied on quit — or immediately via the
-"Update ready — restart" pill in the sidebar. The whole loop is exercised by
-`build/e2e-update.ps1`, which installs a 0.1.0, serves it a 0.1.1, and checks
-that what is on disk afterwards is 0.1.1.
+**Windows** — `Yapper-Setup-<version>.exe` (~83 MB) installs per-user, no admin
+rights, creates the shortcuts. Installed copies **keep themselves updated** from
+the release feed: checked at launch and every four hours, downloaded in the
+background, applied on quit — or immediately via the "Update ready — restart"
+pill in the sidebar. The whole loop is exercised by `build/e2e-update.ps1`,
+which installs a 0.1.0, serves it a 0.1.1, and checks that what is on disk
+afterwards is 0.1.1.
 
-Two honest caveats. The installer is **not code-signed** — no certificate — so
-SmartScreen shows "Windows protected your PC" and the user has to click
-*More info → Run anyway* once. And the update feed lives on GitHub Releases,
-so the machine needs to reach github.com.
+**macOS** — `Yapper-<version>-arm64.dmg` (~95 MB), Apple Silicon, macOS 13 or
+newer. Three differences from the Windows path, all of them consequences of
+having no Apple Developer certificate:
+
+- **The first open is blocked.** The build is signed ad-hoc, so Gatekeeper
+  refuses it, and since macOS 15 the old right-click → Open shortcut no longer
+  clears that. Either press *Open Anyway* in System Settings → Privacy &
+  Security after trying once, or run
+  `xattr -dr com.apple.quarantine /Applications/Yapper.app`.
+- **Updates notify rather than install themselves** — Squirrel.Mac refuses
+  unsigned updates, so the pill opens the download page.
+- **Screen Recording has to be granted** on the first recording, on top of the
+  microphone. It is what captures what the Mac is *playing* — the other side of
+  the call. Nothing of the screen is read or kept: the capture runs at 2×2
+  pixels once a second and is discarded, but macOS offers no audio-only
+  permission to ask for instead. Refused, Yapper records the microphone alone
+  and says so on screen. Meeting auto-detection additionally needs macOS 14.4.
+
+On both, the installer ships the app and not the engine: **first launch
+downloads** whisper.cpp and its models with progress on screen — ~650 MB, or
+~1.3 GB on Windows when an NVIDIA GPU is detected (the CUDA build). Recording
+stays disabled until that lands. The feed lives on GitHub Releases, so the
+machine needs to reach github.com.
 
 **For development: from source.**
 
@@ -44,8 +60,15 @@ so the machine needs to reach github.com.
 git clone https://github.com/iamchuck504/yapper
 cd yapper
 npm install          # electron + electron-builder + electron-updater
-.\setup.ps1          # downloads whisper.cpp + models next to the code
+.\setup.ps1          # Windows: downloads whisper.cpp + models next to the code
 npm start            # run;  npm run dist builds the installer
+```
+
+```bash
+git clone https://github.com/iamchuck504/yapper && cd yapper
+npm install
+bash mac/build-app.sh   # macOS: Swift helpers, engine, dmg — needs Command Line Tools, not Xcode
+npm start
 ```
 
 On first run the app plays an 11-second real-speech sample through the
@@ -65,7 +88,7 @@ records and transcribes — it just has no live text during the meeting.
 signed into one (no key, no per-meeting cost). Otherwise: Google Gemini (free
 tier, no card), OpenRouter, Ollama (fully local), the Anthropic API, or any
 OpenAI-compatible endpoint. Keys are sealed with the OS keystore (DPAPI on
-Windows) — the settings file never contains a readable key.
+Windows, Keychain on macOS) — the settings file never contains a readable key.
 
 ---
 
@@ -124,9 +147,10 @@ on a `fast` machine, worst measured 4.8 s).
 
 Yapper watches which app is using the microphone (Zoom, Teams, Slack, Discord,
 Webex, or a browser call) and offers to take notes — as this card over
-whichever view is open, and as a Windows notification for when Yapper is not
-the focused window. It never starts recording on its own, and the card
-deliberately does not switch views.
+whichever view is open, and as a system notification for when Yapper is not the
+focused window. On macOS that notification carries a real *Start recording*
+button; on Windows the whole toast is the click target. It never starts
+recording on its own, and the card deliberately does not switch views.
 
 Honest limits of this mechanism: it knows *an app is using the microphone*,
 not that a meeting exists. It cannot tell a Meet call from any other tab using
@@ -279,7 +303,8 @@ UI; several are deliberate trade-offs, marked as such.
     out bad and the keep-toggle was off, there is no second chance at that
     audio. The transcript-quality bar is what makes this bet acceptable.
 11. **Windows notifications carry no buttons** (Electron limitation) — the
-    whole toast is the click target.
+    whole toast is the click target. macOS gets a real button, so the same
+    prompt reads better there.
 12. **Updates depend on the release feed being maintained.** Installed copies
     update themselves, but only from versions somebody actually published
     (`npm run release`); a development checkout still updates with `git pull`.
@@ -316,7 +341,7 @@ local capture client; Yapper is a local application, full stop.**
 | Notes LLM | User's choice: Claude CLI, Gemini free, OpenRouter, Ollama (local), Anthropic, any compatible | Managed (GPT-4o / Claude) |
 | Speaker separation | None | Two-speaker (you vs. others) |
 | Calendar | None | Integrated (meetings, titles, upcoming) |
-| Platforms | Windows | macOS, Windows, iOS |
+| Platforms | Windows, macOS (Apple Silicon) | macOS, Windows, iOS |
 | Sharing / teams | None | Links, workspaces, Notion/HubSpot/Slack/Zapier, API (Enterprise) |
 | Account | None | Required |
 | History limit | None — it is the user's disk | Free plan capped at 25 meetings |
