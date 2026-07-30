@@ -1714,36 +1714,7 @@ function previousWeekWith(list, from) {
 // every meeting: Zoom/Teams/Slack huddles natively, and Meet/Hangouts via the
 // browser. On Windows it lives in the CapabilityAccessManager consent store.
 
-const MEETING_APPS = {
-  'zoom.exe': 'Zoom',
-  'teams.exe': 'Microsoft Teams',
-  'ms-teams.exe': 'Microsoft Teams',
-  'slack.exe': 'Slack',
-  'discord.exe': 'Discord',
-  'webexmta.exe': 'Webex',
-  'webex.exe': 'Webex',
-  'chrome.exe': 'a Chrome call (Meet/Hangouts)',
-  'msedge.exe': 'an Edge call',
-  'brave.exe': 'a Brave call',
-  'firefox.exe': 'a Firefox call'
-};
-
-// The same apps, named the way macOS names them. A browser bundle id covers
-// Meet and Hangouts exactly as the .exe does on Windows.
-const MEETING_APPS_MAC = {
-  'us.zoom.xos': 'Zoom',
-  'com.microsoft.teams': 'Microsoft Teams',
-  'com.microsoft.teams2': 'Microsoft Teams',
-  'com.tinyspeck.slackmacgap': 'Slack',
-  'com.hnc.Discord': 'Discord',
-  'com.cisco.webexmeetingsapp': 'Webex',
-  'com.google.Chrome': 'a Chrome call (Meet/Hangouts)',
-  'com.microsoft.edgemac': 'an Edge call',
-  'com.brave.Browser': 'a Brave call',
-  'org.mozilla.firefox': 'a Firefox call',
-  'com.apple.Safari': 'a Safari call',
-  'com.apple.FaceTime': 'FaceTime'
-};
+const { matchMeetingApp } = require('./meetings');
 
 const MIC_CONSENT_KEY =
   'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\microphone';
@@ -1818,7 +1789,6 @@ function micUsersMac() {
   });
 }
 
-const meetingApps = () => (process.platform === 'darwin' ? MEETING_APPS_MAC : MEETING_APPS);
 const micUsers = () => (process.platform === 'darwin' ? micUsersMac() : micUsersWindows());
 
 let meetingTimer = null;
@@ -1832,8 +1802,9 @@ async function pollMeetings() {
   if (process.platform !== 'win32' && process.platform !== 'darwin') return;
   const users = await micUsers();
   if (users === null) return;            // could not ask; say nothing
-  const apps = meetingApps();
-  const hit = users.find(id => apps[id]);
+  // The label, not the process: a call can move between helper processes
+  // without ever stopping, and that must not read as a second meeting.
+  const hit = matchMeetingApp(users);
 
   // While recording, watch for the opposite signal: the meeting app letting go
   // of the microphone. Two clear polls (~10 s) avoids reacting to a blip.
@@ -1850,9 +1821,9 @@ async function pollMeetings() {
   if (meetingCurrent === hit) return;
 
   meetingCurrent = hit;
-  const label = apps[hit];
-  if (win && !win.isDestroyed()) win.webContents.send('meeting-detected', { app: label });
-  notifyMeeting(label);
+  console.log(`[meetings] ${hit} is using the microphone — offering to record`);
+  if (win && !win.isDestroyed()) win.webContents.send('meeting-detected', { app: hit });
+  notifyMeeting(hit);
 }
 
 // A meeting starts while you are looking at Zoom, not at Yapper, so the offer
