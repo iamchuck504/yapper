@@ -259,6 +259,32 @@ cannot hold.
 
 ---
 
+## 7b. What a two-hour meeting actually costs
+
+The expected length for this app's first user is one to two hours, so the whole
+pipeline was run at that length rather than extrapolated to it
+(`build/test-two-hours.js`, on the `fast` tier):
+
+| Stage | Two hours of audio |
+|---|---|
+| Recording | 220 MB on disk, 36,000 IPC blocks written in 12 s, nothing retained in memory |
+| Live transcript | 2.2 s median lag, no drift over the session |
+| Final transcription | 115 s — 63x real time — for +19 MB of memory |
+| Transcript | 84 KB, 2,040 timestamped lines, last stamp at 1h59m |
+| Notes | 73 s from a real 159 KB transcript, all sections, timestamps out to 208 min |
+| Automatic title | produced from the full transcript |
+| Opening the meeting | 512 ms |
+| Exports | .md 8 KB, .txt 159 KB, transcript .md 161 KB, PDF 133 KB in 497 ms |
+| Process memory | 107 MB → 125 MB across the entire run |
+
+**Storage is the one number worth deciding about.** Audio is kept as 16 kHz mono
+WAV — 110 MB per hour — because that is exactly what the transcriber reads, with
+no decode step and no codec dependency. One two-hour meeting a day is about
+4.8 GB a month. Nothing deletes or compresses it today; the audio is kept
+indefinitely so a meeting can always be re-transcribed.
+
+---
+
 ## 8. Decisions worth not re-litigating
 
 Each of these was measured, and each is the opposite of the obvious choice.
@@ -442,6 +468,7 @@ run can never touch a real meeting):
 | `test-record-recovery.js` | Capture refused, and the audio device vanishing mid-start |
 | `test-faults.js` | Fault injection: the transcription server killed mid-pass, two transcriptions at once, a meeting deleted under a running job, a missing model, and file handles or child processes left behind across repeated cycles |
 | `test-extremes.js` | Boundary values and scale: the clock past an hour, a 75-minute recording transcribed for real, accents and emoji and HTML-looking text, an empty WAV, notes with no headings, 300 meetings in the sidebar, and the live loop given 20 minutes of audio at once |
+| `test-two-hours.js` | The expected real length, every stage, measured — see §7b. `MINUTES=60` for the shorter end of the range |
 | `test-smoke.js` | Every view, control and export, while listening for renderer errors |
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
 | `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |

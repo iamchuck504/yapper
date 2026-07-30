@@ -56,6 +56,22 @@ La key se guarda **cifrada con el llavero del sistema** (DPAPI en Windows, Keych
 
 Hay un botón **Test connection** que hace una llamada mínima y responde "working" o el error real (key rechazada, sin saldo, modelo inexistente).
 
+## Reuniones de una a dos horas
+
+Medido de punta a punta con una reunión de 2 h en el tier `fast` (`build/test-two-hours.js`):
+
+| Etapa | 2 horas de audio |
+|---|---|
+| Grabar | 220 MB en disco, 36.000 bloques escritos, nada retenido en memoria |
+| Vivo | 2.2 s de retraso, sin irse acumulando |
+| Transcribir | 115 s (63× tiempo real), +19 MB de memoria |
+| Transcripción | 84 KB, 2.040 líneas, última marca a 1h59m |
+| Notas | 73 s, todas las secciones, marcas hasta el minuto 208 |
+| Abrir la reunión | 512 ms |
+| Exportar | .md 8 KB · .txt 159 KB · PDF 133 KB en 497 ms |
+
+**Lo que sí hay que tener en cuenta es el espacio.** El audio se guarda como WAV 16 kHz mono —**110 MB por hora**— porque es exactamente lo que lee el transcriptor, sin decodificar nada. Una reunión de dos horas al día son unos **4.8 GB al mes**. Hoy nada borra ni comprime ese audio: se conserva para poder re-transcribir cuando quieras.
+
 ## Cómo funciona
 
 1. **Grabar reunión** — captura el audio del sistema (lo que escuchas: Meet, Zoom, Teams…) por loopback de Windows **y** tu micrófono, mezclados en un solo audio.
