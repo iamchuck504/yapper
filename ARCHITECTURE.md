@@ -18,7 +18,7 @@ npm test                                               # no model or GPU needed
 
 Reading order for a review, shortest useful path first:
 
-1. **`preload.js`** (58 lines) — the entire boundary between the privileged and
+1. **`preload.js`** (76 lines) — the entire boundary between the privileged and
    unprivileged halves. If something is not in here, the UI cannot do it.
 2. **`engine.js` §"tiers"** — the performance contract, with the measurements it
    is based on in the comments.
@@ -88,20 +88,20 @@ These shaped most of the decisions below, so they are worth stating first.
 
 ## 3. Module map
 
-Application code, 5,600 lines total. No framework, no build step — the files
+Application code, 6,500 lines total. No framework, no build step — the files
 that ship are the files that run.
 
 ### Main process
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1221 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
-| `engine.js` | 414 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
-| `llm.js` | 296 | Note providers (§6) behind one `generate()` call |
-| `live.js` | 240 | Live transcription: rolling window, LocalAgreement-2 confirmation |
-| `keystore.js` | 35 | Sealing the API key with the OS keystore |
-| `bounds.js` | 29 | Pure geometry: keeping the floating bubble on screen |
-| `preload.js` | 58 | The only bridge between renderer and main |
+| `main.js` | 1428 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
+| `engine.js` | 500 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
+| `llm.js` | 322 | Note providers (§6) behind one `generate()` call |
+| `live.js` | 273 | Live transcription: rolling window, LocalAgreement-2 confirmation |
+| `keystore.js` | 39 | Sealing the API key with the OS keystore |
+| `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
+| `preload.js` | 76 | The only bridge between renderer and main |
 
 `keystore.js` and `bounds.js` are separate files for one reason: they are pure
 functions, so they can be tested without booting Electron, and `keystore.js`
@@ -112,13 +112,13 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 1615 | Main window: capture graph, views, notes rendering, exports, reminders, settings |
-| `renderer/style.css` | 1141 | Everything visual, light and dark |
-| `renderer/index.html` | 284 | Main window markup |
+| `renderer/app.js` | 1828 | Main window: capture graph, views, notes rendering, exports, reminders, settings |
+| `renderer/style.css` | 1218 | Everything visual, light and dark |
+| `renderer/index.html` | 312 | Main window markup |
 | `renderer/bubble.html` | 188 | The always-on-top live transcript overlay |
-| `renderer/bubble.js` | 107 | Its behaviour, including sizing itself to its own controls |
-| `renderer/splash.html` | 97 | Boot screen, including the first-run calibration status |
-| `renderer/pcm-worklet.js` | 30 | The audio-thread tap that produces PCM |
+| `renderer/bubble.js` | 125 | Its behaviour, including sizing itself to its own controls |
+| `renderer/splash.html` | 104 | Boot screen, including the first-run calibration status |
+| `renderer/pcm-worklet.js` | 33 | The audio-thread tap that produces PCM |
 
 `app.js` is the largest file and the obvious candidate for splitting. It is
 organised in labelled sections (capture, live preview, recording, meeting view,
@@ -293,6 +293,17 @@ reliably. The symptom was an icon that appeared inside the app and nowhere else.
 **Shortcuts are repaired by the app, not by the installer.** A `.lnk` stores its
 own copy of the icon path, and nobody re-runs a setup script after an update.
 
+**Transcription is serialised, not parallel.** There is one server; two jobs used
+to fight over it, because the second one's `start()` killed the first one's
+server mid-request and the user was shown "read ECONNRESET". Queueing costs a
+wait, colliding costs a transcript.
+
+**Errors are translated at the boundary.** Node and Electron produce messages
+like `ENOENT: no such file or directory, open 'C:\Users\…'` and `Error invoking
+remote method 'transcribe': …`, and this app shows its errors to the user. The
+preload bridge strips Electron's wrapper for every channel at once, and the
+transcribe handler maps the underlying causes to sentences.
+
 ---
 
 ## 9. Storage layout
@@ -420,6 +431,7 @@ run can never touch a real meeting):
 |---|---|
 | `test-record-cycle.js` | The whole recording cycle: audio in through the real IPC, paused halfway, stopped, every artefact checked |
 | `test-record-recovery.js` | Capture refused, and the audio device vanishing mid-start |
+| `test-faults.js` | Fault injection: the transcription server killed mid-pass, two transcriptions at once, a meeting deleted under a running job, a missing model, and file handles or child processes left behind across repeated cycles |
 | `test-smoke.js` | Every view, control and export, while listening for renderer errors |
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
 | `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |

@@ -14,8 +14,10 @@ const grab = (text, re) => {
   return out;
 };
 
-// what the renderer calls
-const invoked = grab(preload, /ipcRenderer\.invoke\('([^']+)'/g);
+// what the renderer calls. Request/response goes through preload's own invoke()
+// wrapper, which strips Electron's "Error invoking remote method" prefix, so
+// the channel name is one word further left than it used to be.
+const invoked = grab(preload, /(?:^|[^.\w])invoke\('([^']+)'/g);
 const sent = grab(preload, /ipcRenderer\.send\('([^']+)'/g);
 const listened = grab(preload, /ipcRenderer\.on\('([^']+)'/g);
 

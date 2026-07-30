@@ -412,8 +412,28 @@ function fmtStamp(sec) {
  * onProgress({ done, total }) is called after each window.
  * Returns lines of "[hh:mm:ss] text".
  */
-async function transcribeFile(file, { language = 'auto', model, prompt = '', windowSec = 120,
+function transcribeFile(file, opts = {}) {
+  // One server, one job at a time. Two of these at once used to fight over it:
+  // the second one's start() killed the first one's server mid-request, and the
+  // user was shown "read ECONNRESET". Queueing costs a wait; colliding costs a
+  // transcript.
+  return serialize(() => transcribeFileNow(file, opts));
+}
+
+let jobs = Promise.resolve();
+
+function serialize(fn) {
+  // runs whether or not the previous job succeeded
+  const run = jobs.then(fn, fn);
+  jobs = run.then(() => {}, () => {});
+  return run;
+}
+
+async function transcribeFileNow(file, { language = 'auto', model, prompt = '', windowSec = 120,
   overlapSec = 2, onProgress } = {}) {
+  if (!fs.existsSync(file)) {
+    throw new Error('The recording for that meeting is no longer there.');
+  }
   repairWav(file);
   const total = Math.max(0, fs.statSync(file).size - WAV_HEADER);
   const totalSec = total / BYTES_PER_SEC;
@@ -432,7 +452,19 @@ async function transcribeFile(file, { language = 'auto', model, prompt = '', win
       const pcm = Buffer.alloc(size);
       const read = fs.readSync(fd, pcm, 0, size, WAV_HEADER + from);
 
-      const res = await transcribeWav(wavFromPcm(pcm.subarray(0, read)), { language, prompt });
+      let res;
+      try {
+        res = await transcribeWav(wavFromPcm(pcm.subarray(0, read)), { language, prompt });
+      } catch (err) {
+        // The server can be killed under us — antivirus, an out-of-memory kill,
+        // the user ending the task. One retry with a fresh one costs a few
+        // seconds; failing outright costs the whole transcript.
+        if (!/ECONNRESET|ECONNREFUSED|socket hang up|not running/i.test(err.message)) throw err;
+        await stop();
+        await start(model);
+        res = await transcribeWav(wavFromPcm(pcm.subarray(0, read)), { language, prompt })
+          .catch(() => { throw new Error('The transcriber stopped unexpectedly. Try again.'); });
+      }
       for (const seg of res.segments || []) {
         const startSec = typeof seg.start === 'number'
           ? seg.start

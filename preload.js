@@ -1,52 +1,66 @@
-const { contextBridge, ipcRenderer } = require('electron');
+﻿const { contextBridge, ipcRenderer } = require('electron');
+
+// When a handler in the main process rejects, Electron wraps the reason:
+//   "Error invoking remote method 'transcribe': Error: <the actual message>"
+// The UI shows that message to the user, so the wrapper has to come off — once,
+// here, rather than at each of the places that display an error.
+function invoke(channel, ...args) {
+  return ipcRenderer.invoke(channel, ...args).catch(err => {
+    const message = String((err && err.message) || err)
+      .replace(/^Error invoking remote method '[^']*':\s*/, '')
+      .replace(/^(?:Error:\s*)+/, '')
+      .trim();
+    throw new Error(message || 'Something went wrong.');
+  });
+}
 
 contextBridge.exposeInMainWorld('yapper', {
-  recordingStart: participants => ipcRenderer.invoke('recording-start', participants),
+  recordingStart: participants => invoke('recording-start', participants),
   recordingChunk: buf => ipcRenderer.send('recording-chunk', buf),
-  recordingFinish: (title, markers) => ipcRenderer.invoke('recording-finish', title, markers),
+  recordingFinish: (title, markers) => invoke('recording-finish', title, markers),
   markShortcut: on => ipcRenderer.send('mark-shortcut', on),
   onMarkMoment: cb => ipcRenderer.on('mark-moment', () => cb()),
   onMeetingEnded: cb => ipcRenderer.on('meeting-ended', () => cb()),
   onStartRecording: cb => ipcRenderer.on('start-recording', () => cb()),
   bubblePause: () => ipcRenderer.send('bubble-pause'),
   onRemotePause: cb => ipcRenderer.on('remote-pause', () => cb()),
-  importAudio: participants => ipcRenderer.invoke('import-audio', participants),
-  importRead: src => ipcRenderer.invoke('import-read', src),
-  legacyAudio: folder => ipcRenderer.invoke('legacy-audio', folder),
-  importOpen: folder => ipcRenderer.invoke('import-open', folder),
-  importClose: () => ipcRenderer.invoke('import-close'),
-  transcribe: folder => ipcRenderer.invoke('transcribe', folder),
-  summarize: (folder, transcript, options) => ipcRenderer.invoke('summarize', folder, transcript, options),
-  regenerate: (folder, options) => ipcRenderer.invoke('regenerate', folder, options),
-  saveNotes: (folder, md) => ipcRenderer.invoke('save-notes', folder, md),
-  generateTitle: folder => ipcRenderer.invoke('generate-title', folder),
-  saveTextFile: opts => ipcRenderer.invoke('save-text-file', opts),
+  importAudio: participants => invoke('import-audio', participants),
+  importRead: src => invoke('import-read', src),
+  legacyAudio: folder => invoke('legacy-audio', folder),
+  importOpen: folder => invoke('import-open', folder),
+  importClose: () => invoke('import-close'),
+  transcribe: folder => invoke('transcribe', folder),
+  summarize: (folder, transcript, options) => invoke('summarize', folder, transcript, options),
+  regenerate: (folder, options) => invoke('regenerate', folder, options),
+  saveNotes: (folder, md) => invoke('save-notes', folder, md),
+  generateTitle: folder => invoke('generate-title', folder),
+  saveTextFile: opts => invoke('save-text-file', opts),
   setTheme: theme => ipcRenderer.send('set-theme', theme),
-  getOpenAtLogin: () => ipcRenderer.invoke('get-open-at-login'),
-  setOpenAtLogin: enabled => ipcRenderer.invoke('set-open-at-login', enabled),
-  listMeetings: () => ipcRenderer.invoke('list-meetings'),
-  loadMeeting: folder => ipcRenderer.invoke('load-meeting', folder),
-  deleteMeeting: folder => ipcRenderer.invoke('delete-meeting', folder),
-  openFolder: folder => ipcRenderer.invoke('open-folder', folder),
-  openExternal: url => ipcRenderer.invoke('open-external', url),
-  checkEnvironment: () => ipcRenderer.invoke('check-environment'),
-  styleSections: () => ipcRenderer.invoke('style-sections'),
-  getLlmSettings: () => ipcRenderer.invoke('get-llm-settings'),
-  setLlmSettings: next => ipcRenderer.invoke('set-llm-settings', next),
-  testLlm: override => ipcRenderer.invoke('test-llm', override),
-  listReminders: () => ipcRenderer.invoke('list-reminders'),
-  addReminder: (text, source) => ipcRenderer.invoke('add-reminder', text, source),
-  updateReminder: (id, fields) => ipcRenderer.invoke('update-reminder', id, fields),
-  deleteReminder: id => ipcRenderer.invoke('delete-reminder', id),
-  exportPdf: (html, suggestedName) => ipcRenderer.invoke('export-pdf', html, suggestedName),
+  getOpenAtLogin: () => invoke('get-open-at-login'),
+  setOpenAtLogin: enabled => invoke('set-open-at-login', enabled),
+  listMeetings: () => invoke('list-meetings'),
+  loadMeeting: folder => invoke('load-meeting', folder),
+  deleteMeeting: folder => invoke('delete-meeting', folder),
+  openFolder: folder => invoke('open-folder', folder),
+  openExternal: url => invoke('open-external', url),
+  checkEnvironment: () => invoke('check-environment'),
+  styleSections: () => invoke('style-sections'),
+  getLlmSettings: () => invoke('get-llm-settings'),
+  setLlmSettings: next => invoke('set-llm-settings', next),
+  testLlm: override => invoke('test-llm', override),
+  listReminders: () => invoke('list-reminders'),
+  addReminder: (text, source) => invoke('add-reminder', text, source),
+  updateReminder: (id, fields) => invoke('update-reminder', id, fields),
+  deleteReminder: id => invoke('delete-reminder', id),
+  exportPdf: (html, suggestedName) => invoke('export-pdf', html, suggestedName),
   onTranscribeProgress: cb => ipcRenderer.on('transcribe-progress', (_e, text) => cb(text)),
-  liveStart: participants => ipcRenderer.invoke('live-start', participants),
-  liveStop: () => ipcRenderer.invoke('live-stop'),
+  liveStart: participants => invoke('live-start', participants),
+  liveStop: () => invoke('live-stop'),
   onLiveTranscript: cb => ipcRenderer.on('live-transcript', (_e, line) => cb(line)),
 
   // floating bubble
-  bubbleShow: () => ipcRenderer.invoke('bubble-show'),
-  bubbleHide: () => ipcRenderer.invoke('bubble-hide'),
+  bubbleShow: () => invoke('bubble-show'),
+  bubbleHide: () => invoke('bubble-hide'),
   bubbleState: state => ipcRenderer.send('bubble-state', state),
   bubbleResize: size => ipcRenderer.send('bubble-resize', size),
   onBubbleState: cb => ipcRenderer.on('bubble-state', (_e, state) => cb(state)),
