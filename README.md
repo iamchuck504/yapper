@@ -16,7 +16,7 @@ Runs on **Windows** and **macOS (Apple Silicon)**. Both record both sides of a c
 >
 > **To install without cloning anything:** the installers live in
 > [yapper-releases](https://github.com/iamchuck504/yapper-releases/releases/latest)
-> (a public installers-only repo; the code stays here, private). Windows installs
+> (an installers-only repo, so a download does not mean cloning this one). Windows installs
 > per-user and updates itself from that feed; macOS ships a `.dmg`. Both download
 > the engine on first run. Publishing a new version: bump `version` in
 > `package.json` and `npm run release`.
