@@ -997,10 +997,19 @@ async function startRecording() {
   // is open. The timer and the stop button have to be the thing on screen.
   showView('record');
   try {
-    // main.js answers this with Windows system-audio loopback (video must be requested even if unused)
-    const sys = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-    sys.getVideoTracks().forEach(t => (t.enabled = false));
-    sysStream = sys;
+    // main.js answers this with Windows system-audio loopback (video must be
+    // requested even if unused). Not on macOS: Electron's loopback is
+    // Windows-only, and asking there would trigger a Screen Recording
+    // permission prompt — and, if it were refused, reject and take the whole
+    // recording down with it. The microphone alone is what a Mac can offer,
+    // so it asks for exactly that.
+    const sys = window.yapper.platform === 'darwin'
+      ? null
+      : await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    if (sys) {
+      sys.getVideoTracks().forEach(t => (t.enabled = false));
+      sysStream = sys;
+    }
 
     audioCtx = new AudioContext();
     dest = audioCtx.createMediaStreamDestination();
@@ -1028,7 +1037,7 @@ async function startRecording() {
     };
 
     analysers = { sys: null, mic: null };
-    if (sys.getAudioTracks().length) {
+    if (sys && sys.getAudioTracks().length) {
       const sysSrc = audioCtx.createMediaStreamSource(sys);
       sysGainNode = audioCtx.createGain();
       sysGainNode.gain.value = gainSys;
@@ -1095,10 +1104,15 @@ async function startRecording() {
     recLive.classList.remove('hidden');
     pipelineEl.classList.add('hidden');
     statusEl.classList.add('hidden');
-    if (micNodes.size === 0 && !sys.getAudioTracks().length) {
+    const sysAudio = !!(sys && sys.getAudioTracks().length);
+    if (micNodes.size === 0 && !sysAudio) {
       setStatus(statusEl, 'Warning: no audio source could be captured.');
-    } else if (!sys.getAudioTracks().length) {
-      setStatus(statusEl, 'Warning: system audio could not be captured; only the mic is being recorded.');
+    } else if (!sysAudio) {
+      // On macOS this is the normal state, not a failure: there is no system
+      // audio to capture, so say what is happening rather than what went wrong.
+      setStatus(statusEl, window.yapper.platform === 'darwin'
+        ? 'Recording the microphone. macOS cannot capture the other side of a call — on speakers the mic picks it up, on headphones it does not.'
+        : 'Warning: system audio could not be captured; only the mic is being recorded.');
     } else if (micNodes.size === 0) {
       setStatus(statusEl, 'Warning: no microphone could be captured; only system audio is being recorded.');
     }
