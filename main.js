@@ -1448,7 +1448,7 @@ ipcMain.handle('ask', async (_e, question) => {
       input: `Question: ${question}\n\nPassages from the meetings:\n\n${search.passagesForPrompt(results)}`,
       maxTokens: 600
     });
-    return { answer, results };
+    return { answer: search.cleanAnswer(answer), results };
   } catch (err) {
     // The passages are still useful on their own, so they come back either way.
     return { answer: '', results, error: err.message };

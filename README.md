@@ -3,12 +3,15 @@
 Clon de another meeting-notes app AI: graba tus reuniones, las transcribe **localmente** con Whisper y genera un acta en markdown (resumen, puntos clave, decisiones y pendientes) usando Claude Code con tu suscripción Max. Nada de audio sale de tu PC; solo la transcripción de texto se envía a Claude para el resumen.
 
 > Para revisar la arquitectura y la estructura de build: **[ARCHITECTURE.md](ARCHITECTURE.md)** (en inglés).
+>
+> **Manual con capturas + evaluación honesta** (qué hace bien, qué le falta, y la
+> comparación con another meeting-notes app en ambas direcciones): **[docs/MANUAL.md](docs/MANUAL.md)** (en inglés).
 
 ## En vivo (estilo another meeting-notes app)
 
 - **Transcripción en streaming.** El renderer manda PCM continuo; `live.js` mantiene un buffer rodante de 12 s y lo re-transcribe cada ~0.7 s. Una palabra solo se "confirma" cuando dos pasadas seguidas coinciden (LocalAgreement-2); la cola tentativa se muestra atenuada y se corrige sola. Las pausas largas abren párrafo nuevo.
 - **Qué tan atrás va.** Medido reproduciendo un minuto de reunión real a velocidad de reloj en una RTX 4080 SUPER: **2.6 s de mediana** entre lo que se dice y lo que queda confirmado (peor caso 4.8 s). La cola tentativa aparece antes, cerca de 1 s. Una válvula de seguridad confirma lo que lleve más de 1.5 s sin acuerdo, para que un pasaje difícil no congele el transcript.
-- **Burbuja flotante.** Ventana pequeña siempre visible, arrastrable, que sigue el tema claro/oscuro. Se **colapsa a un indicador compacto** (barras animadas + cronómetro) y se expande al transcript completo con un clic. Toggle "Floating bubble".
+- **Burbuja flotante.** En reposo es una **cápsula** del tamaño de su reloj: nivel de audio real (las barras se mueven con la señal capturada, no es animación) + cronómetro. Al pasar el mouse se abre al transcript en vivo con los controles; al salir se vuelve cápsula, con un pin para dejarla abierta. Arrastrable, sigue el tema claro/oscuro. Toggle "Floating bubble".
 - **Auto-detección de reuniones.** Detecta qué app está usando el micrófono (Zoom, Teams, Slack, Discord, Webex y llamadas en el navegador: Meet/Hangouts) y **manda una notificación del sistema**: un clic empieza a grabar, sin tener que ir a buscar la ventana. Cuando Yapper ya está enfrente, el aviso aparece dentro de la app. Toggle "Auto-detect meetings". Solo Windows por ahora; en Mac llega con el rework de audio.
 
 El preview en vivo es *solo un adelanto*: al detener, la transcripción final se rehace con una pasada completa de más calidad, y de ahí salen las notas.
