@@ -23,6 +23,7 @@
       "output": "dist",
       "buildResources": "build"
     },
+    "afterPack": "build/after-pack.js",
     "files": [
       "main.js",
       "engine.js",
