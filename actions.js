@@ -42,6 +42,25 @@ function actionSection(md) {
 const NOTHING_TO_DO = /^(no (action items|commitments|decisions)|none|nothing)\b/i;
 
 /**
+ * The lines of a note section that are statements, with their bullet markers
+ * removed. Headings, blanks, fragments and "None" are not statements.
+ *
+ * The daily digest reads the decisions section the same way, so this is shared:
+ * whatever counts as one written item here counts as one there too.
+ */
+function bullets(body) {
+  const out = [];
+  for (const raw of String(body || '').split('\n')) {
+    const line = raw.trim().replace(/^[-*+]\s+/, '').replace(/^\d+[.)]\s+/, '').trim();
+    if (!line || line.length < 4) continue;
+    if (NOTHING_TO_DO.test(line)) continue;
+    if (/^#{1,6}\s/.test(raw)) continue;
+    out.push(line);
+  }
+  return out;
+}
+
+/**
  * One task per bullet. Whatever the model wrote is kept as the description —
  * only the owner and the date are lifted out of it, and only when they are
  * unambiguous.
@@ -51,12 +70,7 @@ function parseActionItems(md, meeting = {}) {
   if (!body) return [];
 
   const items = [];
-  for (const raw of body.split('\n')) {
-    const line = raw.trim().replace(/^[-*+]\s+/, '').replace(/^\d+[.)]\s+/, '').trim();
-    if (!line || line.length < 4) continue;
-    if (NOTHING_TO_DO.test(line)) continue;
-    if (/^#{1,6}\s/.test(raw)) continue;
-
+  for (const line of bullets(body)) {
     const { owner, rest } = splitOwner(line);
     const { due, text } = splitDue(rest);
     if (!text || text.length < 4) continue;
@@ -232,7 +246,7 @@ function mergeActionItems(existing, incoming, now = 0) {
 }
 
 module.exports = {
-  noteSections, actionSection, parseActionItems,
+  noteSections, actionSection, bullets, parseActionItems,
   splitOwner, splitDue, priorityOf,
   contentWords, actionKey, similarity, sameOwner, isDuplicate, mergeActionItems
 };

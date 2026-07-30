@@ -381,8 +381,10 @@ function showView(name) {
   viewMeeting.classList.toggle('hidden', name !== 'meeting');
   viewReminders.classList.toggle('hidden', name !== 'reminders');
   viewSearch.classList.toggle('hidden', name !== 'search');
+  $('view-home').classList.toggle('hidden', name !== 'home');
   $('btn-reminders').classList.toggle('active', name === 'reminders');
   $('btn-search-view').classList.toggle('active', name === 'search');
+  $('btn-home').classList.toggle('active', name === 'home');
 }
 
 function setStatus(el, text, isError = false) {
@@ -1448,6 +1450,350 @@ function renderSearchResults(res) {
     li.append(head, body);
     searchResultsEl.appendChild(li);
   }
+}
+
+// ---------- home: the day, and the week ----------
+//
+// Two panels behind one button, and they are deliberately different kinds of
+// thing. "Today" is assembled from the notes — every line on it is a copy of
+// something in a file, with the meeting it came from attached, so it appears
+// instantly and works with no provider configured. "This week" is the only
+// place a model is asked to write, and even there the numbers above it are
+// assembled, so a failed call leaves facts on screen instead of an error alone.
+
+const viewHome = $('view-home');
+const homeCountEl = $('home-count');
+let homeScope = 'day';
+let homeDay = '';        // '' means today; set when jumping to an earlier day
+let homeWeekOf = '';
+let homeRun = 0;
+
+$('btn-home').addEventListener('click', () => {
+  homeDay = '';
+  homeWeekOf = '';
+  showView('home');
+  loadHome();
+});
+
+document.querySelectorAll('#home-scope .seg-btn').forEach(b =>
+  b.addEventListener('click', () => {
+    homeScope = b.dataset.scope;
+    document.querySelectorAll('#home-scope .seg-btn')
+      .forEach(x => x.classList.toggle('active', x === b));
+    loadHome();
+  }));
+
+$('btn-week-refresh').addEventListener('click', () => loadHome({ refresh: true }));
+
+function loadHome(opts = {}) {
+  $('home-day').classList.toggle('hidden', homeScope !== 'day');
+  $('home-week').classList.toggle('hidden', homeScope !== 'week');
+  return homeScope === 'day' ? loadDay() : loadWeek(opts);
+}
+
+// ---- the day ----
+
+async function loadDay() {
+  const run = ++homeRun;
+  $('home-hint').textContent = '';
+  try {
+    const d = await window.yapper.dailyDigest(homeDay || undefined);
+    if (run !== homeRun) return;
+    renderDay(d);
+  } catch (err) {
+    if (run !== homeRun) return;
+    showDayEmpty(`Could not read your meetings: ${err.message}`, true);
+  }
+}
+
+function renderDay(d) {
+  homeDay = d.day;
+  const isToday = d.day === localToday();
+  $('home-title').textContent = isToday ? 'Today' : longDate(d.day);
+  $('home-sub').textContent = isToday
+    ? 'Everything your meetings recorded today, taken straight from the notes.'
+    : `What happened on ${longDate(d.day)}.`;
+
+  fillList('day-attention', d.attention, item => {
+    const li = document.createElement('li');
+    li.className = 'digest-item';
+    const tag = document.createElement('span');
+    tag.className = `digest-tag tag-${item.kind}`;
+    tag.textContent = { 'no-notes': 'no notes', overdue: 'overdue', urgent: 'urgent' }[item.kind] || item.kind;
+    const text = document.createElement('span');
+    text.className = 'digest-text';
+    text.textContent = item.text;
+    li.append(tag, text);
+    if (item.owner) li.appendChild(meta(item.owner));
+    if (item.due) li.appendChild(meta(`due ${item.due}`));
+    li.appendChild(sourceButton(item.meeting && item.meeting.folder
+      ? item.meeting : { title: item.meeting, folder: item.folder }));
+    return li;
+  });
+
+  fillList('day-meetings', d.meetings, m => {
+    const li = document.createElement('li');
+    li.className = 'digest-item';
+    const time = document.createElement('span');
+    time.className = 'digest-time';
+    time.textContent = m.time || '—';
+    const open = document.createElement('button');
+    open.className = 'result-meeting';
+    open.textContent = m.title;
+    open.title = 'Open this meeting';
+    open.addEventListener('click', () => openMeetingByFolder(m.folder));
+    li.append(time, open);
+    if (m.participants.length) li.appendChild(meta(m.participants.join(', ')));
+    return li;
+  });
+
+  fillList('day-decisions', d.decisions, dec => {
+    const li = document.createElement('li');
+    li.className = 'digest-item';
+    const text = document.createElement('span');
+    text.className = 'digest-text';
+    text.textContent = dec.text;
+    li.append(text, sourceButton(dec.meeting));
+    return li;
+  });
+
+  fillList('day-actions', d.created, a => {
+    const li = document.createElement('li');
+    li.className = 'digest-item';
+    const text = document.createElement('span');
+    text.className = 'digest-text';
+    text.textContent = a.text;
+    li.appendChild(text);
+    li.appendChild(meta(a.owner || 'nobody named'));
+    if (a.due) li.appendChild(meta(`due ${a.due}`));
+    li.appendChild(sourceButton({ title: a.meeting, folder: a.folder }));
+    return li;
+  });
+
+  if (d.empty) {
+    const label = isToday ? 'No meetings recorded today.' : `Nothing on ${longDate(d.day)}.`;
+    showDayEmpty(label, false, d.previous);
+  } else {
+    $('day-empty').classList.add('hidden');
+    const c = d.counts;
+    $('home-hint').textContent = `${count(c.meetings, 'meeting')} · `
+      + `${count(c.decisions, 'decision')} · ${count(c.openTotal, 'item')} still open`;
+  }
+  homeCountEl.textContent = d.attention.length;
+  homeCountEl.classList.toggle('hidden', !d.attention.length);
+}
+
+function showDayEmpty(text, isError, previous) {
+  for (const id of ['day-attention', 'day-meetings', 'day-decisions', 'day-actions']) {
+    $(id).innerHTML = '';
+    $(`${id}-block`).classList.add('hidden');
+  }
+  const box = $('day-empty');
+  box.innerHTML = '';
+  box.classList.remove('hidden');
+  box.classList.toggle('error', !!isError);
+  const p = document.createElement('p');
+  p.textContent = text;
+  box.appendChild(p);
+  if (previous) {
+    const back = document.createElement('button');
+    back.className = 'btn-ghost';
+    back.textContent = `Show ${longDate(previous)} instead`;
+    back.addEventListener('click', () => { homeDay = previous; loadDay(); });
+    box.appendChild(back);
+  }
+}
+
+/** Fill a digest list, and hide the whole block when there is nothing in it. */
+function fillList(id, items, build) {
+  const ul = $(id);
+  ul.innerHTML = '';
+  for (const item of items || []) ul.appendChild(build(item));
+  $(`${id}-block`).classList.toggle('hidden', !(items || []).length);
+}
+
+function meta(text) {
+  const el = document.createElement('span');
+  el.className = 'digest-meta';
+  el.textContent = text;
+  return el;
+}
+
+/** The link back to where a line came from. Every line has one. */
+function sourceButton(meeting) {
+  const btn = document.createElement('button');
+  btn.className = 'digest-source';
+  btn.textContent = (meeting && meeting.title) || 'the meeting';
+  btn.title = 'Open the meeting this came from';
+  if (meeting && meeting.folder) {
+    btn.addEventListener('click', () => openMeetingByFolder(meeting.folder));
+  } else {
+    btn.disabled = true;
+  }
+  return btn;
+}
+
+// ---- the week ----
+
+async function loadWeek(opts = {}) {
+  const run = ++homeRun;
+  $('week-sections').innerHTML = '';
+  $('week-foot').classList.add('hidden');
+  setStatus($('week-status'), opts.refresh ? 'Writing it again…' : 'Reading this week\'s notes…');
+  try {
+    const w = await window.yapper.weeklySummary({
+      week: homeWeekOf || undefined, refresh: !!opts.refresh
+    });
+    if (run !== homeRun) return;
+    renderWeek(w);
+  } catch (err) {
+    if (run !== homeRun) return;
+    setStatus($('week-status'), `Could not build the weekly review: ${err.message}`, true);
+  }
+}
+
+function renderWeek(w) {
+  homeWeekOf = w.from;
+  $('home-title').textContent = 'This week';
+  $('home-sub').textContent = `${longDate(w.from)} — ${longDate(w.to)}`;
+  $('home-hint').textContent = w.week;
+  renderWeekFacts(w.facts);
+
+  // Whatever happens next, the numbers above stay on screen.
+  const status = $('week-status');
+  if (w.reason === 'no-meetings') {
+    setStatus(status, 'No meetings this week yet.');
+    return offerPreviousWeek(w);
+  }
+  if (w.reason === 'no-notes') {
+    setStatus(status, `${count(w.facts.meetings.length, 'meeting')} this week, but none of them have notes yet. `
+      + 'Generate notes for one and the review can be written.');
+    return offerPreviousWeek(w);
+  }
+  if (w.reason === 'thin') {
+    setStatus(status, 'Only one meeting has notes this week. A review connects meetings to each '
+      + 'other, so there is nothing to connect yet.');
+    return offerPreviousWeek(w);
+  }
+  if (w.error) {
+    setStatus(status, `The written review failed: ${w.error}`, true);
+    $('week-foot').classList.remove('hidden');
+    $('week-note').textContent = 'The counts above come from your notes and do not need a model.';
+    return;
+  }
+
+  status.classList.add('hidden');
+  const host = $('week-sections');
+  host.innerHTML = '';
+  let shown = 0;
+
+  for (const section of w.sections || []) {
+    const block = document.createElement('section');
+    block.className = 'digest-block week-section';
+    const h = document.createElement('h2');
+    h.className = 'digest-h';
+    h.textContent = section.title;
+    block.appendChild(h);
+
+    if (!section.items.length) {
+      const none = document.createElement('p');
+      none.className = 'week-none';
+      none.textContent = section.title === 'Threads'
+        ? 'No topic came up in more than one meeting.'
+        : 'Nothing in the notes.';
+      block.appendChild(none);
+    } else {
+      const ul = document.createElement('ul');
+      ul.className = 'digest-list';
+      for (const item of section.items) {
+        const li = document.createElement('li');
+        li.className = 'digest-item';
+        const text = document.createElement('span');
+        text.className = 'digest-text';
+        text.textContent = item.text;
+        li.appendChild(text);
+        for (const c of item.cites) li.appendChild(sourceButton(c));
+        ul.appendChild(li);
+      }
+      block.appendChild(ul);
+      shown += section.items.length;
+    }
+    host.appendChild(block);
+  }
+
+  if (!shown) {
+    setStatus(status, 'The notes from this week did not support any cross-meeting points.');
+  }
+
+  $('week-foot').classList.remove('hidden');
+  const notes = [];
+  if (w.cached) notes.push('Written earlier from the same notes');
+  notes.push(`from ${count(w.fromMeetings || 0, 'meeting')}`);
+  if (w.dropped) notes.push(`${count(w.dropped, 'line')} left out for not naming a meeting`);
+  if (w.truncated) notes.push(`${count(w.truncated, 'long note')} shortened`);
+  $('week-note').textContent = notes.join(' · ');
+}
+
+function renderWeekFacts(f) {
+  const host = $('week-facts');
+  host.innerHTML = '';
+  const stats = [
+    [f.meetings.length, 'meetings'],
+    [f.days.length, f.days.length === 1 ? 'day' : 'days'],
+    [f.people.length, 'people'],
+    [f.decisionCount, 'decisions'],
+    [f.openFromWeek, 'new items'],
+    [f.overdue, 'overdue']
+  ];
+  for (const [n, label] of stats) {
+    const cell = document.createElement('div');
+    cell.className = 'week-stat' + (label === 'overdue' && n ? ' stat-warn' : '');
+    const big = document.createElement('span');
+    big.className = 'week-stat-n';
+    big.textContent = n;
+    const small = document.createElement('span');
+    small.className = 'week-stat-l';
+    small.textContent = label;
+    cell.append(big, small);
+    host.appendChild(cell);
+  }
+  if (f.missingNotes.length) {
+    const warn = document.createElement('div');
+    warn.className = 'week-missing';
+    warn.textContent = `${count(f.missingNotes.length, 'meeting')} transcribed without notes: `;
+    for (const m of f.missingNotes) warn.appendChild(sourceButton(m));
+    host.appendChild(warn);
+  }
+}
+
+function offerPreviousWeek(w) {
+  $('week-foot').classList.remove('hidden');
+  $('week-note').textContent = '';
+  const back = document.createElement('button');
+  back.className = 'btn-ghost';
+  back.textContent = 'Show the week before';
+  back.addEventListener('click', () => { homeWeekOf = w.previous; loadWeek(); });
+  $('week-sections').innerHTML = '';
+  $('week-sections').appendChild(back);
+}
+
+// ---- small shared bits ----
+
+function count(n, noun) {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`;
+}
+
+function localToday() {
+  const now = new Date();
+  const p = x => String(x).padStart(2, '0');
+  return `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+}
+
+function longDate(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString(undefined,
+    { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 // ---------- text-to-speech (read notes aloud) ----------
