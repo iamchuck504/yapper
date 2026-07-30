@@ -71,7 +71,15 @@ function migrateOldData() {
     }
   }
 }
-const CLAUDE_FALLBACK = path.join(app.getPath('home'), '.local', 'bin', 'claude.exe');
+// Where the Claude CLI hides when it is not on PATH — which for a GUI app on
+// macOS is always, since launchd gives apps a bare PATH without /opt/homebrew.
+const CLAUDE_FALLBACKS = process.platform === 'win32'
+  ? [path.join(app.getPath('home'), '.local', 'bin', 'claude.exe')]
+  : [
+    path.join(app.getPath('home'), '.local', 'bin', 'claude'),
+    '/opt/homebrew/bin/claude',
+    '/usr/local/bin/claude'
+  ];
 
 let win;
 let bubble = null;
@@ -593,7 +601,7 @@ function newMeetingFolder() {
 }
 
 function resolveClaude() {
-  return fs.existsSync(CLAUDE_FALLBACK) ? CLAUDE_FALLBACK : 'claude';
+  return CLAUDE_FALLBACKS.find(p => fs.existsSync(p)) || 'claude';
 }
 
 function writeParticipants(folder, participants) {
@@ -1205,11 +1213,23 @@ ipcMain.handle('engine-setup', async () => ensureEngine());
 // launch and every few hours, downloaded in the background, applied on quit —
 // or right away if the user clicks the pill the renderer shows. A development
 // checkout updates with git and skips all of this.
+//
+// macOS is the exception: Squirrel.Mac refuses to apply an unsigned update, and
+// there is no signing certificate yet. So on mac the app only *notices* — it
+// reads latest.yml from the same feed, and the pill opens the download page
+// instead of promising a restart it cannot deliver.
 
+const RELEASES_LATEST = 'https://github.com/iamchuck504/yapper-releases/releases/latest';
 let updater = null;
+let macUpdateVersion = '';
 
 function setupAutoUpdate() {
   if (!app.isPackaged) return;
+  if (process.platform === 'darwin') {
+    checkMacUpdate();
+    setInterval(checkMacUpdate, 4 * 60 * 60 * 1000);
+    return;
+  }
   try {
     const { autoUpdater } = require('electron-updater');
     updater = autoUpdater;
@@ -1224,9 +1244,25 @@ function setupAutoUpdate() {
   }
 }
 
+async function checkMacUpdate() {
+  try {
+    const tmp = path.join(app.getPath('temp'), `yapper-feed-${process.pid}.yml`);
+    await provision.download(`${RELEASES_LATEST}/download/latest.yml`, tmp);
+    const m = fs.readFileSync(tmp, 'utf8').match(/^version:\s*(\S+)/m);
+    try { fs.unlinkSync(tmp); } catch { /* temp */ }
+    if (m && provision.newerVersion(m[1], app.getVersion())) {
+      macUpdateVersion = m[1];
+      broadcast('update-ready', { version: m[1], manual: true });
+    }
+  } catch (err) {
+    console.log('[update] mac check failed:', String(err.message).slice(0, 120));
+  }
+}
+
 ipcMain.handle('update-restart', async () => {
-  if (updater) updater.quitAndInstall();
-  return !!updater;
+  if (updater) { updater.quitAndInstall(); return 'installing'; }
+  if (macUpdateVersion) { shell.openExternal(RELEASES_LATEST); return 'browser'; }
+  return 'none';
 });
 
 ipcMain.handle('save-notes', async (_e, folder, md) => {

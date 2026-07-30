@@ -215,8 +215,9 @@ transcript, notes, title. Useful for phone recordings and voice memos.
 | Dark/light theme, read-aloud, start with Windows | Working |
 | Windows installer (per-user NSIS) | Working, unsigned |
 | First-run engine download with progress | Working |
-| Auto-update from the release feed | Working, proven end to end |
-| macOS / mobile | **Missing** |
+| Auto-update from the release feed | Working, proven end to end (Windows; on macOS it notifies and links the download) |
+| macOS | Code-ready and build-scripted (`mac/`), **not yet run on a Mac**; mic-only capture, unsigned |
+| Mobile | **Missing** |
 | Speaker labels | **Missing** |
 | Calendar integration | **Missing** |
 | Sync, sharing, team features | **Missing** |
@@ -238,10 +239,13 @@ UI; several are deliberate trade-offs, marked as such.
    identity paperwork; without one, SmartScreen warns on first install and some
    corporate policies block unsigned executables outright. The auto-updater
    works unsigned, but signing is what "install without a scary screen" costs.
-2. **Windows only.** The capture layer (WASAPI loopback) and the detection
-   layer (CapabilityAccessManager) are Windows APIs. macOS needs a whisper.cpp
-   arm64 build, a ScreenCaptureKit capture path, notarization, and an Apple
-   Developer account. No mobile.
+2. **Windows-first; macOS is second-class.** The mac build is scripted
+   (`mac/`) but has not yet run on a Mac, and even built it captures the
+   **microphone only** — Electron's system-audio loopback is Windows-only, so
+   a headphone call records just this side. It is also unsigned (Gatekeeper
+   right-click-open), updates notify instead of self-installing, and meeting
+   auto-detection does not exist there. Full parity needs a ScreenCaptureKit
+   capture path and an Apple Developer account. No mobile.
 3. **No speaker labels.** The transcript does not say who spoke. Typed
    participants improve name spelling only. (The mic and system channels are
    already separate internally, so "You:" vs "Them:" attribution is reachable —

@@ -2596,13 +2596,19 @@ async function provisionEngine() {
 // Installed copies download updates in the background; this pill is the offer
 // to apply one now. Ignoring it is fine — it applies on next quit anyway.
 
+let updateIsManual = false;   // macOS: unsigned builds cannot self-apply, so
+                              // the pill opens the download page instead
+
 window.yapper.onUpdateReady(info => {
   const b = $('btn-update');
-  b.textContent = `Update ${info && info.version ? 'v' + info.version : ''} ready — restart`.replace('  ', ' ');
+  updateIsManual = !!(info && info.manual);
+  b.textContent = updateIsManual
+    ? `New version v${info.version} — download`
+    : `Update ${info && info.version ? 'v' + info.version : ''} ready — restart`.replace('  ', ' ');
   b.classList.remove('hidden');
 });
 $('btn-update').addEventListener('click', () => {
-  if (recording) {
+  if (recording && !updateIsManual) {
     setStatus(statusEl, 'Recording — the update will install when Yapper closes.');
     return;
   }

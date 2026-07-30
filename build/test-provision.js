@@ -40,6 +40,9 @@ const gpuZip = makeZip('gpu.zip', {
   'deep/nested/Release/whisper-server.exe': 'fake gpu server',
   'deep/nested/Release/cublas64.dll': 'fake cublas'
 });
+const macZip = makeZip('mac.zip', {
+  'bin/whisper-server': 'fake mac server'
+});
 const model = name => Buffer.from(`fake ${name} model weights`);
 
 // ---- the server, with a hit counter and switchable failures ----
@@ -58,6 +61,7 @@ const server = http.createServer((req, res) => {
 
   const routes = {
     '/engine/whisper-bin-x64.zip': () => cpuZip,
+    '/engine/whisper-mac-arm64.zip': () => macZip,
     '/engine/whisper-cublas-12.4.0-bin-x64.zip': () => {
       if (failGpu) { res.writeHead(500); res.end(); return null; }
       return gpuZip;
@@ -142,6 +146,28 @@ server.listen(0, '127.0.0.1', async () => {
 
     // ---- and the retry after the failure completes it ----
     check('reintentar completa lo que faltaba', await provision.run({ ...opts(D), gpu: false }));
+
+    // ---- version comparison, what the mac update notice hangs on ----
+    check('0.1.1 es más nueva que 0.1.0', provision.newerVersion('0.1.1', '0.1.0'));
+    check('0.2.0 gana a 0.1.9', provision.newerVersion('0.2.0', '0.1.9'));
+    check('0.1.10 gana a 0.1.9 (numérico, no alfabético)', provision.newerVersion('0.1.10', '0.1.9'));
+    check('la misma versión no es más nueva', provision.newerVersion('0.1.0', '0.1.0'), false);
+    check('una vieja no es más nueva', provision.newerVersion('0.1.0', '0.1.1'), false);
+    check('1.0 contra 1.0.1 pierde', provision.newerVersion('1.0', '1.0.1'), false);
+
+    // ---- macOS: one Metal build from our own feed, no gpu variant ----
+    const E = path.join(ROOT, 'homeE');
+    progressLog = [];
+    check('mac instala desde nuestro feed', await provision.run({
+      ...opts(E), platform: 'mac-arm64', gpu: false,
+      macZip: `${base}/engine/whisper-mac-arm64.zip`
+    }));
+    check('el binario mac quedó donde engine.binDir() lo busca',
+      fs.readFileSync(path.join(E, 'bin', 'mac-arm64', 'whisper-server'), 'utf8'), 'fake mac server');
+    check('sin variante -gpu en mac',
+      fs.existsSync(path.join(E, 'bin', 'mac-arm64-gpu')), false);
+    check('en mac son 3 pasos (motor + 2 modelos)',
+      progressLog.every(p => p.steps === 3));
   } catch (err) {
     fails++;
     console.log('FAIL  ' + (err.stack || err.message));

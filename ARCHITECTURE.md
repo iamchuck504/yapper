@@ -95,14 +95,14 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1918 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `main.js` | 1954 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
 | `engine.js` | 648 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
 | `llm.js` | 322 | Note providers (§6) behind one `generate()` call |
 | `live.js` | 304 | Live transcription: rolling window, LocalAgreement-2 confirmation |
 | `actions.js` | 253 | Reading action items out of the notes, and folding duplicates together |
-| `provision.js` | 181 | First-run engine download for installed copies: the whisper.cpp builds and models, with progress |
+| `provision.js` | 213 | First-run engine download for installed copies (Windows and macOS), and the version comparison behind update notices |
 | `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
@@ -638,9 +638,16 @@ why:
   machine without symlink privileges that extraction fails on electron-builder
   25 and works on 26, which is why the pin is `^26`.
 
-**macOS** remains unpackaged — no prebuilt whisper.cpp for arm64 (compile once
-on Apple hardware), notarisation needs a paid Apple Developer account, and
-capture plus meeting detection are Windows APIs today.
+**macOS** is code-ready and build-scripted, but has not yet run on a Mac. The
+platform branches live in the same files: `provision.js` downloads a
+self-hosted Metal engine from the feed (ggml-org publishes no mac binary —
+`mac/build-engine.sh` compiles and publishes it once per engine version),
+`mac/build-app.sh` produces the dmg, and updates on mac only *notify* (the
+pill opens the download page) because Squirrel.Mac refuses unsigned updates.
+The honest limitations — microphone-only capture (Electron's loopback is
+Windows-only), Gatekeeper's right-click-open on an unsigned app, no meeting
+auto-detection — are laid out in `mac/README.md`, which is also the runbook
+for the one-time session on Apple hardware.
 
 ---
 
