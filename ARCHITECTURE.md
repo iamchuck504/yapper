@@ -673,16 +673,34 @@ why:
   machine without symlink privileges that extraction fails on electron-builder
   25 and works on 26, which is why the pin is `^26`.
 
-**macOS** is code-ready and build-scripted, but has not yet run on a Mac. The
-platform branches live in the same files: `provision.js` downloads a
-self-hosted Metal engine from the feed (ggml-org publishes no mac binary —
-`mac/build-engine.sh` compiles and publishes it once per engine version),
-`mac/build-app.sh` produces the dmg, and updates on mac only *notify* (the
-pill opens the download page) because Squirrel.Mac refuses unsigned updates.
-The honest limitations — microphone-only capture (Electron's loopback is
-Windows-only), Gatekeeper's right-click-open on an unsigned app, no meeting
-auto-detection — are laid out in `mac/README.md`, which is also the runbook
-for the one-time session on Apple hardware.
+**macOS** ships a dmg built by `mac/build-app.sh` on Apple Silicon. The platform
+branches live in the same files: `provision.js` downloads a self-hosted Metal
+engine from the feed (ggml-org publishes no mac binary — `mac/build-engine.sh`
+compiles and publishes it once per engine version), and the two native helpers
+are compiled alongside the app.
+
+Three constraints are worth knowing before touching that build, all learned the
+hard way and all documented in `mac/README.md`:
+
+- **The signature identity is not cosmetic.** electron-builder leaves Electron's
+  own ad-hoc signature unless told otherwise, so the bundle claimed
+  `com.yapper.meetingnotes` while its signature said `Electron`. macOS keys
+  notification authorisation on the signature, so the app was never registered
+  and never got to ask — notifications simply did not exist, silently.
+  `identity: "-"` fixes it; `hardenedRuntime` is off beside it, since without a
+  certificate it buys nothing and would demand a microphone entitlement the
+  defaults omit.
+- **Deployment targets must be pinned.** `swiftc` defaults to the SDK's version,
+  so building on a beta produces helpers that run on that beta and nowhere else,
+  while the Electron app opens fine — an install that looks healthy and quietly
+  has neither system audio nor meeting detection.
+- **Updates only notify.** Squirrel.Mac refuses unsigned updates, so the pill
+  opens the download page instead of promising a restart it cannot deliver.
+
+Gatekeeper still rejects the ad-hoc signature on someone else's machine, and
+since macOS 15 right-click → Open no longer clears it. That, and self-installing
+updates, and notarisation, are all the same missing item: an Apple Developer
+certificate.
 
 ---
 
@@ -728,6 +746,9 @@ three groups.
 | `test-meetings.js` | The delete path guard |
 | `test-section-coverage.js` | Every note style has a button, every section has a colour rule |
 | `test-ipc-wiring.js` | Every bridge channel has a counterpart |
+| `test-meeting-detect.js` | Which running app counts as a meeting, in both vocabularies — including the helper-process bundle ids Electron apps actually report, which is what the first macOS build got wrong |
+| `test-sysaudio.js` | Mixing system audio into the microphone: saturating instead of wrapping, the bounded buffer, and a helper that is absent leaving the microphone untouched rather than writing silence over it |
+| `test-platform-parity.js` | The Windows assumptions that mean something else on macOS — asking for screen capture to record, registering a login item by executable path, and telling a Mac user to run a PowerShell script |
 
 **Driving the real app** (Electron, a throwaway `Documents` and `userData` so a
 run can never touch a real meeting):
@@ -749,6 +770,7 @@ run can never touch a real meeting):
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
 | `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |
 | `test-bubble-fit.js`, `test-splash-mark.js`, `icon-verify.js` | The overlay in all three states — capsule, hover-open, pinned — fits its contents, opens and closes on the hover messages, keeps the pin across a reload, migrates the old expanded preference, and its bars track the level they are sent; the splash mark loads under CSP; the icon's corners, halo and every `.ico` size |
+| `probe-system-audio.js` | macOS: mutes the output, plays a clip, records, and checks the file still has signal. Energy alone would prove nothing — the microphone hears the speakers too — so muting is what makes the capture path the only possible source |
 | `probe-empty.js` | Not an assertion — it boots against an empty profile and prints what every view says, so a first run can be read instead of guessed at. It is how the weekly panel's wall of zeros and its dead "write it again" button were found |
 | `probe-notify.js` | Shows one real meeting-detected toast and reports what the OS did with it. `WITH_SHORTCUT=1` adds a Start Menu shortcut first, to test whether the AppUserModelID needs one — on Windows 11 it does not; the toast displays either way |
 | `probe-wave.js`, `probe-wave-real.js`, `probe-wave-user.js` | Three rungs for diagnosing dead waveforms: the real `startRecording()` with synthetic streams, with the real loopback and default microphone, and with the user's actual saved profile. Each reports context state, track counts, which analysers exist, and whether the drawn pixels move |
