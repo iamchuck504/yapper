@@ -105,14 +105,38 @@ app.whenReady().then(async () => {
     has(c, 'recording.wav') ? true : tSize >= 40,
     `transcript de ${tSize} bytes y el audio ya no está`);
 
-  // ---- 4. the opt-out ----
-  say('\n--- 4. "Keep audio after transcribing" ---');
-  await $('window.yapper.setKeepAudio(true)');
+  // ---- 4. "Keep this meeting's audio": one meeting, then off again ----
+  say("\n--- 4. \"Keep this meeting's audio\" ---");
+  check('arranca apagado', (await $('window.yapper.getKeepAudio()')) === false, 'venía encendido');
+  check('y el interruptor de la pantalla también',
+    (await $("document.getElementById('opt-keep-audio').checked")) === false, 'venía marcado');
+
+  await $(`(() => { const t = document.getElementById('opt-keep-audio');
+    t.checked = true; t.dispatchEvent(new Event('change')); })()`);
+  await new Promise(r => setTimeout(r, 300));
+
   const d = seed('2026-07-29_2003');
   await within($(`window.yapper.transcribe(${JSON.stringify(d)})`), 'transcribir con keepAudio', 120000);
-  check('con el ajuste puesto, conserva el audio', has(d, 'recording.wav'), 'lo borró igual');
+  check('encendido, conserva el audio de ESA reunión', has(d, 'recording.wav'), 'lo borró igual');
   check('y aun así deja el transcript', has(d, 'transcript.txt'), 'no lo dejó');
-  await $('window.yapper.setKeepAudio(false)');
+
+  // and it must have turned itself off again
+  await new Promise(r => setTimeout(r, 300));
+  check('se apaga solo después de honrarlo',
+    (await $('window.yapper.getKeepAudio()')) === false, 'sigue encendido');
+  check('el interruptor de la pantalla se desmarca solo',
+    (await $("document.getElementById('opt-keep-audio').checked")) === false, 'sigue marcado');
+
+  // so the very next meeting releases again, without touching anything
+  const d2 = seed('2026-07-29_2006');
+  await within($(`window.yapper.transcribe(${JSON.stringify(d2)})`), 'la siguiente reunión', 120000);
+  check('la siguiente reunión ya libera el audio', !has(d2, 'recording.wav'), 'lo conservó');
+  check('y la anterior sigue conservando el suyo', has(d, 'recording.wav'), 'se lo llevó después');
+
+  // nothing about it may be written to settings, or it would survive a restart
+  const settings = JSON.parse(fs.readFileSync(path.join(ROOT, 'user', 'settings.json'), 'utf8'));
+  check('no queda guardado en los ajustes', settings.keepAudio === undefined,
+    JSON.stringify(settings));
 
   // ---- 5. reclaiming what older meetings still hold ----
   say('\n--- 5. liberar lo que ya estaba guardado ---');

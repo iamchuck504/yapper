@@ -178,12 +178,19 @@ async function refreshHeldAudio() {
   btnFreeAudio.classList.toggle('hidden', !show);
 }
 
+// Not a saved preference: off on every launch, and off again the moment it has
+// been honoured for one meeting.
 window.yapper.getKeepAudio().then(keep => { keepAudioToggle.checked = keep; });
 refreshHeldAudio();
 
 keepAudioToggle.addEventListener('change', async () => {
   await window.yapper.setKeepAudio(keepAudioToggle.checked);
   await refreshHeldAudio();
+});
+
+window.yapper.onKeepAudioChanged(keep => {
+  keepAudioToggle.checked = keep;
+  refreshHeldAudio();
 });
 
 btnFreeAudio.addEventListener('click', async () => {

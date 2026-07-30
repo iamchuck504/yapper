@@ -734,11 +734,23 @@ ipcMain.handle('transcribe', async (_e, folder) => {
 // Note the ordering: the transcript is written first, then the audio is
 // released. A crash between the two costs nothing.
 
+// Keeping the audio is a decision about one meeting, not a preference. It lives
+// in memory only, so it is off on every launch, and it turns itself off again
+// once it has been honoured — nobody means "keep every recording from now on"
+// when they tick it for a negotiation.
+let keepThisOne = false;
+
 function releaseAudio(folder) {
-  if (readSettings().keepAudio === true) return;      // opted out
   const transcript = path.join(folder, 'transcript.txt');
   // never on a guess: only when the transcript is really there and has content
   if (!fs.existsSync(transcript) || fs.statSync(transcript).size < 40) return;
+
+  if (keepThisOne) {
+    keepThisOne = false;                     // that meeting, and only that one
+    broadcast('keep-audio-changed', false);
+    console.log('[audio] kept by request for this meeting; back to releasing');
+    return;
+  }
 
   for (const f of fs.readdirSync(folder)) {
     if (!/^recording\./i.test(f)) continue;
@@ -753,13 +765,14 @@ function releaseAudio(folder) {
   }
 }
 
-ipcMain.handle('get-keep-audio', async () => readSettings().keepAudio === true);
+ipcMain.handle('get-keep-audio', async () => keepThisOne);
 
 ipcMain.handle('set-keep-audio', async (_e, keep) => {
+  keepThisOne = !!keep;
+  // an older build persisted this as a setting; make sure that cannot linger
   const s = readSettings();
-  s.keepAudio = !!keep;
-  writeSettings(s);
-  return s.keepAudio;
+  if (s.keepAudio !== undefined) { delete s.keepAudio; writeSettings(s); }
+  return keepThisOne;
 });
 
 /** Audio still held by meetings that already have a transcript. */

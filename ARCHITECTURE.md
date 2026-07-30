@@ -95,13 +95,13 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1525 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
+| `main.js` | 1538 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
 | `engine.js` | 620 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `llm.js` | 322 | Note providers (§6) behind one `generate()` call |
 | `live.js` | 287 | Live transcription: rolling window, LocalAgreement-2 confirmation |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
-| `preload.js` | 80 | The only bridge between renderer and main |
+| `preload.js` | 81 | The only bridge between renderer and main |
 
 `keystore.js` and `bounds.js` are separate files for one reason: they are pure
 functions, so they can be tested without booting Electron, and `keystore.js`
@@ -112,9 +112,9 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 1868 | Main window: capture graph, views, notes rendering, exports, reminders, settings |
+| `renderer/app.js` | 1875 | Main window: capture graph, views, notes rendering, exports, reminders, settings |
 | `renderer/style.css` | 1218 | Everything visual, light and dark |
-| `renderer/index.html` | 318 | Main window markup |
+| `renderer/index.html` | 319 | Main window markup |
 | `renderer/bubble.html` | 188 | The always-on-top live transcript overlay |
 | `renderer/bubble.js` | 125 | Its behaviour, including sizing itself to its own controls |
 | `renderer/splash.html` | 104 | Boot screen, including the first-run calibration status |
@@ -179,7 +179,7 @@ phrase and a word lost on the seam.
 
 ## 5. IPC surface
 
-57 channels, all declared in `preload.js` — that file is the complete list of
+58 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
@@ -197,9 +197,9 @@ a typo here fails at runtime inside a click.
 **Fire-and-forget (10)** — `recording-chunk` (the audio itself), `set-theme`,
 `recording-state`, `autodetect-set`, `mark-shortcut`, and five bubble messages.
 
-**Main → renderer (9)** — `transcribe-progress`, `live-transcript`,
+**Main → renderer (10)** — `transcribe-progress`, `live-transcript`,
 `meeting-detected`, `meeting-ended`, `start-recording`, `mark-moment`,
-`remote-stop`, `remote-pause`, `bubble-state`.
+`remote-stop`, `remote-pause`, `bubble-state`, `keep-audio-changed`.
 
 ---
 
@@ -393,8 +393,12 @@ is released, so a crash between the two costs nothing. Release happens only when
 the transcript really exists and has content — a failed transcription keeps the
 audio so it can be retried, which is the whole reason to have it.
 
-- `Keep audio after transcribing` in settings turns this off for anyone who wants
-  the recording.
+- `Keep this meeting's audio` covers **one meeting**, not a policy. It lives in
+  the main process's memory rather than in settings, so it is off on every
+  launch, and it switches itself off — and unticks itself on screen — as soon as
+  it has been honoured. Nobody who ticks it before a negotiation means "keep
+  every recording from now on", and a persisted version of this toggle would
+  quietly do exactly that.
 - Meetings recorded before this changed still hold their audio. The app reports
   how much and offers to release it, to the recycle bin, on request — it does not
   delete a user's existing recordings on their behalf at launch.
