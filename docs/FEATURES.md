@@ -294,8 +294,14 @@ The rules around it:
 
 - **Theme** — light and dark, everywhere including the capsule.
 - **Start at login** — on by default, switchable.
-- **Updates** — Windows installs them itself; macOS notifies and opens the
-  download page (it needs a signing certificate to do more).
+- **Updates** — checked at launch and every four hours. **Windows** downloads in
+  the background and applies on quit, or immediately from the sidebar pill.
+  **macOS** shows *New version — download* and opens the releases page instead:
+  Squirrel.Mac refuses unsigned updates, so it says so rather than promising a
+  restart it cannot deliver. Updating there means dragging the new dmg over the
+  old app and clearing Gatekeeper once more — but not re-downloading the engine,
+  which lives outside the app, so it is ~95 MB rather than another 650 MB. Your
+  meetings and permissions are untouched either way.
 - **Reminders** — add your own, alongside the ones extracted from notes.
 
 ---

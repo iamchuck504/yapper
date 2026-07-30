@@ -118,6 +118,20 @@ and then dropped as not worth the dependency; see the history of
    updates, so the app checks the same feed, and the sidebar pill becomes
    "New version — download", opening the releases page. Auto-install arrives
    with signing.
+
+   The check reads **`latest-mac.yml`**, falling back to `latest.yml`. That
+   distinction is not cosmetic: electron-builder writes one manifest per
+   platform, so a release cut here updates `latest-mac.yml` and leaves
+   `latest.yml` at whatever Windows last published. Reading only the latter —
+   which is what it did until this was noticed — means every installed Mac is
+   told there is nothing new. `build-app.sh` uploads the manifest with the dmg
+   for the same reason; it used to be left behind in `dist/`, so the feed had
+   never carried one.
+
+   Updating is manual but cheap: the engine and models live in
+   `~/Library/Application Support/yapper`, outside the bundle, so a new version
+   is the ~95 MB dmg and not another 650 MB. Meetings and granted permissions
+   survive, since neither belongs to the app bundle and the bundle id is stable.
 4. **Intel Macs are not built.** arm64 only; an x64/universal build would need
    a second engine compile and doubles the artifact size for a shrinking
    audience.
