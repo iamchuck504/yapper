@@ -95,9 +95,9 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1765 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
+| `main.js` | 1774 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
 | `engine.js` | 640 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
-| `digest.js` | 344 | The day, assembled from the notes; the week, written from them and checked |
+| `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 342 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
 | `llm.js` | 322 | Note providers (§6) behind one `generate()` call |
 | `live.js` | 304 | Live transcription: rolling window, LocalAgreement-2 confirmation |
@@ -116,7 +116,7 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 2500 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
+| `renderer/app.js` | 2521 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
 | `renderer/style.css` | 1494 | Everything visual, light and dark |
 | `renderer/index.html` | 423 | Main window markup |
 | `renderer/bubble.html` | 188 | The always-on-top live transcript overlay |
@@ -643,6 +643,7 @@ run can never touch a real meeting):
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
 | `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |
 | `test-bubble-fit.js`, `test-splash-mark.js`, `icon-verify.js` | The overlay fits its own controls; the splash mark loads under CSP; the icon's corners, halo and every `.ico` size |
+| `probe-empty.js` | Not an assertion — it boots against an empty profile and prints what every view says, so a first run can be read instead of guessed at. It is how the weekly panel's wall of zeros and its dead "write it again" button were found |
 
 **Spending model calls** (minutes, run deliberately): `test-styles.js` runs every
 note style against one transcript and compares the sections returned with the

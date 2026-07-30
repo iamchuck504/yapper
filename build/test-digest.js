@@ -128,6 +128,10 @@ const quiet = digest.dailyDigest({ meetings: MEETINGS, items: [], day: '2026-07-
 check('un día sin nada se declara vacío', quiet.empty, true);
 check('y no inventa reuniones', quiet.meetings.length, 0);
 
+check('un día vacío sabe si la biblioteca entera está vacía', quiet.library, 4);
+check('y con biblioteca vacía lo dice como tal',
+  digest.dailyDigest({ meetings: [], items: [], day: TODAY }).library, 0);
+
 const quietButOwing = digest.dailyDigest({ meetings: MEETINGS, items: ITEMS, day: '2026-07-25' });
 ok('un día sin reuniones pero con algo vencido no está vacío',
   quietButOwing.empty === false && quietButOwing.attention.length > 0,

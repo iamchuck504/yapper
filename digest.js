@@ -154,6 +154,8 @@ function dailyDigest({ meetings = [], items = [], day }) {
       created: created.length,
       openTotal: open.length
     },
+    // "nothing today" and "nothing ever" are different sentences to a new user
+    library: meetings.length,
     empty: todays.length === 0 && attention.length === 0
   };
 }
