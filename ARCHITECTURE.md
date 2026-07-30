@@ -98,7 +98,7 @@ that ship are the files that run.
 | `main.js` | 1428 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
 | `engine.js` | 500 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `llm.js` | 322 | Note providers (§6) behind one `generate()` call |
-| `live.js` | 273 | Live transcription: rolling window, LocalAgreement-2 confirmation |
+| `live.js` | 287 | Live transcription: rolling window, LocalAgreement-2 confirmation |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
 | `preload.js` | 76 | The only bridge between renderer and main |
@@ -298,6 +298,15 @@ to fight over it, because the second one's `start()` killed the first one's
 server mid-request and the user was shown "read ECONNRESET". Queueing costs a
 wait, colliding costs a transcript.
 
+**The live window is capped before decoding, not trimmed after.** The buffer used
+to be trimmed only once a pass had finished, which is fine while audio arrives in
+real time. Given a backlog — a slow pass, a machine coming back from sleep — one
+pass would try to decode everything that had piled up, take proportionally longer
+to do it, and fall further behind while more arrived. Fed 20 minutes at once it
+confirmed nothing and grew by 89 MB; capped, it skips to the present, confirms
+the current window and grows by 4. The live view is a preview, and the file on
+disk still has all of it.
+
 **Errors are translated at the boundary.** Node and Electron produce messages
 like `ENOENT: no such file or directory, open 'C:\Users\…'` and `Error invoking
 remote method 'transcribe': …`, and this app shows its errors to the user. The
@@ -432,6 +441,7 @@ run can never touch a real meeting):
 | `test-record-cycle.js` | The whole recording cycle: audio in through the real IPC, paused halfway, stopped, every artefact checked |
 | `test-record-recovery.js` | Capture refused, and the audio device vanishing mid-start |
 | `test-faults.js` | Fault injection: the transcription server killed mid-pass, two transcriptions at once, a meeting deleted under a running job, a missing model, and file handles or child processes left behind across repeated cycles |
+| `test-extremes.js` | Boundary values and scale: the clock past an hour, a 75-minute recording transcribed for real, accents and emoji and HTML-looking text, an empty WAV, notes with no headings, 300 meetings in the sidebar, and the live loop given 20 minutes of audio at once |
 | `test-smoke.js` | Every view, control and export, while listening for renderer errors |
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
 | `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |
