@@ -32,3 +32,6 @@ build/whisper/
 # whisper.cpp binaries and models (downloaded by setup, never committed)
 bin/
 models/
+
+# compiled from mac/mic-probe.swift by mac/build-app.sh, per machine
+build/mic-probe

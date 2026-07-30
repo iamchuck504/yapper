@@ -18,6 +18,13 @@ REPO="iamchuck504/yapper-releases"
 echo "== dependencias"
 npm install
 
+echo "== sonda de micrófono (autodetección de reuniones)"
+# Native, tiny, and required before packaging: electron-builder copies
+# build/mic-probe into the app, and main.js leaves auto-detection off if it is
+# not there. swiftc ships with the Command Line Tools, so this needs no Xcode.
+swiftc -O mac/mic-probe.swift -o build/mic-probe
+./build/mic-probe >/dev/null || true   # exits 0 with no output when nobody is capturing
+
 echo "== suite de pruebas puras"
 npm test
 
