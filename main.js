@@ -1385,17 +1385,27 @@ function setupAutoUpdate() {
 }
 
 async function checkMacUpdate() {
-  try {
-    const tmp = path.join(app.getPath('temp'), `yapper-feed-${process.pid}.yml`);
-    await provision.download(`${RELEASES_LATEST}/download/latest.yml`, tmp);
-    const m = fs.readFileSync(tmp, 'utf8').match(/^version:\s*(\S+)/m);
-    try { fs.unlinkSync(tmp); } catch { /* temp */ }
-    if (m && provision.newerVersion(m[1], app.getVersion())) {
-      macUpdateVersion = m[1];
-      broadcast('update-ready', { version: m[1], manual: true });
+  // latest-mac.yml first, and it matters which. electron-builder writes one
+  // manifest per platform: the Windows build produces latest.yml, the mac build
+  // latest-mac.yml. A release cut only on a Mac therefore leaves latest.yml at
+  // whatever version Windows last published, so reading only that one would
+  // announce nothing — or announce a version that has no dmg behind it.
+  for (const name of ['latest-mac.yml', 'latest.yml']) {
+    const tmp = path.join(app.getPath('temp'), `yapper-${name}-${process.pid}`);
+    try {
+      await provision.download(`${RELEASES_LATEST}/download/${name}`, tmp);
+      const m = fs.readFileSync(tmp, 'utf8').match(/^version:\s*(\S+)/m);
+      try { fs.unlinkSync(tmp); } catch { /* temp */ }
+      if (!m) continue;
+      if (provision.newerVersion(m[1], app.getVersion())) {
+        macUpdateVersion = m[1];
+        broadcast('update-ready', { version: m[1], manual: true });
+      }
+      return;                     // the first manifest that parses is the answer
+    } catch (err) {
+      try { fs.unlinkSync(tmp); } catch { /* never existed */ }
+      console.log(`[update] ${name} unavailable:`, String(err.message).slice(0, 90));
     }
-  } catch (err) {
-    console.log('[update] mac check failed:', String(err.message).slice(0, 120));
   }
 }
 

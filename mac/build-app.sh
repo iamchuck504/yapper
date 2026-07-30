@@ -45,8 +45,14 @@ DMG="dist/Yapper-$VERSION-arm64.dmg"
 test -f "$DMG" || DMG="$(ls dist/*.dmg | head -1)"
 
 echo "== subiendo al release v$VERSION"
+# latest-mac.yml goes up with the dmg, not as an afterthought: it is what an
+# installed Mac reads to notice a new version. Without it the app falls back to
+# latest.yml, which the Windows build owns — so a release cut only here would be
+# invisible to every Mac already installed.
+FEED="dist/latest-mac.yml"
 if gh release view "v$VERSION" --repo "$REPO" >/dev/null 2>&1; then
   gh release upload "v$VERSION" "$DMG" --repo "$REPO" --clobber
+  test -f "$FEED" && gh release upload "v$VERSION" "$FEED" --repo "$REPO" --clobber
 else
   echo "no existe el release v$VERSION en $REPO — publica primero desde Windows (npm run release)"
   exit 1
