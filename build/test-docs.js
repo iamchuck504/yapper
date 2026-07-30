@@ -26,15 +26,18 @@ for (const c of claimed) {
     continue;
   }
   const real = lines(c.file);
-  // a doc that drifts by a few lines is fine; one that drifts by a third is not
+  // A few lines of drift is fine. Tight enough to notice a rewrite, loose
+  // enough not to fail on every edit. Count the same way the doc does — with
+  // node, since PowerShell's Measure-Object disagrees and that mismatch is what
+  // made these numbers wrong in the first place.
   const off = Math.abs(real - c.n) / Math.max(real, c.n);
-  check(`${c.file}: ${c.n} líneas`, off < 0.15, `el archivo tiene ${real}`);
+  check(`${c.file}: ${c.n} líneas`, off < 0.08, `el archivo tiene ${real}`);
 }
 
 // --- the IPC channel count ---
 const pre = read('preload.js');
 const count = re => (pre.match(re) || []).length;
-const invoke = count(/ipcRenderer\.invoke\('/g);
+const invoke = count(/(?:^|[^.\w])invoke\('/g);
 const send = count(/ipcRenderer\.send\('/g);
 const on = count(/ipcRenderer\.on\('/g);
 const total = invoke + send + on;

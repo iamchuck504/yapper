@@ -666,6 +666,25 @@ function transcriptionHint(participants) {
   return `The people in this conversation are: ${participants.trim().replace(/\n/g, ', ')}.`;
 }
 
+/**
+ * Whatever went wrong down there, said in words. Left alone, this surfaces
+ * things like "read ECONNRESET" and "ENOENT: no such file or directory, open
+ * 'C:\\Users\\…'" in the app's own status line.
+ */
+function humanTranscribeError(err) {
+  const m = String(err && err.message || err);
+  if (/ENOENT|no longer there/i.test(m)) return 'The recording for that meeting is no longer there.';
+  if (/model .* is missing|not installed/i.test(m)) {
+    return 'The transcription engine is not installed. Run setup.ps1 from the app folder.';
+  }
+  if (/ECONNRESET|ECONNREFUSED|socket hang up|did not start|not running/i.test(m)) {
+    return 'The transcriber stopped unexpectedly. Try again.';
+  }
+  if (/EACCES|EPERM|EBUSY/i.test(m)) return 'That file is in use by something else. Close it and try again.';
+  if (/ENOSPC/i.test(m)) return 'The disk is full, so the transcript could not be saved.';
+  return m;
+}
+
 ipcMain.handle('transcribe', async (_e, folder) => {
   const wav = path.join(folder, 'recording.wav');
   if (!fs.existsSync(wav)) {
@@ -681,14 +700,20 @@ ipcMain.handle('transcribe', async (_e, folder) => {
     if (win && !win.isDestroyed()) win.webContents.send('transcribe-progress', text);
   };
 
-  const lines = await engine.transcribeFile(wav, {
-    model: tier.finalModel,
-    language: process.env.YAPPER_LANG || 'auto',
-    prompt: transcriptionHint(readParticipants(folder)),
-    onProgress: ({ done, total }) => {
-      send(`\rTranscribing… ${Math.round(done / total * 100)}%`);
-    }
-  });
+  let lines;
+  try {
+    lines = await engine.transcribeFile(wav, {
+      model: tier.finalModel,
+      language: process.env.YAPPER_LANG || 'auto',
+      prompt: transcriptionHint(readParticipants(folder)),
+      onProgress: ({ done, total }) => {
+        send(`\rTranscribing… ${Math.round(done / total * 100)}%`);
+      }
+    });
+  } catch (err) {
+    await engine.stop();
+    throw new Error(humanTranscribeError(err));
+  }
   await engine.stop();
 
   const transcript = lines.join('\n').trim();
