@@ -16,7 +16,13 @@ is about using it and judging it.
 
 ## 1. Install and first run
 
-**For users: an installer.** `Yapper-Setup-<version>.exe` (~83 MB) installs
+**For users: an installer.**
+
+> Download: **https://github.com/iamchuck504/yapper-releases/releases/latest**
+> (the code repo stays private; that public repo hosts only installers and the
+> update feed)
+
+`Yapper-Setup-<version>.exe` (~83 MB) installs
 per-user — no admin rights — creates the shortcuts, and on first launch the app
 downloads the transcription engine itself, with progress on screen: ~650 MB on
 a CPU-only machine, ~1.3 GB when an NVIDIA GPU is detected (the CUDA build).

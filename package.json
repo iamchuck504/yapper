@@ -7,7 +7,7 @@
     "start": "electron .",
     "test": "node build/test-llm.js && node build/test-keystore.js && node build/test-live-logic.js && node build/test-dedup.js && node build/test-actions.js && node build/test-library.js && node build/test-search.js && node build/test-digest.js && node build/test-provision.js && node build/test-bounds.js && node build/test-meetings.js && node build/test-section-coverage.js && node build/test-ipc-wiring.js && node build/test-docs.js",
     "dist": "electron-builder --win",
-    "release": "electron-builder --win --publish always"
+    "release": "node build/release.js"
   },
   "dependencies": {
     "electron-updater": "^6.3.9"
@@ -63,7 +63,8 @@
       {
         "provider": "github",
         "owner": "iamchuck504",
-        "repo": "yapper-releases"
+        "repo": "yapper-releases",
+        "releaseType": "release"
       }
     ]
   }
