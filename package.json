@@ -23,7 +23,6 @@
       "output": "dist",
       "buildResources": "build"
     },
-    "afterPack": "build/after-pack.js",
     "files": [
       "main.js",
       "engine.js",
@@ -70,7 +69,7 @@
           ]
         }
       ],
-      "icon": "build/yapper-icon.png",
+      "icon": "build/yapper-icon-dark.png",
       "category": "public.app-category.productivity",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Yapper records meetings with your microphone and transcribes them on this Mac."
