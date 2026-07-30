@@ -15,6 +15,11 @@ function invoke(channel, ...args) {
 }
 
 contextBridge.exposeInMainWorld('yapper', {
+  // What the renderer is allowed to ask the machine for differs by platform:
+  // system audio exists on Windows and nowhere else, and asking for it anyway
+  // costs a Screen Recording permission on macOS in exchange for nothing.
+  platform: process.platform,
+
   recordingStart: participants => invoke('recording-start', participants),
   recordingChunk: buf => ipcRenderer.send('recording-chunk', buf),
   recordingFinish: (title, markers) => invoke('recording-finish', title, markers),

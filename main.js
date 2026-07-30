@@ -256,7 +256,15 @@ function writeSettings(s) {
 // Start with Windows. Defaults to on, but only the first time — after that the
 // user's choice is what counts.
 function applyOpenAtLogin(enabled) {
-  if (process.platform === 'darwin' || process.platform === 'win32') {
+  // macOS registers the bundle, and works it out on its own. Handing it
+  // process.execPath registers Yapper.app/Contents/MacOS/Yapper — the binary
+  // inside, which is not what LaunchServices reopens at login, so the setting
+  // reads as on while nothing ever starts.
+  if (process.platform === 'darwin') {
+    app.setLoginItemSettings({ openAtLogin: enabled });
+    return;
+  }
+  if (process.platform === 'win32') {
     app.setLoginItemSettings({
       openAtLogin: enabled,
       path: process.execPath,
@@ -753,7 +761,11 @@ function humanTranscribeError(err) {
   const m = String(err && err.message || err);
   if (/ENOENT|no longer there/i.test(m)) return 'The recording for that meeting is no longer there.';
   if (/model .* is missing|not installed/i.test(m)) {
-    return 'The transcription engine is not installed. Run setup.ps1 from the app folder.';
+    // setup.ps1 is a Windows script, and pointing a Mac user at it is a dead
+    // end: there the engine arrives through the first-run download instead.
+    return process.platform === 'darwin'
+      ? 'The transcription engine is not installed. Restart Yapper to download it again.'
+      : 'The transcription engine is not installed. Run setup.ps1 from the app folder.';
   }
   if (/ECONNRESET|ECONNREFUSED|socket hang up|did not start|not running/i.test(m)) {
     return 'The transcriber stopped unexpectedly. Try again.';
