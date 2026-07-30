@@ -169,6 +169,23 @@ async function pass(s) {
   if (s.stopped) return;
   const again = () => { if (!s.stopped) s.timer = setTimeout(() => pass(s), s.cadenceMs); };
 
+  // A full-file transcription — someone hitting "Transcribe now" on an older
+  // meeting mid-recording — holds the same single server. Step aside rather
+  // than fight over it: the buffer is capped below, so the wait costs the
+  // skipped seconds and nothing else.
+  if (engine.busy()) return again();
+
+  // And it may have left the server on a different model. Take ours back.
+  if (engine.loaded() !== s.model) {
+    try {
+      await engine.start(s.model);
+      if (s.stopped) return;
+    } catch (err) {
+      if (!s.stopped) s.onLine({ error: err.message });
+      return again();
+    }
+  }
+
   if (s.bytes < MIN_AUDIO_SEC * BYTES_PER_SEC) return again();
 
   // Never decode more than the window. The buffer was only trimmed *after* a

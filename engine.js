@@ -421,12 +421,32 @@ function transcribeFile(file, opts = {}) {
 }
 
 let jobs = Promise.resolve();
+let running = 0;
 
 function serialize(fn) {
   // runs whether or not the previous job succeeded
-  const run = jobs.then(fn, fn);
+  const start = () => { running++; return fn(); };
+  const done = v => { running--; return v; };
+  const failed = e => { running--; throw e; };
+  const run = jobs.then(start, start).then(done, failed);
   jobs = run.then(() => {}, () => {});
   return run;
+}
+
+/**
+ * True while a full-file transcription holds the server. The live loop checks
+ * this and steps aside: both want the same single server, and a transcription of
+ * another meeting started mid-recording used to kill the live transcript
+ * outright — "whisper-server is not running", over and over, and it never came
+ * back.
+ */
+function busy() {
+  return running > 0;
+}
+
+/** Which model the running server has loaded, if any. */
+function loaded() {
+  return proc ? loadedModel : null;
 }
 
 async function transcribeFileNow(file, { language = 'auto', model, prompt = '', windowSec = 120,
@@ -613,7 +633,7 @@ module.exports = {
   modelPath, hasModel, MODELS_DIR,
   TIERS, tierConfig, guessTier, tierFromBenchmark, hasNvidiaGpu, isAppleSilicon,
   CALIBRATION_MODEL, calibrate,
-  start, stop, transcribeWav, transcribeFile,
+  start, stop, busy, loaded, transcribeWav, transcribeFile,
   deduplicate, undoStutter,
   wavFromPcm, openWav, finishWav, repairWav, WAV_HEADER, BYTES_PER_SEC
 };

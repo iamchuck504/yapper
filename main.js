@@ -711,10 +711,12 @@ ipcMain.handle('transcribe', async (_e, folder) => {
       }
     });
   } catch (err) {
-    await engine.stop();
+    if (!liveOn) await engine.stop();
     throw new Error(humanTranscribeError(err));
   }
-  await engine.stop();
+  // Leave the server up while a recording is in progress: the live loop is using
+  // it, and it takes its own model back on its next pass.
+  if (!liveOn) await engine.stop();
 
   const transcript = lines.join('\n').trim();
   if (!transcript) throw new Error('The transcript came out empty. Was any audio recorded?');

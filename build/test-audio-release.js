@@ -138,6 +138,24 @@ app.whenReady().then(async () => {
   check('no queda guardado en los ajustes', settings.keepAudio === undefined,
     JSON.stringify(settings));
 
+  // ---- 4b. an old compressed recording ----
+  // Re-transcribing a meeting from before the app wrote WAV converts it first,
+  // so the folder briefly holds both files. Both are that meeting's audio, and
+  // the policy is the same for both — but the .webm is the user's only copy, so
+  // it is worth being explicit that this is intended and not a slip.
+  say('\n--- 4b. una grabación vieja comprimida ---');
+  const legacyFolder = path.join(ROOT, 'Meetings', '2026-07-29_2007');
+  fs.mkdirSync(legacyFolder, { recursive: true });
+  fs.writeFileSync(path.join(legacyFolder, 'recording.webm'), Buffer.alloc(300 * 1024, 7));
+  fs.writeFileSync(path.join(legacyFolder, 'recording.wav'),
+    fs.readFileSync(path.join(seed('2026-07-29_2008', 20), 'recording.wav')));
+  await within($(`window.yapper.transcribe(${JSON.stringify(legacyFolder)})`),
+    'transcribir la vieja', 120000);
+  check('libera el WAV convertido', !has(legacyFolder, 'recording.wav'), 'sigue ahí');
+  check('y también el original comprimido', !has(legacyFolder, 'recording.webm'),
+    'el .webm sobrevivió — la política dice que también se va');
+  check('conservando el transcript', has(legacyFolder, 'transcript.txt'), 'no está');
+
   // ---- 5. reclaiming what older meetings still hold ----
   say('\n--- 5. liberar lo que ya estaba guardado ---');
   const e1 = seed('2026-07-29_2004', 30);

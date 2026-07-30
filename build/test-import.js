@@ -48,6 +48,25 @@ app.whenReady().then(async () => {
 
     const before = fs.readdirSync(path.join(ROOT, 'Meetings'));
     const t0 = Date.now();
+
+    // Keep a copy of the decoded WAV the moment it is finished, since the app
+    // releases it as soon as the transcript lands. Watching for it is how the
+    // conversion itself stays testable.
+    const watch = setInterval(() => {
+      for (const d of fs.readdirSync(path.join(ROOT, 'Meetings'))) {
+        if (before.includes(d)) continue;
+        const w = path.join(ROOT, 'Meetings', d, 'recording.wav');
+        const copy = path.join(ROOT, 'Meetings', d, 'decoded-copy.wav');
+        try {
+          if (fs.existsSync(w) && !fs.existsSync(copy)
+            && fs.statSync(w).size > engine.WAV_HEADER
+            && fs.readFileSync(w).readUInt32LE(40) > 0) {     // header already closed
+            fs.copyFileSync(w, copy);
+          }
+        } catch { /* mid-write; try again next tick */ }
+      }
+    }, 150);
+
     await $(`document.getElementById('btn-import').click()`);
 
     // wait for the pipeline to finish, or for it to give up
@@ -64,6 +83,7 @@ app.whenReady().then(async () => {
         }
       }, 1000);
     });
+    clearInterval(watch);
     console.log(`tardó ${((Date.now() - t0) / 1000).toFixed(0)} s`);
     check(`.${ext}: no falló`, !done.err, done.err || '');
     if (done.err) continue;
@@ -73,12 +93,16 @@ app.whenReady().then(async () => {
     if (!folders.length) continue;
     const folder = path.join(ROOT, 'Meetings', folders[0]);
 
-    // the WAV must be a real one, not just a header
+    // The converted WAV is released once there is a transcript, so what it
+    // looked like is checked from the copy the test kept before that happened.
     const wav = path.join(folder, 'recording.wav');
-    check(`.${ext}: escribió recording.wav`, fs.existsSync(wav), 'no está');
-    if (!fs.existsSync(wav)) continue;
+    check(`.${ext}: liberó el WAV convertido al haber transcripción`, !fs.existsSync(wav),
+      'sigue ocupando espacio');
+    const kept = path.join(folder, 'decoded-copy.wav');
+    check(`.${ext}: se pudo inspeccionar la conversión`, fs.existsSync(kept), 'no se copió');
+    if (!fs.existsSync(kept)) continue;
 
-    const buf = fs.readFileSync(wav);
+    const buf = fs.readFileSync(kept);
     const secs = (buf.length - engine.WAV_HEADER) / engine.BYTES_PER_SEC;
     check(`.${ext}: WAV con cabecera válida`,
       buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WAVE',
@@ -114,6 +138,10 @@ app.whenReady().then(async () => {
     check(`.${ext}: no se queda con el nombre genérico del archivo`,
       title !== 'recording' && title.trim().length > 3, `título: "${title}"`);
     console.log(`      título: "${title}"`);
+
+    // the file the user picked is theirs and must not be touched
+    check(`.${ext}: el archivo original sigue intacto`,
+      fs.existsSync(picked) && fs.statSync(picked).size > 100 * 1024, picked);
 
     await $(`document.getElementById('btn-new').click()`);
     await new Promise(r => setTimeout(r, 300));
