@@ -1575,7 +1575,11 @@ function renderDay(d) {
   });
 
   if (d.empty) {
-    const label = isToday ? 'No meetings recorded today.' : `Nothing on ${longDate(d.day)}.`;
+    // A first run and a quiet Tuesday look the same from here, but they are not
+    // the same sentence: one needs telling what to do, the other does not.
+    const label = d.library === 0
+      ? 'Nothing here yet. Record a meeting or import a voice note, and it will show up here.'
+      : isToday ? 'No meetings recorded today.' : `Nothing on ${longDate(d.day)}.`;
     showDayEmpty(label, false, d.previous);
   } else {
     $('day-empty').classList.add('hidden');
@@ -1643,6 +1647,9 @@ async function loadWeek(opts = {}) {
   const run = ++homeRun;
   $('week-sections').innerHTML = '';
   $('week-foot').classList.add('hidden');
+  // Offering to write it again before anything was written reads as a broken
+  // button, so it stays hidden until there is something to rewrite.
+  $('btn-week-refresh').classList.add('hidden');
   setStatus($('week-status'), opts.refresh ? 'Writing it again…' : 'Reading this week\'s notes…');
   try {
     const w = await window.yapper.weeklySummary({
@@ -1682,6 +1689,7 @@ function renderWeek(w) {
   if (w.error) {
     setStatus(status, `The written review failed: ${w.error}`, true);
     $('week-foot').classList.remove('hidden');
+    $('btn-week-refresh').classList.remove('hidden');   // retrying is the useful move here
     $('week-note').textContent = 'The counts above come from your notes and do not need a model.';
     return;
   }
@@ -1730,6 +1738,7 @@ function renderWeek(w) {
   }
 
   $('week-foot').classList.remove('hidden');
+  $('btn-week-refresh').classList.remove('hidden');
   const notes = [];
   if (w.cached) notes.push('Written earlier from the same notes');
   notes.push(`from ${count(w.fromMeetings || 0, 'meeting')}`);
@@ -1741,6 +1750,9 @@ function renderWeek(w) {
 function renderWeekFacts(f) {
   const host = $('week-facts');
   host.innerHTML = '';
+  // Six zeros in a row look like a broken screen rather than an empty week.
+  host.classList.toggle('hidden', !!f.empty);
+  if (f.empty) return;
   const stats = [
     [f.meetings.length, 'meetings'],
     [f.days.length, f.days.length === 1 ? 'day' : 'days'],
@@ -1770,14 +1782,23 @@ function renderWeekFacts(f) {
   }
 }
 
+/**
+ * The way out of an empty week — but only when there is one. `previous` is the
+ * last week that actually had a meeting, so a new install gets no button rather
+ * than one that walks backwards through empty weeks.
+ */
 function offerPreviousWeek(w) {
-  $('week-foot').classList.remove('hidden');
+  $('week-sections').innerHTML = '';
   $('week-note').textContent = '';
+  if (!w.previous) {
+    $('week-foot').classList.add('hidden');
+    return;
+  }
+  $('week-foot').classList.remove('hidden');
   const back = document.createElement('button');
   back.className = 'btn-ghost';
-  back.textContent = 'Show the week before';
+  back.textContent = 'Show the last week that had meetings';
   back.addEventListener('click', () => { homeWeekOf = w.previous; loadWeek(); });
-  $('week-sections').innerHTML = '';
   $('week-sections').appendChild(back);
 }
 

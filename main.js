@@ -1493,7 +1493,10 @@ ipcMain.handle('weekly-summary', async (_e, opts = {}) => {
   const facts = digest.weeklyFacts({
     meetings: list, items: readReminders(), from: week.from, to: week.to, today: library.today()
   });
-  const base = { week: week.label, from: week.from, to: week.to, facts, previous: previousWeek(week.from) };
+  const base = {
+    week: week.label, from: week.from, to: week.to, facts,
+    previous: previousWeekWith(list, week.from)
+  };
 
   if (facts.empty) return { ...base, reason: 'no-meetings' };
 
@@ -1525,9 +1528,15 @@ ipcMain.handle('weekly-summary', async (_e, opts = {}) => {
   }
 });
 
-function previousWeek(from) {
-  const [y, m, d] = from.split('-').map(Number);
-  return library.today(new Date(y, m - 1, d - 7));
+/**
+ * The last week that actually had a meeting, or '' if there is nothing earlier.
+ * Stepping back seven days at a time would walk a new user through empty weeks
+ * forever, so the offer is only made when there is something to land on.
+ */
+function previousWeekWith(list, from) {
+  const earlier = list.filter(m => m.date && m.date < from).map(m => m.date);
+  if (!earlier.length) return '';
+  return earlier.sort((a, b) => b.localeCompare(a))[0];
 }
 
 // ---------- meeting auto-detection ----------

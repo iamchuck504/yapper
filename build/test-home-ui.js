@@ -241,6 +241,29 @@ app.whenReady().then(async () => {
   const nothing = await within($(`window.yapper.weeklySummary({ week: '2025-02-05' })`), 'semana vacía', 60 * 1000);
   check('una semana sin reuniones tampoco se escribe',
     nothing.reason === 'no-meetings' && !nothing.sections, JSON.stringify(nothing).slice(0, 160));
+  check('y no ofrece retroceder a la nada', nothing.previous === '', String(nothing.previous));
+
+  // Una semana vacía en pantalla: ni muro de ceros, ni botones que no hacen nada.
+  await $(`(() => { homeWeekOf = '2025-02-05'; loadWeek(); })()`);
+  await new Promise(r => setTimeout(r, 1800));
+  const bare = await $(`({
+    facts: !document.getElementById('week-facts').classList.contains('hidden'),
+    zeros: [...document.querySelectorAll('.week-stat')].length,
+    refresh: !document.getElementById('btn-week-refresh').classList.contains('hidden'),
+    back: !!document.querySelector('#week-sections .btn-ghost'),
+    status: document.getElementById('week-status').textContent
+  })`);
+  say(`  semana vacía en pantalla -> ${JSON.stringify(bare)}`);
+  check('una semana vacía no muestra el muro de ceros',
+    !bare.facts && bare.zeros === 0, JSON.stringify(bare));
+  check('ni ofrece reescribir lo que nunca se escribió', !bare.refresh, JSON.stringify(bare));
+  check('ni retroceder cuando no hay nada atrás', !bare.back, JSON.stringify(bare));
+  check('lo que sí hace es decirlo', /No meetings this week/i.test(bare.status), bare.status);
+
+  // Con reuniones antes, sí hay salida — y va a una semana que tuvo algo.
+  const janWeek = await within($(`window.yapper.weeklySummary({ week: '2026-02-04' })`), 'febrero', 60 * 1000);
+  check('desde una semana vacía posterior, la salida apunta a algo real',
+    janWeek.previous === '2026-01-05', String(janWeek.previous));
 
   say(fails ? `\n${fails} fallos` : '\nPASS');
   app.exit(fails ? 1 : 0);
