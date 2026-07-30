@@ -202,6 +202,7 @@ async function calibrate({ passes = 3 } = {}) {
 // ---------------------------------------------------------------- server
 
 let proc = null;
+let reaped = false;       // orphan sweep: once per run, see start()
 let port = 0;
 let ready = null;
 let loadedModel = null;
@@ -229,12 +230,55 @@ function waitForPort(p, timeoutMs = 90000) {
 }
 
 /** Start (or reuse) the server for a given model. */
+/**
+ * Kill whisper-servers left over from a run that died without cleaning up.
+ *
+ * The server is a child process, and a child outlives a parent that is killed
+ * rather than closed — a crash, a Force Quit, a `kill -9`. It keeps its model
+ * resident the whole time, which is hundreds of megabytes each, and they stack
+ * up: measured at 802 MB across four of them after an afternoon of testing.
+ *
+ * Only called when this process has no server of its own, so anything matching
+ * our own binary path is by definition abandoned. The app is single-instance,
+ * so there is no sibling whose server this could be.
+ */
+function reapOrphans() {
+  const exe = serverPath();
+  try {
+    if (process.platform === 'win32') {
+      const r = spawnSync('taskkill', ['/F', '/IM', path.basename(exe)], { windowsHide: true });
+      return r.status === 0 ? 1 : 0;
+    }
+    const found = spawnSync('pgrep', ['-f', exe], { encoding: 'utf8' });
+    const pids = String(found.stdout || '').split('\n')
+      .map(s => Number(s.trim())).filter(pid => pid && pid !== process.pid);
+    for (const pid of pids) {
+      try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+    }
+    return pids.length;
+  } catch {
+    return 0;                 // best effort: never block a recording over this
+  }
+}
+
 async function start(model, { threads } = {}) {
   if (proc && loadedModel === model) return ready;
+  const hadServer = !!proc;
   await stop();
 
   if (!isInstalled()) throw new Error('whisper.cpp is not installed for this platform');
   if (!hasModel(model)) throw new Error(`model ${model} is missing`);
+
+  // Once per run, and only before the first server exists. Orphans belong to
+  // *previous* executions, so one sweep finds all of them — and repeating it
+  // would be actively harmful: two transcriptions starting at the same moment
+  // both see `proc` as null while the first is still in stop(), and the second
+  // sweep would kill the server the first had just spawned.
+  if (!hadServer && !reaped) {
+    reaped = true;
+    const killed = reapOrphans();
+    if (killed) console.log(`[engine] cleaned up ${killed} whisper-server(s) from a previous run`);
+  }
 
   port = freePort();
   const args = [

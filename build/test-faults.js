@@ -119,7 +119,8 @@ app.whenReady().then(async () => {
   say(`  resultado: ${String(r4).slice(0, 120)}`);
   check('no se cuelga si le borran la carpeta', !String(r4).startsWith('colgado'), String(r4));
   check('y lo dice en palabras, sin códigos ni rutas',
-    !/ENOENT|ECONN|\\Users\\|Error invoking/.test(String(r4)), String(r4));
+    // Paths leak differently per platform, so both shapes count as a leak.
+    !/ENOENT|ECONN|\\Users\\|\/Users\/|Error invoking/.test(String(r4)), String(r4));
 
   // ---- 5. a missing model ----
   say('\n--- 5. falta el modelo ---');

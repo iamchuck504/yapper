@@ -916,6 +916,12 @@ ipcMain.handle('transcribe', async (_e, folder) => {
     });
   } catch (err) {
     if (!liveOn) await engine.stop();
+    // The same race as above, but lost later: both callers found the wav, the
+    // winner finished and released the audio, and this one was mid-read when
+    // it vanished. The check at the top cannot catch that — by then the file
+    // was still there. A finished transcript is the answer either way.
+    const done = path.join(folder, 'transcript.txt');
+    if (!fs.existsSync(wav) && fs.existsSync(done)) return fs.readFileSync(done, 'utf8');
     throw new Error(humanTranscribeError(err));
   }
   // Leave the server up while a recording is in progress: the live loop is using
@@ -924,8 +930,16 @@ ipcMain.handle('transcribe', async (_e, folder) => {
 
   const transcript = lines.join('\n').trim();
   if (!transcript) throw new Error('The transcript came out empty. Was any audio recorded?');
-  fs.writeFileSync(path.join(folder, 'transcript.txt'), transcript, 'utf8');
-  releaseAudio(folder);
+  try {
+    fs.writeFileSync(path.join(folder, 'transcript.txt'), transcript, 'utf8');
+    releaseAudio(folder);
+  } catch (err) {
+    // Transcribing succeeded and saving did not — the folder was deleted while
+    // this ran, the disk filled, the drive went away. Raw, that surfaces as
+    // "ENOENT: no such file or directory, open '/Users/…'" in the app's status
+    // line, which tells the user nothing they can act on.
+    throw new Error(humanTranscribeError(err));
+  }
   send('\n');
   return transcript;
 });
