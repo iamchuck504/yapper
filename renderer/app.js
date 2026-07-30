@@ -233,33 +233,39 @@ async function saveLlm() {
   syncLlmControls();
 }
 
-(async () => {
+/** Fill the row from what is stored for whichever provider is selected. */
+async function loadLlm() {
   const s = await window.yapper.getLlmSettings();
   llmProviders = s.providers;
-  llmProviderSel.innerHTML = '';
-  for (const p of s.providers) {
-    const o = document.createElement('option');
-    o.value = p.id;
-    o.textContent = p.label;
-    llmProviderSel.appendChild(o);
+  if (!llmProviderSel.options.length) {
+    for (const p of s.providers) {
+      const o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = p.label;
+      llmProviderSel.appendChild(o);
+    }
   }
   llmProviderSel.value = s.provider;
+  // each provider keeps its own key, model and endpoint, so switching shows
+  // that provider's setup rather than the last one's
   llmModelInput.value = s.model;
   llmBaseInput.value = s.baseUrl;
+  llmKeyInput.value = '';
   llmHasKey = s.hasKey;
   syncLlmControls();
   if (s.hasKey && !s.keyEncrypted) {
     setLlmStatus('This system has no keystore, so the key is stored unencrypted.', 'error');
   }
-})();
+}
 
-llmProviderSel.addEventListener('change', () => {
-  // a new provider's own defaults, not the last one's model or endpoint
-  llmModelInput.value = '';
-  llmBaseInput.value = '';
+loadLlm();
+
+llmProviderSel.addEventListener('change', async () => {
   setLlmStatus('');
-  syncLlmControls();
-  saveLlm();
+  // save the choice alone — sending no key or model leaves each provider's own
+  // stored values untouched
+  await window.yapper.setLlmSettings({ provider: llmProviderSel.value });
+  await loadLlm();
 });
 
 $('llm-key-link').addEventListener('click', e => {

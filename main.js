@@ -249,40 +249,82 @@ function refreshShortcutIcons() {
 // macOS) rather than sitting in a readable JSON file. It never leaves the main
 // process: the renderer only ever learns whether one is set.
 
+// A key belongs to the provider it was issued for, so each one gets its own
+// slot. Sharing a single slot meant that saving a Gemini key and then switching
+// to OpenRouter would have sent Google's key to OpenRouter's servers — and the
+// UI would have said "saved", as if that provider were set up.
+
+/** Fold the old single-slot settings into the per-provider map, once. */
+function migrateLlmSettings(s) {
+  if (!s.llmByProvider) s.llmByProvider = {};
+  if (s.llmKey === undefined && s.llmModel === undefined && s.llmBaseUrl === undefined) return false;
+  const owner = s.llmProvider || 'claude-cli';
+  const slot = s.llmByProvider[owner] || {};
+  if (s.llmKey && !slot.key) slot.key = s.llmKey;
+  if (s.llmModel && !slot.model) slot.model = s.llmModel;
+  if (s.llmBaseUrl && !slot.baseUrl) slot.baseUrl = s.llmBaseUrl;
+  s.llmByProvider[owner] = slot;
+  delete s.llmKey;
+  delete s.llmModel;
+  delete s.llmBaseUrl;
+  return true;
+}
+
+/** This provider's stored setup. Migration is the caller's job, once. */
+function llmSlot(s, id) {
+  return (s.llmByProvider && s.llmByProvider[id]) || { key: null, model: '', baseUrl: '' };
+}
+
 /** Everything llm.js needs, assembled from settings. */
 function llmConfig() {
   const s = readSettings();
+  migrateLlmSettings(s);              // in memory is enough on the read path
+  const provider = s.llmProvider || 'claude-cli';
+  const slot = llmSlot(s, provider);
   return {
-    provider: s.llmProvider || 'claude-cli',
-    apiKey: keystore.open(safeStorage, s.llmKey),
-    model: s.llmModel || '',
-    baseUrl: s.llmBaseUrl || '',
+    provider,
+    apiKey: keystore.open(safeStorage, slot.key),
+    model: slot.model || '',
+    baseUrl: slot.baseUrl || '',
     claudePath: resolveClaude()
   };
 }
 
 ipcMain.handle('get-llm-settings', async () => {
   const s = readSettings();
+  // migrate first, and persist it, so the old single slot does not linger in
+  // the file where later code could read it by mistake
+  if (migrateLlmSettings(s)) writeSettings(s);
+  const provider = s.llmProvider || 'claude-cli';
+  const slot = llmSlot(s, provider);
   return {
     providers: llm.providerList(),
-    provider: s.llmProvider || 'claude-cli',
-    model: s.llmModel || '',
-    baseUrl: s.llmBaseUrl || '',
-    hasKey: !!(s.llmKey && s.llmKey.v),
-    keyEncrypted: !!(s.llmKey && s.llmKey.enc),
+    provider,
+    model: slot.model || '',
+    baseUrl: slot.baseUrl || '',
+    hasKey: !!(slot.key && slot.key.v),
+    keyEncrypted: !!(slot.key && slot.key.enc),
+    // which other providers are already set up, so switching can say so
+    configured: Object.entries(s.llmByProvider || {})
+      .filter(([, v]) => v && v.key && v.key.v).map(([k]) => k),
     encryptionAvailable: safeStorage.isEncryptionAvailable()
   };
 });
 
 ipcMain.handle('set-llm-settings', async (_e, next) => {
   const s = readSettings();
-  s.llmProvider = next.provider || 'claude-cli';
-  s.llmModel = (next.model || '').trim();
-  s.llmBaseUrl = (next.baseUrl || '').trim();
-  // an absent key means "leave the stored one alone"; an empty string clears it
-  if (typeof next.apiKey === 'string') {
-    s.llmKey = keystore.seal(safeStorage, next.apiKey);
-  }
+  migrateLlmSettings(s);
+  const provider = next.provider || 'claude-cli';
+  s.llmProvider = provider;
+
+  const slot = s.llmByProvider[provider] || { key: null, model: '', baseUrl: '' };
+  if (typeof next.model === 'string') slot.model = next.model.trim();
+  if (typeof next.baseUrl === 'string') slot.baseUrl = next.baseUrl.trim();
+  // an absent key means "leave this provider's stored one alone"; an empty
+  // string clears it
+  if (typeof next.apiKey === 'string') slot.key = keystore.seal(safeStorage, next.apiKey);
+  s.llmByProvider[provider] = slot;
+
   writeSettings(s);
   envCache = null;                   // the preflight answer just changed
   return true;
