@@ -170,6 +170,20 @@ async function pass(s) {
   const again = () => { if (!s.stopped) s.timer = setTimeout(() => pass(s), s.cadenceMs); };
 
   if (s.bytes < MIN_AUDIO_SEC * BYTES_PER_SEC) return again();
+
+  // Never decode more than the window. The buffer was only trimmed *after* a
+  // pass, which is fine while audio arrives in real time — but if it piles up,
+  // because a pass was slow or the machine came back from sleep, one pass would
+  // try to decode minutes of audio, take minutes to do it, and fall further
+  // behind while more arrived. The live view is a preview: skipping ahead to the
+  // present beats reading the past. The file on disk still has all of it.
+  const maxBytes = Math.floor(s.windowSec * BYTES_PER_SEC);
+  if (s.bytes > maxBytes) {
+    const skipped = (s.bytes - maxBytes) / BYTES_PER_SEC;
+    dropFront(s, s.bytes - maxBytes);
+    if (DEBUG) console.log(`[live] backlog: salté ${skipped.toFixed(1)} s para no atrasarme más`);
+  }
+
   const pcm = Buffer.concat(s.chunks, s.bytes);
 
   // Re-decoding silence changes nothing and is the main trigger for
