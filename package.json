@@ -79,6 +79,7 @@
       "category": "public.app-category.productivity",
       "identity": "-",
       "hardenedRuntime": false,
+      "minimumSystemVersion": "13.0",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Yapper records meetings with your microphone and transcribes them on this Mac."
       }

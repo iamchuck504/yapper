@@ -22,6 +22,22 @@ bash mac/build-app.sh      # every release: dmg + zip, uploaded to the
 all** — the engine on the feed is ours. `provision.js` downloads it on every
 Mac's first run, exactly like the Windows first run.
 
+## Deployment targets are not optional
+
+`swiftc` defaults to the SDK's own version, so a build made on a beta produces
+helpers stamped `minos 27.0` that refuse to launch on any other Mac — the app
+still opens, and silently has neither system audio nor meeting detection. Both
+are pinned explicitly in `build-app.sh`:
+
+| Helper | Target | Why that version |
+|---|---|---|
+| `system-audio` | `macos13.0` | ScreenCaptureKit audio capture |
+| `mic-probe` | `macos14.4` | the CoreAudio process list it reads |
+
+`minimumSystemVersion` in package.json says 13.0 to match. Check a build with
+`vtool -show-build build/system-audio` — it costs a second, and this is
+invisible on the machine that built it.
+
 ## The icon is inverted on macOS, on purpose
 
 Windows gets the amber tile with a near-black mark. macOS gets the negative of

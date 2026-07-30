@@ -23,8 +23,13 @@ echo "== ayudantes nativos (detección de reuniones y audio del sistema)"
 # and main.js degrades quietly if either is missing — auto-detection stays off,
 # and recording falls back to the microphone alone. swiftc ships with the
 # Command Line Tools, so neither needs Xcode.
-swiftc -O mac/mic-probe.swift -o build/mic-probe
-swiftc -O mac/system-audio.swift -o build/system-audio
+# -target matters more than it looks: swiftc defaults to the SDK's own version,
+# so building on a machine running a beta produces binaries that refuse to launch
+# anywhere else. Each helper is pinned to the oldest macOS its APIs exist in —
+# ScreenCaptureKit audio capture landed in 13.0, and the CoreAudio process list
+# the mic probe reads in 14.4.
+swiftc -O -target arm64-apple-macos14.4 mac/mic-probe.swift -o build/mic-probe
+swiftc -O -target arm64-apple-macos13.0 mac/system-audio.swift -o build/system-audio
 ./build/mic-probe >/dev/null || true   # exits 0 with no output when nobody is capturing
 
 echo "== suite de pruebas puras"
