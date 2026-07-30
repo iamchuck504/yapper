@@ -95,9 +95,9 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1167 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
+| `main.js` | 1204 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
 | `engine.js` | 414 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
-| `llm.js` | 266 | Note providers (§6) behind one `generate()` call |
+| `llm.js` | 282 | Note providers (§6) behind one `generate()` call |
 | `live.js` | 240 | Live transcription: rolling window, LocalAgreement-2 confirmation |
 | `keystore.js` | 35 | Sealing the API key with the OS keystore |
 | `bounds.js` | 29 | Pure geometry: keeping the floating bubble on screen |
@@ -112,7 +112,7 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 1597 | Main window: capture graph, views, notes rendering, exports, reminders, settings |
+| `renderer/app.js` | 1615 | Main window: capture graph, views, notes rendering, exports, reminders, settings |
 | `renderer/style.css` | 1141 | Everything visual, light and dark |
 | `renderer/index.html` | 284 | Main window markup |
 | `renderer/bubble.html` | 188 | The always-on-top live transcript overlay |
@@ -309,7 +309,8 @@ Documents\Meetings\YYYY-MM-DD_HHMM\
   markers.txt        moments flagged during the meeting
 
 %APPDATA%\yapper\
-  settings.json      theme, startup, measured tier, provider, sealed key
+  settings.json      theme, startup, measured tier, chosen provider, and
+                     llmByProvider: a sealed key, model and endpoint per provider
   reminders.json     action items across all meetings
 ```
 
@@ -382,6 +383,7 @@ packager rather than untangling a build. The open questions for that step:
 | Renderer → main | Only the 53 channels in `preload.js`. No `ipcRenderer` exposure. |
 | CSP | `default-src 'self'` on every page; `index.html` additionally `style-src 'self'` (no inline styles) and `media-src blob:` |
 | API key at rest | Sealed with `safeStorage` (DPAPI on Windows, Keychain on macOS), never in plaintext `settings.json`. Where a platform has no keystore, the UI says the key is stored unencrypted rather than implying protection it does not have. |
+| One key per provider | Keys are stored under the provider they were issued for. A single shared slot meant switching from Gemini to OpenRouter would have sent Google's key to OpenRouter's servers, and the UI would have called that provider configured. |
 | API key in the renderer | Never sent. The renderer learns only whether one is set. |
 | Opening URLs | `shell.openExternal` accepts only the provider sign-up pages the app itself offers — an allowlist, not an arbitrary URL from the renderer. |
 | Deleting files | The delete handler refuses any path that is not a child of the meetings folder; tested against eight ways of trying to escape it. |
