@@ -11,6 +11,7 @@ const llm = require('./llm');
 const keystore = require('./keystore');
 const library = require('./library');
 const actions = require('./actions');
+const search = require('./search');
 
 const MEETINGS_DIR = path.join(app.getPath('documents'), 'Meetings');
 
@@ -1358,6 +1359,65 @@ function meetings() {
 }
 
 ipcMain.handle('refresh-library', async () => refreshLibrary().length);
+
+// ---------- search ----------
+// The index is built from the library and thrown away when the library changes.
+// A few megabytes of transcript ranks in milliseconds, so there is nothing to
+// persist and nothing to keep in step.
+
+let searchIndex = null;
+let searchIndexFor = 0;
+
+function ensureSearchIndex() {
+  const list = meetings();
+  if (searchIndex && searchIndexFor === list.length && searchIndex.builtFrom === libraryCache) {
+    return searchIndex;
+  }
+  searchIndex = search.buildIndex(list, m => {
+    try { return fs.readFileSync(path.join(m.folder, 'transcript.txt'), 'utf8'); } catch { return ''; }
+  });
+  searchIndex.builtFrom = libraryCache;
+  searchIndexFor = list.length;
+  return searchIndex;
+}
+
+ipcMain.handle('search', async (_e, query, opts = {}) => {
+  const index = ensureSearchIndex();
+  const { query: parsed, results } = search.search(index, query, {
+    today: library.today(),
+    limit: opts.limit || 20
+  });
+  return {
+    query: { raw: parsed.raw, question: parsed.question, people: parsed.people,
+      kinds: parsed.kinds, from: parsed.from, to: parsed.to },
+    results,
+    searched: index.passages.length,
+    meetings: index.meetings
+  };
+});
+
+/**
+ * A question, answered only from what the search retrieved. The passages are the
+ * evidence and the citation at once: no passages, no answer.
+ */
+ipcMain.handle('ask', async (_e, question) => {
+  const index = ensureSearchIndex();
+  const { results } = search.search(index, question, { today: library.today(), limit: 12, perMeeting: 3 });
+  if (!results.length) {
+    return { answer: '', results: [], reason: 'nothing-found' };
+  }
+  try {
+    const answer = await llm.generate(llmConfig(), {
+      system: search.ANSWER_PROMPT,
+      input: `Question: ${question}\n\nPassages from the meetings:\n\n${search.passagesForPrompt(results)}`,
+      maxTokens: 600
+    });
+    return { answer, results };
+  } catch (err) {
+    // The passages are still useful on their own, so they come back either way.
+    return { answer: '', results, error: err.message };
+  }
+});
 
 /** Everything the action items view needs, with its meeting resolved. */
 ipcMain.handle('list-actions', async () => {

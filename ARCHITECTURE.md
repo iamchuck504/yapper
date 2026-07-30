@@ -95,15 +95,16 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1613 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
+| `main.js` | 1673 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
 | `engine.js` | 640 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
+| `search.js` | 342 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
 | `llm.js` | 322 | Note providers (§6) behind one `generate()` call |
 | `live.js` | 304 | Live transcription: rolling window, LocalAgreement-2 confirmation |
-| `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
 | `actions.js` | 239 | Reading action items out of the notes, and folding duplicates together |
+| `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
-| `preload.js` | 83 | The only bridge between renderer and main |
+| `preload.js` | 85 | The only bridge between renderer and main |
 
 `keystore.js` and `bounds.js` are separate files for one reason: they are pure
 functions, so they can be tested without booting Electron, and `keystore.js`
@@ -114,9 +115,9 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 2005 | Main window: capture graph, views, notes rendering, exports, reminders, settings |
-| `renderer/style.css` | 1278 | Everything visual, light and dark |
-| `renderer/index.html` | 332 | Main window markup |
+| `renderer/app.js` | 2146 | Main window: capture graph, views, notes rendering, exports, reminders, search, settings |
+| `renderer/style.css` | 1379 | Everything visual, light and dark |
+| `renderer/index.html` | 362 | Main window markup |
 | `renderer/bubble.html` | 188 | The always-on-top live transcript overlay |
 | `renderer/bubble.js` | 125 | Its behaviour, including sizing itself to its own controls |
 | `renderer/splash.html` | 104 | Boot screen, including the first-run calibration status |
@@ -177,22 +178,50 @@ Windowing keeps memory flat on a two-hour meeting and lets the UI show progress.
 Segments that begin inside the overlap are dropped, which avoids both a repeated
 phrase and a word lost on the seam.
 
+### Across meetings
+
+Everything that looks at more than one meeting reads the same index, and none of
+it stores a second copy of anything:
+
+```
+Meetings/*/  ─► library.refresh() ─► library.json      (one entry per meeting)
+                     │                    │
+                     ├─► actions.parseActionItems() ─► reminders.json
+                     │        (owner, due date, priority — only if written down)
+                     │
+                     └─► search.buildIndex() ─► passages, in memory only
+                                  │
+                                  ├─► search()  BM25 + phrase/kind/people/date
+                                  └─► ask()  ─► the passages, then llm.generate()
+```
+
+`library.json` and the search index are both derived, so both are disposable:
+delete either and the next refresh rebuilds it from the folders. A meeting is
+re-read only when its stamp (each file's name, size and mtime) changed, which is
+what keeps a refresh over hundreds of meetings from re-parsing all of them.
+
+`reminders.json` is the exception — it is *not* purely derived, because it also
+holds what the user did to an item (completed, dismissed). Extraction therefore
+merges rather than replaces: an incoming item that matches an existing one folds
+into it and keeps its state.
+
 ---
 
 ## 5. IPC surface
 
-60 channels, all declared in `preload.js` — that file is the complete list of
+62 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
 
-**Request/response (40)** — recording lifecycle (`recording-start`,
+**Request/response (42)** — recording lifecycle (`recording-start`,
 `recording-finish`), import (`import-audio`, `import-read`, `import-open`,
 `import-close`, `legacy-audio`), processing (`transcribe`, `summarize`,
 `regenerate`, `generate-title`, `save-notes`), meetings (`list-meetings`,
 `load-meeting`, `delete-meeting`, `open-folder`), reminders (4), settings
 (`get/set-open-at-login`, `get/set-llm-settings`, `test-llm`, `style-sections`,
-`check-environment`), the library (`refresh-library`, `list-actions`), exports (`save-text-file`, `export-pdf`), live
+`check-environment`), the library (`refresh-library`, `list-actions`), retrieval
+(`search`, `ask`), exports (`save-text-file`, `export-pdf`), live
 (`live-start`, `live-stop`), bubble (`bubble-show`, `bubble-hide`),
 `open-external`.
 
@@ -360,6 +389,32 @@ remote method 'transcribe': …`, and this app shows its errors to the user. The
 preload bridge strips Electron's wrapper for every channel at once, and the
 transcribe handler maps the underlying causes to sentences.
 
+**Nothing about a meeting is inferred — an owner, a date or a decision exists
+only if it was said.** This is a rule about the code, not only about prompts.
+`splitOwner()` returns a name only when the line is written `Name: task`, and
+rejects the shapes that look like one but are not — `URGENT:`, `TODO:`, anything
+in all caps. `splitDue()` reads a date only from words present in the line; there
+is no path that turns "soon" into a date or defaults to next Friday. An item
+with no owner is shown as unassigned, which is a true statement about the
+meeting.
+
+**Search retrieves before it answers, and can return nothing.** `ask()` runs
+retrieval first and, when no passage matches, stops there and replies
+`nothing-found` — the model is never asked a question with an empty context,
+because that is exactly the situation in which it would invent one. When there
+are passages, they are the entire context and the prompt requires a bracketed
+citation per claim. `test-search-ui.js` asks about a topic that appears in no
+meeting and asserts no answer comes back.
+
+**Ranking is lexical, not embeddings.** BM25 over passages needs no model, no
+index file and no network, so search works before any provider is configured and
+costs nothing per query. Two ordering rules were added because measurement showed
+plain relevance was wrong for how the question was asked: a query about a
+decision puts the Decisions section above a transcript line that merely says the
+word, and a query that is only a period ("what happened in June") lists that
+period's meetings instead of returning nothing. The cost is no synonym matching —
+searching "cost" will not find "pricing".
+
 ---
 
 ## 9. Storage layout
@@ -509,6 +564,9 @@ three groups.
 | `test-provider-keys.js` | Each provider keeps its own key, model and endpoint; switching neither inherits nor loses one; a legacy single-slot profile migrates |
 | `test-live-logic.js` | The confirmation rules — prefix agreement, repeat stripping, degenerate-output detection |
 | `test-dedup.js` | Transcript cleanup: which repeats are removed, which survive, and the time window that separates a seam artefact from a person restating something |
+| `test-library.js` | The meeting index: what counts as content, day and week selection, and the stamp that decides when a cached entry can be reused |
+| `test-actions.js` | Extraction and deduplication: only what the notes actually say becomes an item, `URGENT:` is not an owner, an undated item never gains a date, and restating a task merges instead of duplicating |
+| `test-search.js` | Retrieval end to end without a model: passages, query parsing in English and Spanish, ranking, and the two orderings that matter — a decision outranks a transcript line that merely mentions the word, and a period with no keyword still lists its meetings |
 | `test-bounds.js` | The bubble stays on screen, including multi-monitor negative origins |
 | `test-meetings.js` | The delete path guard |
 | `test-section-coverage.js` | Every note style has a button, every section has a colour rule |
@@ -526,6 +584,8 @@ run can never touch a real meeting):
 | `test-two-hours.js` | The expected real length, every stage, measured — see §7b. `MINUTES=60` for the shorter end of the range |
 | `test-audio-release.js` | The audio is released only after a real transcript, never on a failure, never when the user asked to keep it, and reclaiming older meetings' audio touches only the transcribed ones |
 | `test-live-vs-final.js` | A full transcription requested mid-recording: it completes, and the live transcript survives it without errors |
+| `test-search-ui.js` | The search view against a real model: results carry their meeting, date, timestamp and participants, a result opens its meeting, nothing-found says so, and a question about something never discussed returns no answer rather than an invented one |
+| `test-actions-ui.js` | The action list: filters, the meeting each item came from, and completing one |
 | `test-smoke.js` | Every view, control and export, while listening for renderer errors |
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
 | `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |

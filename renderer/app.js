@@ -3,6 +3,7 @@
 const viewRecord = $('view-record');
 const viewMeeting = $('view-meeting');
 const viewReminders = $('view-reminders');
+const viewSearch = $('view-search');
 const btnRecord = $('btn-record');
 const btnStop = $('btn-stop');
 const btnNew = $('btn-new');
@@ -379,7 +380,9 @@ function showView(name) {
   viewRecord.classList.toggle('hidden', name !== 'record');
   viewMeeting.classList.toggle('hidden', name !== 'meeting');
   viewReminders.classList.toggle('hidden', name !== 'reminders');
+  viewSearch.classList.toggle('hidden', name !== 'search');
   $('btn-reminders').classList.toggle('active', name === 'reminders');
+  $('btn-search-view').classList.toggle('active', name === 'search');
 }
 
 function setStatus(el, text, isError = false) {
@@ -1308,6 +1311,144 @@ searchInput.addEventListener('input', () => {
   searchQuery = searchInput.value;
   renderMeetingList();
 });
+
+// ---------- search ----------
+// A question gets an answer written only from retrieved passages; anything else
+// gets ranked passages. Either way the passages are shown, because they are the
+// evidence — an answer with nothing under it is not worth reading.
+
+const searchInputEl = $('search-q');
+const searchStatusEl = $('search-status');
+const searchAnswerEl = $('search-answer');
+const searchResultsEl = $('search-results');
+
+$('btn-search-view').addEventListener('click', () => {
+  stopSpeak();
+  showView('search');
+  searchInputEl.focus();
+});
+
+$('btn-search').addEventListener('click', runSearch);
+searchInputEl.addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
+document.querySelectorAll('#search-examples button').forEach(b =>
+  b.addEventListener('click', () => { searchInputEl.value = b.dataset.q; runSearch(); }));
+
+let searchRun = 0;
+
+async function runSearch() {
+  const query = searchInputEl.value.trim();
+  searchAnswerEl.classList.add('hidden');
+  searchResultsEl.innerHTML = '';
+  if (!query) {
+    setStatus(searchStatusEl, 'Type something to look for.');
+    return;
+  }
+
+  const run = ++searchRun;
+  setStatus(searchStatusEl, 'Searching your meetings…');
+  try {
+    const res = await window.yapper.search(query, { limit: 20 });
+    if (run !== searchRun) return;               // a newer search already started
+
+    if (!res.results.length) {
+      setStatus(searchStatusEl,
+        res.meetings === 0
+          ? 'There are no meetings to search yet.'
+          : `Nothing matched "${query}" across ${res.meetings} meeting${res.meetings === 1 ? '' : 's'}.`);
+      return;
+    }
+
+    searchStatusEl.classList.add('hidden');
+    renderSearchResults(res);
+
+    // A question gets an answer on top of the passages, not instead of them.
+    if (res.query.question) {
+      setStatus(searchStatusEl, 'Reading the passages…');
+      const answered = await window.yapper.ask(query);
+      if (run !== searchRun) return;
+      searchStatusEl.classList.add('hidden');
+      if (answered.answer) showSearchAnswer(answered.answer);
+      else if (answered.error) setStatus(searchStatusEl, `Could not answer: ${answered.error}`, true);
+    }
+  } catch (err) {
+    if (run !== searchRun) return;
+    setStatus(searchStatusEl, `Search failed: ${err.message}`, true);
+  }
+}
+
+function showSearchAnswer(answer) {
+  searchAnswerEl.innerHTML = '';
+  const body = document.createElement('div');
+  body.className = 'answer-body';
+  // Citations are the point, so they are marked rather than left inline.
+  body.innerHTML = escapeHtml(answer)
+    .replace(/\[([^\]]+)\]/g, '<span class="cite">$1</span>')
+    .replace(/\n/g, '<br>');
+  const note = document.createElement('div');
+  note.className = 'answer-note';
+  note.textContent = 'Written only from the passages below.';
+  searchAnswerEl.append(body, note);
+  searchAnswerEl.classList.remove('hidden');
+}
+
+const KIND_LABEL = {
+  transcript: 'transcript', decision: 'decision', action: 'action item',
+  risk: 'risk', question: 'open question', notes: 'notes'
+};
+
+function renderSearchResults(res) {
+  searchResultsEl.innerHTML = '';
+
+  // Say out loud when a date in the query narrowed things, so an unexpectedly
+  // short list is explained rather than mysterious.
+  if (res.query.from) {
+    const scope = document.createElement('li');
+    scope.className = 'result-scope';
+    scope.textContent = res.query.from === res.query.to
+      ? `Only meetings on ${res.query.from}.`
+      : `Only meetings between ${res.query.from} and ${res.query.to}.`;
+    searchResultsEl.appendChild(scope);
+  }
+
+  for (const r of res.results) {
+    const li = document.createElement('li');
+    li.className = 'result';
+
+    const head = document.createElement('div');
+    head.className = 'result-head';
+
+    const open = document.createElement('button');
+    open.className = 'result-meeting';
+    open.textContent = r.meeting.title;
+    open.title = 'Open this meeting';
+    open.addEventListener('click', () => openMeetingByFolder(r.meeting.folder));
+    head.appendChild(open);
+
+    const when = document.createElement('span');
+    when.className = 'result-when';
+    when.textContent = r.meeting.date + (r.stamp ? ` · ${r.stamp}` : '');
+    head.appendChild(when);
+
+    const kind = document.createElement('span');
+    kind.className = `result-kind kind-${r.kind}`;
+    kind.textContent = r.heading || KIND_LABEL[r.kind] || r.kind;
+    head.appendChild(kind);
+
+    if (r.meeting.participants.length) {
+      const who = document.createElement('span');
+      who.className = 'result-who';
+      who.textContent = r.meeting.participants.join(', ');
+      head.appendChild(who);
+    }
+
+    const body = document.createElement('div');
+    body.className = 'result-text';
+    body.textContent = r.text;
+
+    li.append(head, body);
+    searchResultsEl.appendChild(li);
+  }
+}
 
 // ---------- text-to-speech (read notes aloud) ----------
 

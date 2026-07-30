@@ -1139,6 +1139,107 @@ body.light #status.error, body.light #regen-status.error { color: var(--rec); }
 .r-again { font-size: 11px; color: var(--text-3); font-style: italic; cursor: help; }
 .reminder.done .r-meta { opacity: 0.55; }
 
+/* ---- Search ---- */
+#view-search { max-width: 780px; margin: 0 auto; animation: fadeUp 0.26s ease; }
+#search-q { flex: 1; }
+
+.search-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: -8px 0 18px;
+}
+.search-examples button {
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-family: inherit;
+  font-size: 11.5px;
+  padding: 4px 11px;
+  cursor: pointer;
+}
+.search-examples button:hover { color: var(--text); border-color: var(--border-2); }
+
+#search-status {
+  font-size: 12.5px;
+  color: var(--text-3);
+  padding: 10px 0 14px;
+}
+#search-status.error { color: var(--c-risk); }
+
+/* The answer sits above its evidence, and says so. */
+.search-answer {
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--c-summary);
+  border-radius: var(--r-md);
+}
+.answer-body { font-size: 14px; line-height: 1.6; }
+.answer-body .cite {
+  font-size: 11.5px;
+  color: var(--accent);
+  background: var(--surface-4);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+.answer-note { margin-top: 8px; font-size: 11px; color: var(--text-3); font-style: italic; }
+
+#search-results { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+
+.result-scope { font-size: 11.5px; color: var(--text-3); font-style: italic; }
+
+.result {
+  padding: 11px 13px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+.result-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.result-meeting {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.result-meeting:hover { text-decoration: underline; }
+.result-when { font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.result-who {
+  font-size: 11px;
+  color: var(--text-3);
+  margin-left: auto;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.result-kind {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--surface-4);
+  color: var(--text-2);
+}
+.kind-decision { color: var(--c-decision); }
+.kind-action { color: var(--c-action); }
+.kind-risk { color: var(--c-risk); }
+.result-text { font-size: 13px; line-height: 1.55; color: var(--text); }
+
 /* ---- Reminders view ---- */
 #view-reminders { max-width: 720px; margin: 0 auto; animation: fadeUp 0.26s ease; }
 .add-reminder { display: flex; gap: 8px; margin-bottom: 20px; }
