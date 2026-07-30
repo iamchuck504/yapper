@@ -92,8 +92,8 @@ app.whenReady().then(async () => {
   check('el botón vuelve a estar disponible tras cancelar',
     !(await $(`${rowFor('10:00')}.querySelector('.m-del').disabled`)), 'quedó deshabilitado');
   check('cancelar tampoco abre la reunión',
-    !(await $("document.getElementById('view-record').classList.contains('hidden')")),
-    'se salió de la vista de grabar');
+    await $("document.getElementById('view-meeting').classList.contains('hidden')"),
+    'abrió la reunión que se iba a borrar');
 
   await clickDelete('09:00');
   check('de una vacía dice que está vacía',

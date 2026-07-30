@@ -47,6 +47,16 @@
     <svg class="icon-moon" viewBox="0 0 16 16" width="15" height="15"><path d="M13.4 9.6A5.8 5.8 0 0 1 6.4 2.6a5.8 5.8 0 1 0 7 7z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
   </button>
 
+  <!-- Meeting detected. It sits outside the views on purpose: it can arrive
+       while any of them is open, and it must neither hide nor steal the one
+       being read. -->
+  <div id="meeting-prompt" class="hidden">
+    <span class="mp-dot"></span>
+    <div class="mp-text"><strong>Meeting detected</strong><span id="mp-app"></span></div>
+    <button id="mp-start" class="btn-primary">Take notes</button>
+    <button id="mp-dismiss" class="btn-ghost">Dismiss</button>
+  </div>
+
   <main id="content">
 
     <!-- ===== Record view ===== -->
@@ -55,13 +65,6 @@
         <button id="action-summary" class="action-summary hidden" title="Open your action items"></button>
         <h1 class="page-title">New meeting</h1>
         <p class="view-sub">Record live or import audio — transcribed on your machine, summarized by AI.</p>
-      </div>
-
-      <div id="meeting-prompt" class="hidden">
-        <span class="mp-dot"></span>
-        <div class="mp-text"><strong>Meeting detected</strong><span id="mp-app"></span></div>
-        <button id="mp-start" class="btn-primary">Take notes</button>
-        <button id="mp-dismiss" class="btn-ghost">Dismiss</button>
       </div>
 
       <input id="meeting-title" type="text" placeholder="Meeting title (optional)" autocomplete="off" spellcheck="false" />

@@ -64,6 +64,30 @@ app.whenReady().then(async () => {
     await new Promise(r => setTimeout(r, 250));
   };
 
+  // ---- it opens on the day, and the detected-meeting card floats above it ----
+  check('abre en Today',
+    !(await $("document.getElementById('view-home').classList.contains('hidden')")), 'no abrió ahí');
+
+  win.webContents.send('meeting-detected', { app: 'Zoom' });
+  await new Promise(r => setTimeout(r, 400));
+  // offsetParent is always null on a fixed element, so visibility is measured
+  // from the box it actually occupies inside the window.
+  const prompt = await $(`(() => { const el = document.getElementById('meeting-prompt');
+    const r = el.getBoundingClientRect();
+    const css = getComputedStyle(el);
+    return { hidden: el.classList.contains('hidden'), inRecordView: !!el.closest('#view-record'),
+      w: Math.round(r.width), h: Math.round(r.height),
+      onScreen: r.width > 0 && r.height > 0 && r.top >= 0 && r.left >= 0
+        && r.bottom <= innerHeight && r.right <= innerWidth,
+      shown: css.display !== 'none' && css.visibility !== 'hidden' && +css.opacity > 0,
+      text: el.textContent }; })()`);
+  check('el aviso de reunión detectada se ve estando en Today',
+    !prompt.hidden && prompt.shown && prompt.onScreen && !prompt.inRecordView, JSON.stringify(prompt));
+  check('y dice qué lo disparó', /Zoom/.test(prompt.text), prompt.text);
+  await click('#mp-dismiss');
+  check('se puede descartar',
+    await $("document.getElementById('meeting-prompt').classList.contains('hidden')"), 'sigue ahí');
+
   // ---- every view opens ----
   await click('#btn-reminders');
   check('la vista de recordatorios abre',

@@ -116,9 +116,9 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 2492 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
-| `renderer/style.css` | 1489 | Everything visual, light and dark |
-| `renderer/index.html` | 420 | Main window markup |
+| `renderer/app.js` | 2500 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
+| `renderer/style.css` | 1494 | Everything visual, light and dark |
+| `renderer/index.html` | 423 | Main window markup |
 | `renderer/bubble.html` | 188 | The always-on-top live transcript overlay |
 | `renderer/bubble.js` | 125 | Its behaviour, including sizing itself to its own controls |
 | `renderer/splash.html` | 104 | Boot screen, including the first-run calibration status |
@@ -429,6 +429,18 @@ because that is exactly the situation in which it would invent one. When there
 are passages, they are the entire context and the prompt requires a bracketed
 citation per claim. `test-search-ui.js` asks about a topic that appears in no
 meeting and asserts no answer comes back.
+
+**The app opens on the day, and nothing else may take the screen.** On launch the
+first question is usually "what happened, what do I owe", not "record
+something" — so `Today` is the landing view. Two consequences were handled with
+it rather than discovered later. The detected-meeting card was inside the record
+view, where the landing change would have made it invisible; it is now a fixed
+card that floats over whichever view is open, because it can arrive at any moment
+and must neither hide behind a view nor replace the one being read — an earlier
+version switched views on detection and made an open meeting vanish 400 ms after
+it was clicked. And `startRecording()` switches to the record view itself rather
+than relying on its callers, so the timer and the stop button are on screen no
+matter which of the three entry points started the recording.
 
 **A claim without a resolvable source is dropped, not shown with a caveat.** The
 weekly review has to cite meetings by title, and each citation is looked up
