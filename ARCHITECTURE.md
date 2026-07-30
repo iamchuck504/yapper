@@ -5,13 +5,16 @@ and turns the transcript into notes with a language model. Audio never leaves th
 device; only text is sent, and only to the provider the user picked.
 
 This document is for reviewing how it is put together. `README.md` is the
-user-facing guide (in Spanish).
+user-facing guide; `mac/README.md` is the macOS build runbook.
 
 ## Where to start
 
 ```
 git clone <repo> && cd yapper
-powershell -ExecutionPolicy Bypass -File setup.ps1     # engine + models, ~600 MB
+
+powershell -ExecutionPolicy Bypass -File setup.ps1     # Windows: engine + models, ~600 MB
+bash mac/build-app.sh                                  # macOS: helpers, engine, dmg
+
 npm start
 npm test                                               # no model or GPU needed
 ```
@@ -29,9 +32,12 @@ Reading order for a review, shortest useful path first:
 ```
 yapper/
 ├── main.js  engine.js  live.js  llm.js  keystore.js  bounds.js  preload.js
+├── sysaudio.js          macOS system audio: helper lifecycle, buffer, mixing
+├── meetings.js          which running app counts as a meeting, per platform
 ├── renderer/            all three windows, plus fonts and the audio worklet
 ├── build/               tests, icon pipeline, and the calibration sample
-├── setup.ps1            provisioning: engine, models, Electron, shortcut
+├── mac/                 the two Swift helpers and the macOS build scripts
+├── setup.ps1            Windows provisioning: engine, models, Electron, shortcut
 ├── bin/    models/      downloaded, gitignored
 ├── README.md            user guide
 └── ARCHITECTURE.md      this file
@@ -95,7 +101,7 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 2036 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `main.js` | 2117 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
 | `engine.js` | 648 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
@@ -104,7 +110,7 @@ that ship are the files that run.
 | `actions.js` | 253 | Reading action items out of the notes, and folding duplicates together |
 | `provision.js` | 213 | First-run engine download for installed copies (Windows and macOS), and the version comparison behind update notices |
 | `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
-| `sysaudio.js` | 158 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
+| `sysaudio.js` | 186 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
 | `meetings.js` | 72 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
