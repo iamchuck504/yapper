@@ -104,7 +104,9 @@
         </div>
         <div class="opt-row llm-detail hidden" id="llm-privacy-row">
           <span class="opt-label"></span>
-          <span id="llm-privacy" class="privacy-note hidden"></span>
+          <!-- the row above is what gets shown or hidden; this must not carry
+               its own hidden class or the warning never appears at all -->
+          <span id="llm-privacy" class="privacy-note"></span>
         </div>
         <div class="opt-row llm-detail hidden" id="llm-baseurl-row">
           <span class="opt-label">Endpoint</span>

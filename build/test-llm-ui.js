@@ -60,9 +60,20 @@ app.whenReady().then(async () => {
   check('al elegir la gratis aparece el enlace para sacar la key',
     !(await $("document.getElementById('llm-key-link').classList.contains('hidden')")),
     'el enlace no aparece');
-  check('y aparece el aviso de privacidad',
-    !(await $("document.getElementById('llm-privacy-row').classList.contains('hidden')")),
-    'el aviso no aparece');
+  // Checking the row is not enough: the text inside it kept its own hidden
+  // class, so the row opened and the warning was never actually on screen.
+  const privacy = await $(`(() => {
+    const el = document.getElementById('llm-privacy');
+    const r = el.getBoundingClientRect();
+    return { text: el.textContent, visible: r.width > 0 && r.height > 0,
+      hidden: el.classList.contains('hidden'),
+      rowHidden: document.getElementById('llm-privacy-row').classList.contains('hidden') };
+  })()`);
+  check('la fila del aviso de privacidad se destapa', !privacy.rowHidden, 'sigue oculta');
+  check('el aviso de privacidad se ve de verdad en pantalla',
+    privacy.visible && !privacy.hidden && privacy.text.length > 20, JSON.stringify(privacy));
+  check('y dice que el plan gratis usa tus datos',
+    /train|improve its models/i.test(privacy.text), privacy.text);
   check('el enlace apunta a una URL permitida',
     (await $("document.getElementById('llm-key-link').dataset.url")).startsWith('https://'),
     await $("document.getElementById('llm-key-link').dataset.url"));

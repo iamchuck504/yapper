@@ -218,11 +218,8 @@ function request(method, url, headers, body) {
         let parsed = null;
         try { parsed = JSON.parse(raw); } catch { /* not JSON; the text is the error */ }
         if (res.statusCode < 200 || res.statusCode >= 300) {
-          const msg = (parsed && parsed.error && (parsed.error.message || parsed.error.type))
-            || (parsed && parsed.message)
-            || raw.slice(0, 300)
-            || `HTTP ${res.statusCode}`;
-          return reject(new Error(httpHint(res.statusCode) + msg));
+          const msg = errorText(parsed, raw, res.statusCode);
+          return reject(new Error(httpHint(res.statusCode, msg) + msg));
         }
         if (!parsed) return reject(new Error(`Unexpected reply: ${raw.slice(0, 200)}`));
         resolve(parsed);
@@ -237,8 +234,28 @@ function request(method, url, headers, body) {
   });
 }
 
-/** Turn the usual status codes into something worth reading. */
-function httpHint(status) {
+/**
+ * The sentence inside an error body, whatever shape the provider chose. They do
+ * not agree: OpenAI-style nests it under `error`, Gemini's compatibility
+ * endpoint wraps the whole thing in an array, and some just return a string. A
+ * miss here means the user is shown raw JSON, which is what a rejected key used
+ * to look like on the provider this app recommends first.
+ */
+function errorText(parsed, raw, status) {
+  const first = Array.isArray(parsed) ? parsed[0] : parsed;
+  if (typeof first === 'string' && first.trim()) return first.trim();
+  const e = (first && first.error) || first;
+  const msg = e && (e.message || e.detail || e.type || (typeof e === 'string' ? e : ''));
+  return (msg && String(msg).trim()) || raw.slice(0, 300).trim() || `HTTP ${status}`;
+}
+
+/** Turn the usual failures into something worth reading. */
+function httpHint(status, msg = '') {
+  // a bad key is a 400 on some providers and a 401 on others, so the message
+  // gets a say as well as the code
+  if (/api[\s_-]?key|credential|unauthenticated|unauthorized|permission denied/i.test(msg)) {
+    return 'The API key was rejected: ';
+  }
   if (status === 401 || status === 403) return 'The API key was rejected: ';
   if (status === 404) return 'That endpoint or model does not exist: ';
   if (status === 429) return 'Rate limited or out of credit: ';
