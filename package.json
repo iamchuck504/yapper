@@ -35,6 +35,7 @@
       "search.js",
       "digest.js",
       "provision.js",
+      "meetings.js",
       "preload.js",
       "renderer/**/*",
       "!renderer/.pdf-export.html",
