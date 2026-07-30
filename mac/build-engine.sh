@@ -41,7 +41,10 @@ echo "== publicando en el feed ($REPO, tag engine-$TAG)"
 if gh release view "engine-$TAG" --repo "$REPO" >/dev/null 2>&1; then
   gh release upload "engine-$TAG" "$OUT" --repo "$REPO" --clobber
 else
-  gh release create "engine-$TAG" "$OUT" --repo "$REPO" \
+  # --latest=false matters: the app (and electron-updater) read the feed's
+  # "latest" release to find latest.yml, and an engine release has none —
+  # publishing it as latest makes every update check 404.
+  gh release create "engine-$TAG" "$OUT" --repo "$REPO" --latest=false \
     --title "whisper.cpp $TAG — macOS arm64" \
     --notes "Metal build of whisper-server, compiled on Apple Silicon. Downloaded by the app's first run on macOS."
 fi
