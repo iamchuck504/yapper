@@ -695,7 +695,12 @@ hard way and all documented in `mac/README.md`:
   while the Electron app opens fine — an install that looks healthy and quietly
   has neither system audio nor meeting detection.
 - **Updates only notify.** Squirrel.Mac refuses unsigned updates, so the pill
-  opens the download page instead of promising a restart it cannot deliver.
+  opens the download page instead of promising a restart it cannot deliver. The
+  check reads `latest-mac.yml` and falls back to `latest.yml`: electron-builder
+  writes one manifest per platform, so a release cut on a Mac leaves the Windows
+  manifest at its old version, and reading only that one announces nothing.
+  `mac/build-app.sh` uploads the mac manifest with the dmg — it used to stay in
+  `dist/`, which is why the feed had never carried one.
 
 Gatekeeper still rejects the ad-hoc signature on someone else's machine, and
 since macOS 15 right-click → Open no longer clears it. That, and self-installing

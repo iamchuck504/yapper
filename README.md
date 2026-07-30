@@ -121,7 +121,9 @@ Everything above works on both. These are the differences that remain:
 
 **The screen stays awake while recording on macOS.** Not a preference — a requirement: ScreenCaptureKit offers no displays while the screen is asleep, and with no display there is no capture, so a meeting you mostly listen to would quietly lose the other side halfway through. The block is released as soon as the recording stops.
 
-The updater and the installer both depend on an Apple Developer certificate the project does not have. Until then, macOS updates are a notice rather than an install, and the first open of a downloaded `.dmg` needs right-click → Open.
+The updater and the installer both depend on an Apple Developer certificate the project does not have. Until then, macOS updates are a notice rather than an install: the sidebar shows *New version — download* and opens the releases page, and updating means dragging the new dmg over the old app and clearing Gatekeeper again. The engine is not re-downloaded — it lives in `~/Library/Application Support/yapper`, outside the bundle — so an update is the ~95 MB dmg, not another 650 MB, and meetings and granted permissions survive it.
+
+Note for whoever cuts a release: electron-builder writes one manifest per platform, `latest.yml` from the Windows build and `latest-mac.yml` from the mac one. Both belong on the release, and `mac/build-app.sh` uploads the mac one with the dmg — a release published from only one platform would otherwise tell the other's users that nothing is new.
 
 ## Importing voice notes
 

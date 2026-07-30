@@ -46,7 +46,10 @@ having no Apple Developer certificate:
   Security after trying once, or run
   `xattr -dr com.apple.quarantine /Applications/Yapper.app`.
 - **Updates notify rather than install themselves** — Squirrel.Mac refuses
-  unsigned updates, so the pill opens the download page.
+  unsigned updates, so the pill opens the download page. Updating is dragging
+  the new dmg over the old app and clearing Gatekeeper once more; the engine is
+  not re-downloaded, so it costs ~95 MB rather than another 650 MB, and both
+  meetings and granted permissions survive it.
 - **Screen Recording has to be granted** on the first recording, on top of the
   microphone. It is what captures what the Mac is *playing* — the other side of
   the call. Nothing of the screen is read or kept: the capture runs at 2×2

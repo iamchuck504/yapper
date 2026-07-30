@@ -127,11 +127,29 @@ on what you send, and the app says so when you pick one.
 ## Updating
 
 macOS copies **do not update themselves**. Squirrel.Mac refuses to apply an
-unsigned update, so instead the app checks the same feed and turns the sidebar
-pill into **New version — download**, which opens the releases page. Download the
-new dmg and drag it over the old app.
+unsigned update, so the app does the honest thing instead of promising a restart
+it cannot deliver: it checks the same feed at launch and every four hours, and
+when there is something newer the sidebar shows
 
-The quarantine step is only needed the first time, unless you delete the app.
+> **New version v0.1.1 — download**
+
+which opens the releases page.
+
+**What updating actually involves:**
+
+1. Download the new dmg and drag Yapper into Applications, replacing the old one.
+2. **Do the Gatekeeper step again.** The new download carries its own quarantine
+   flag — either *Open Anyway* in System Settings, or
+   `xattr -dr com.apple.quarantine /Applications/Yapper.app`.
+3. That is it. **The engine and models are not downloaded again** — they live in
+   `~/Library/Application Support/yapper`, outside the app — so an update is the
+   ~95 MB dmg rather than another 650 MB.
+4. **Your meetings are untouched.** They are in `~/Documents/Meetings` and have
+   nothing to do with the app bundle.
+5. Permissions stay granted, since the bundle id does not change.
+
+When the project has an Apple Developer certificate, steps 1 and 2 disappear and
+updates install themselves as they do on Windows.
 
 ## Uninstalling
 
