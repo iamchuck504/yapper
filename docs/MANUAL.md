@@ -25,8 +25,7 @@ compares to another meeting-notes app in both directions.
 **For users: an installer.**
 
 > Download: **https://github.com/iamchuck504/yapper-releases/releases/latest**
-> (the code repo stays private; that public repo hosts only installers and the
-> update feed)
+> (an installers-only repo: the code lives here, the releases live there)
 
 **Windows** — `Yapper-Setup-<version>.exe` (~83 MB) installs per-user, no admin
 rights, creates the shortcuts. Installed copies **keep themselves updated** from
