@@ -95,7 +95,7 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1954 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `main.js` | 2036 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
 | `engine.js` | 648 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
@@ -104,6 +104,8 @@ that ship are the files that run.
 | `actions.js` | 253 | Reading action items out of the notes, and folding duplicates together |
 | `provision.js` | 213 | First-run engine download for installed copies (Windows and macOS), and the version comparison behind update notices |
 | `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
+| `sysaudio.js` | 158 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
+| `meetings.js` | 72 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
 | `preload.js` | 100 | The only bridge between renderer and main |
@@ -128,6 +130,29 @@ reachable in a test.
 `app.js` is the largest file and the obvious candidate for splitting. It is
 organised in labelled sections (capture, live preview, recording, meeting view,
 exports, reminders, settings) but it is one module.
+
+### The two native helpers (macOS)
+
+Two facts Windows reads straight out of the OS have no JavaScript equivalent on
+macOS, so each is a small Swift binary compiled by `mac/build-app.sh` and
+unpacked from the asar — nothing can be executed from inside one.
+
+| Helper | Lines | Answers |
+|---|---:|---|
+| `mac/system-audio.swift` | 109 | What the machine is playing, as 16 kHz mono PCM on stdout (ScreenCaptureKit) |
+| `mac/mic-probe.swift` | 58 | Which processes hold the microphone right now, as bundle ids (CoreAudio) |
+
+They are deliberately dumb: they answer one question on stdout and exit codes
+carry the only nuance (`2` from the audio helper means the Screen Recording
+permission is missing, which is recoverable). Everything that can be decided in
+JavaScript — buffering, mixing, which bundle id counts as a meeting — stays in
+`sysaudio.js` and `meetings.js`, where it can be tested without a Mac in the
+loop.
+
+Neither is required. Without the audio helper the app records the microphone
+alone and says so; without the mic probe, auto-detection stays off. That is the
+same shape as the CUDA build on Windows: better when present, never fatal when
+absent.
 
 ---
 
@@ -742,10 +767,18 @@ the doc cannot quietly drift away from the code.
 
 ## 14. Known gaps
 
-- The installer is not code-signed — SmartScreen warns on first install (§11).
-- macOS: no engine binary, and system audio plus auto-detection are
-  Windows-only.
+- Neither build is code-signed by an authority — SmartScreen warns on first
+  install on Windows (§11), Gatekeeper asks on first open on macOS. The macOS
+  build is ad-hoc signed under its own bundle id, which is not a trust
+  statement but is what makes the OS deliver its notifications at all.
+- macOS updates notify instead of installing themselves: Squirrel.Mac refuses
+  unsigned updates. Same certificate, same gap.
+- macOS system audio depends on the user granting Screen Recording. Refused,
+  the recording is the microphone alone — degraded, and said out loud, but not
+  what was asked for.
+- Apple Silicon only. An Intel or universal build needs a second engine compile
+  and doubles the artifact size.
 - No speaker diarisation. Attendees are typed by hand; they bias name spelling
   and help attribution, but the app does not know who said what.
 - No playback from the timestamps in the notes.
-- `renderer/app.js` is 1,597 lines in one module.
+- `renderer/app.js` is 2,647 lines in one module.

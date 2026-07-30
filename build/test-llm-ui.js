@@ -26,6 +26,13 @@ app.whenReady().then(async () => {
 
   const $ = js => win.webContents.executeJavaScript(js);
 
+  // The provider rows live inside the record view, and the app opens on Today.
+  // Measuring them while their own section is display:none reports 0×0 for
+  // everything, so "is it actually on screen" could never pass — it was
+  // measuring the closed view, not the notice.
+  await $(`showView('record')`);
+  await new Promise(r => setTimeout(r, 300));
+
   check('el selector de proveedor existe y tiene opciones',
     (await $("document.getElementById('llm-provider').options.length")) >= 4,
     'no se llenó');

@@ -2,11 +2,12 @@
 // the real prompt and the configured provider, then checks the shape: the
 // sections it promised, prose instead of bullets where it matters.
 const path = require('path');
+const os = require("os");
 const fs = require('fs');
 const { app } = require('electron');
 const { mainWindow } = require('./harness');
 
-const REAL_MEETINGS = path.join(process.env.USERPROFILE, 'Documents', 'Meetings');
+const REAL_MEETINGS = path.join(os.homedir(), 'Documents', 'Meetings');
 const ROOT = path.join(app.getPath('temp'), 'yapper-memo-test');
 fs.rmSync(ROOT, { recursive: true, force: true });
 fs.mkdirSync(path.join(ROOT, 'Meetings'), { recursive: true });

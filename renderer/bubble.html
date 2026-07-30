@@ -84,6 +84,14 @@
        this row exactly, and a button that squeezes instead of keeping its width
        would make that measurement lie. */
     header > *:not(.spacer) { flex-shrink: 0; }
+    /* One exception, and only while the card is open: pausing widens two things
+       at once — the button becomes "Resume" and " · paused" is appended here —
+       and on a Mac that overflowed the row by a few pixels, because font metrics
+       are not the ones this was measured against. The label is the part that can
+       lose characters without costing a control. As a pill it is display:none,
+       so the measurement the comment above protects is untouched. */
+    header .label { flex-shrink: 1; min-width: 0; overflow: hidden;
+                    text-overflow: ellipsis; white-space: nowrap; }
 
     /* level indicator — driven by the real signal, not an animation */
     .eq {

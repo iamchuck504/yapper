@@ -3,11 +3,12 @@
 // compete for attention, so this runs the styles most likely to drown the
 // timestamp rule several times and checks it survives.
 const path = require('path');
+const os = require("os");
 const fs = require('fs');
 const { app } = require('electron');
 const { mainWindow } = require('./harness');
 
-const REAL_MEETINGS = path.join(process.env.USERPROFILE, 'Documents', 'Meetings');
+const REAL_MEETINGS = path.join(os.homedir(), 'Documents', 'Meetings');
 const BASE = path.join(app.getPath('temp'), 'yapper-stamps-test');
 let ROOT = BASE;
 try { fs.rmSync(BASE, { recursive: true, force: true }); } catch { ROOT = `${BASE}-${process.pid}`; }

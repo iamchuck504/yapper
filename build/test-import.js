@@ -3,11 +3,12 @@
 // webm and checks the WAV that comes out is playable, the right length, and
 // that the transcript is not empty.
 const path = require('path');
+const os = require("os");
 const fs = require('fs');
 const { app, dialog } = require('electron');
 const { mainWindow } = require('./harness');
 
-const REAL = path.join(process.env.USERPROFILE, 'Documents', 'Meetings');
+const REAL = path.join(os.homedir(), 'Documents', 'Meetings');
 const ROOT = path.join(app.getPath('temp'), 'yapper-import-test');
 fs.rmSync(ROOT, { recursive: true, force: true });
 fs.mkdirSync(path.join(ROOT, 'Meetings'), { recursive: true });

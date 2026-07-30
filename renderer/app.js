@@ -134,6 +134,9 @@ customInput.addEventListener('change', saveOptions);
 const bubbleToggle = $('opt-bubble');
 const autoDetectToggle = $('opt-autodetect');
 const startupToggle = $('opt-startup');
+// The switch does the same thing on both platforms, but "Start with Windows"
+// on a Mac reads like a setting that belongs to some other computer.
+if (window.yapper.platform === 'darwin') $('startup-label').textContent = 'Start at login';
 let bubbleEnabled = localStorage.getItem('yapper-bubble') !== 'off';
 let autoDetectEnabled = localStorage.getItem('yapper-autodetect') !== 'off';   // on by default
 

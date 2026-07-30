@@ -2,9 +2,10 @@
 // windows through it, and report what a streaming pass actually costs here.
 const fs = require('fs');
 const path = require('path');
+const os = require("os");
 const engine = require('../engine');
 
-const WAV_10S = path.join(process.env.TEMP, 'yapper-10s.wav');
+const WAV_10S = path.join(os.tmpdir(), 'yapper-10s.wav');
 
 function fail(msg) { console.log('FAIL  ' + msg); process.exit(1); }
 
@@ -48,4 +49,8 @@ function fail(msg) { console.log('FAIL  ' + msg); process.exit(1); }
 
   await engine.stop();
   console.log('\nservidor detenido — PASS');
+  // Under Electron nothing else keeps the process alive but nothing ends it
+  // either, so a passing run would hang until something killed it — which
+  // reads exactly like a failure. Say so explicitly.
+  process.exit(0);
 })().catch(e => fail(e.message));

@@ -1,6 +1,6 @@
 # Yapper — user manual and honest assessment
 
-Yapper records meetings on Windows, transcribes them **on the machine** with
+Yapper records meetings on Windows and macOS, transcribes them **on the machine** with
 whisper.cpp, and writes structured notes with an LLM the user chooses. Nothing
 is uploaded to record or transcribe; every meeting is a plain folder of files
 the user can open. It is a working clone of the Granola idea with a different
@@ -199,7 +199,7 @@ transcript, notes, title. Useful for phone recordings and voice memos.
 
 | Area | State |
 |---|---|
-| Record system audio + mic on Windows | Working (loopback capture, no bot) |
+| Record system audio + mic | Working on both (Windows loopback; macOS ScreenCaptureKit helper, needs Screen Recording) |
 | Live transcript | Working on `fast`/`steady` machines; absent on `modest` |
 | Full transcription | Working, local, ~63× real time on a 4080 |
 | Notes in 7 styles + custom instructions | Working, provider-dependent |
@@ -212,11 +212,12 @@ transcript, notes, title. Useful for phone recordings and voice memos.
 | Meeting auto-detection + notification | Working, heuristic (mic usage) |
 | Audio auto-release after transcript | Working, with per-meeting keep toggle |
 | BYOK providers + OS-keystore key storage | Working (6 providers) |
-| Dark/light theme, read-aloud, start with Windows | Working |
+| Dark/light theme, read-aloud, start at login | Working |
 | Windows installer (per-user NSIS) | Working, unsigned |
+| macOS build (dmg + zip, arm64) | Working, ad-hoc signed, **not notarised** |
 | First-run engine download with progress | Working |
 | Auto-update from the release feed | Working, proven end to end (Windows; on macOS it notifies and links the download) |
-| macOS | Code-ready and build-scripted (`mac/`), **not yet run on a Mac**; mic-only capture, unsigned |
+| macOS | Working: Metal engine, system audio, meeting detection, notifications. Apple Silicon only, unsigned |
 | Mobile | **Missing** |
 | Speaker labels | **Missing** |
 | Calendar integration | **Missing** |
@@ -239,13 +240,16 @@ UI; several are deliberate trade-offs, marked as such.
    identity paperwork; without one, SmartScreen warns on first install and some
    corporate policies block unsigned executables outright. The auto-updater
    works unsigned, but signing is what "install without a scary screen" costs.
-2. **Windows-first; macOS is second-class.** The mac build is scripted
-   (`mac/`) but has not yet run on a Mac, and even built it captures the
-   **microphone only** — Electron's system-audio loopback is Windows-only, so
-   a headphone call records just this side. It is also unsigned (Gatekeeper
-   right-click-open), updates notify instead of self-installing, and meeting
-   auto-detection does not exist there. Full parity needs a ScreenCaptureKit
-   capture path and an Apple Developer account. No mobile.
+2. **macOS works, but is not signed.** Recording both sides, meeting detection,
+   notifications and the Metal engine all run there now — the first build was
+   done on an M4 Pro and the gaps that mattered were closed: system audio comes
+   from a ScreenCaptureKit helper rather than the Windows-only loopback, and
+   detection asks CoreAudio instead of the registry. What is left all traces
+   back to one missing thing, an Apple Developer certificate: Gatekeeper asks
+   on first open, updates notify instead of self-installing, and there is no
+   notarised installer to hand someone. System audio also depends on the user
+   granting Screen Recording; refused, it records the microphone alone and says
+   so. Apple Silicon only. No mobile.
 3. **No speaker labels.** The transcript does not say who spoke. Typed
    participants improve name spelling only. (The mic and system channels are
    already separate internally, so "You:" vs "Them:" attribution is reachable —
@@ -384,8 +388,9 @@ Neutral estimates of shape, not commitments; ordered by leverage.
   starting", with titles and attendees prefilled.
 - **Semantic search** — a small local embedding model beside BM25, keeping the
   no-cloud promise while closing the synonym gap.
-- **macOS** — whisper.cpp Metal build, ScreenCaptureKit capture,
-  notarization; needs Apple hardware and a developer account.
+- **macOS notarization** — the Metal build and the ScreenCaptureKit capture are
+  done; what remains is the Apple Developer certificate, which is also what
+  unlocks self-installing updates there.
 - **True diarization** — heavier (tinydiarize / pyannote class models); the
   channel split above is the cheap first step.
 - **Renderer split** — mechanical refactor of the 2,500-line file into
