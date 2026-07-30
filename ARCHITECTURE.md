@@ -95,16 +95,17 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1673 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
+| `main.js` | 1765 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
 | `engine.js` | 640 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
+| `digest.js` | 344 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 342 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
 | `llm.js` | 322 | Note providers (§6) behind one `generate()` call |
 | `live.js` | 304 | Live transcription: rolling window, LocalAgreement-2 confirmation |
-| `actions.js` | 239 | Reading action items out of the notes, and folding duplicates together |
+| `actions.js` | 253 | Reading action items out of the notes, and folding duplicates together |
 | `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
-| `preload.js` | 85 | The only bridge between renderer and main |
+| `preload.js` | 87 | The only bridge between renderer and main |
 
 `keystore.js` and `bounds.js` are separate files for one reason: they are pure
 functions, so they can be tested without booting Electron, and `keystore.js`
@@ -115,9 +116,9 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 2146 | Main window: capture graph, views, notes rendering, exports, reminders, search, settings |
-| `renderer/style.css` | 1379 | Everything visual, light and dark |
-| `renderer/index.html` | 362 | Main window markup |
+| `renderer/app.js` | 2492 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
+| `renderer/style.css` | 1489 | Everything visual, light and dark |
+| `renderer/index.html` | 420 | Main window markup |
 | `renderer/bubble.html` | 188 | The always-on-top live transcript overlay |
 | `renderer/bubble.js` | 125 | Its behaviour, including sizing itself to its own controls |
 | `renderer/splash.html` | 104 | Boot screen, including the first-run calibration status |
@@ -189,10 +190,16 @@ Meetings/*/  ─► library.refresh() ─► library.json      (one entry per me
                      ├─► actions.parseActionItems() ─► reminders.json
                      │        (owner, due date, priority — only if written down)
                      │
-                     └─► search.buildIndex() ─► passages, in memory only
-                                  │
-                                  ├─► search()  BM25 + phrase/kind/people/date
-                                  └─► ask()  ─► the passages, then llm.generate()
+                     ├─► search.buildIndex() ─► passages, in memory only
+                     │            │
+                     │            ├─► search()  BM25 + phrase/kind/people/date
+                     │            └─► ask()  ─► the passages, then llm.generate()
+                     │
+                     ├─► digest.dailyDigest()   ─► today, assembled. No model.
+                     │
+                     └─► digest.weeklyFacts()   ─► the week's numbers. No model.
+                           + digest.weeklyInput() ─► llm.generate()
+                                  └─► digest.parseWeekly() ─► digests/weekly-*.json
 ```
 
 `library.json` and the search index are both derived, so both are disposable:
@@ -205,23 +212,40 @@ holds what the user did to an item (completed, dismissed). Extraction therefore
 merges rather than replaces: an incoming item that matches an existing one folds
 into it and keeps its state.
 
+The daily and weekly roll-ups are split by *kind*, not just by period, and that
+is what keeps them from being two views of the same list:
+
+| | Daily | Weekly |
+|---|---|---|
+| How it is produced | assembled from the notes | written by a model from the notes |
+| What it contains | the meetings, the decisions recorded, the tasks that appeared, what is overdue | the threads across meetings, where the week changed direction, what was left unresolved |
+| Cost | none — no model, no network | one call, cached per week |
+| Cached | no, recomputing is cheaper than validating | `digests/weekly-YYYY-Www.json`, keyed by the fingerprint of the meetings behind it |
+| If the provider is unreachable | unaffected | the numbers still render; only the written part is missing |
+
+The weekly prompt is not given the action-item sections at all, so the review
+cannot become a task list even if the model tried — the input does not contain
+one. Its bullets must cite meetings by title, and `parseWeekly()` drops any
+bullet whose citation does not resolve to a meeting in that week.
+
 ---
 
 ## 5. IPC surface
 
-62 channels, all declared in `preload.js` — that file is the complete list of
+64 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
 
-**Request/response (42)** — recording lifecycle (`recording-start`,
+**Request/response (44)** — recording lifecycle (`recording-start`,
 `recording-finish`), import (`import-audio`, `import-read`, `import-open`,
 `import-close`, `legacy-audio`), processing (`transcribe`, `summarize`,
 `regenerate`, `generate-title`, `save-notes`), meetings (`list-meetings`,
 `load-meeting`, `delete-meeting`, `open-folder`), reminders (4), settings
 (`get/set-open-at-login`, `get/set-llm-settings`, `test-llm`, `style-sections`,
 `check-environment`), the library (`refresh-library`, `list-actions`), retrieval
-(`search`, `ask`), exports (`save-text-file`, `export-pdf`), live
+(`search`, `ask`), the roll-ups (`daily-digest`, `weekly-summary`), exports
+(`save-text-file`, `export-pdf`), live
 (`live-start`, `live-stop`), bubble (`bubble-show`, `bubble-hide`),
 `open-external`.
 
@@ -406,6 +430,13 @@ are passages, they are the entire context and the prompt requires a bracketed
 citation per claim. `test-search-ui.js` asks about a topic that appears in no
 meeting and asserts no answer comes back.
 
+**A claim without a resolvable source is dropped, not shown with a caveat.** The
+weekly review has to cite meetings by title, and each citation is looked up
+against the meetings of that week. A bullet citing something that is not there —
+the failure mode where a plausible-sounding week gets invented — is discarded,
+and the count of what was discarded is shown rather than hidden. A caveat would
+leave the sentence on screen, and a sentence on screen is what gets believed.
+
 **Ranking is lexical, not embeddings.** BM25 over passages needs no model, no
 index file and no network, so search works before any provider is configured and
 costs nothing per query. Two ordering rules were added because measurement showed
@@ -434,11 +465,19 @@ Documents\Meetings\YYYY-MM-DD_HHMM\
   settings.json      theme, startup, measured tier, chosen provider, and
                      llmByProvider: a sealed key, model and endpoint per provider
   reminders.json     action items across all meetings
+  index.json         the meeting index — a cache, safe to delete
+  digests\
+    weekly-YYYY-Www.json   one written review per week, with the fingerprint of
+                           the meetings it came from; stale copies are ignored
 ```
 
 The meeting folder is the unit of everything: exports read from it, deletion
 moves it to the recycle bin, and a folder that only has audio is picked up as
 "not transcribed" with a retry button.
+
+Everything under `%APPDATA%` except `settings.json` and `reminders.json` is
+derived and disposable. Deleting `index.json` or the whole `digests` folder costs
+one rebuild and one model call respectively; nothing is lost.
 
 ## 9b. The audio's job ends with the transcript
 
@@ -567,6 +606,7 @@ three groups.
 | `test-library.js` | The meeting index: what counts as content, day and week selection, and the stamp that decides when a cached entry can be reused |
 | `test-actions.js` | Extraction and deduplication: only what the notes actually say becomes an item, `URGENT:` is not an owner, an undated item never gains a date, and restating a task merges instead of duplicating |
 | `test-search.js` | Retrieval end to end without a model: passages, query parsing in English and Spanish, ranking, and the two orderings that matter — a decision outranks a transcript line that merely mentions the word, and a period with no keyword still lists its meetings |
+| `test-digest.js` | The roll-ups: which due dates are allowed to resolve to a day and which stay as written, what belongs to a day, what reaches the weekly model, and what is thrown away when it comes back citing a meeting that does not exist |
 | `test-bounds.js` | The bubble stays on screen, including multi-monitor negative origins |
 | `test-meetings.js` | The delete path guard |
 | `test-section-coverage.js` | Every note style has a button, every section has a colour rule |
@@ -585,6 +625,7 @@ run can never touch a real meeting):
 | `test-audio-release.js` | The audio is released only after a real transcript, never on a failure, never when the user asked to keep it, and reclaiming older meetings' audio touches only the transcribed ones |
 | `test-live-vs-final.js` | A full transcription requested mid-recording: it completes, and the live transcript survives it without errors |
 | `test-search-ui.js` | The search view against a real model: results carry their meeting, date, timestamp and participants, a result opens its meeting, nothing-found says so, and a question about something never discussed returns no answer rather than an invented one |
+| `test-home-ui.js` | The day and the week against a real model: only today's meetings and decisions appear, every line opens its source, an empty day offers the last one that had something, the weekly review cites real meetings and does not repeat the task list, and a week with one set of notes is explained rather than written |
 | `test-actions-ui.js` | The action list: filters, the meeting each item came from, and completing one |
 | `test-smoke.js` | Every view, control and export, while listening for renderer errors |
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |

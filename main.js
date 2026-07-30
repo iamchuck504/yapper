@@ -12,6 +12,7 @@ const keystore = require('./keystore');
 const library = require('./library');
 const actions = require('./actions');
 const search = require('./search');
+const digest = require('./digest');
 
 const MEETINGS_DIR = path.join(app.getPath('documents'), 'Meetings');
 
@@ -1437,6 +1438,97 @@ ipcMain.handle('list-actions', async () => {
     };
   });
 });
+
+// ---------- digests ----------
+// Today's is assembled from the notes and costs nothing, so it is never cached:
+// recomputing it is cheaper than deciding whether a cached copy is still good.
+// The week's costs a model call, so it is cached under the fingerprint of the
+// meetings it was built from — edit any of them and the next open regenerates.
+
+function digestFile(name) {
+  return path.join(app.getPath('userData'), 'digests', `${name}.json`);
+}
+
+function readDigest(name, key) {
+  try {
+    const saved = JSON.parse(fs.readFileSync(digestFile(name), 'utf8'));
+    return saved.key === key ? saved : null;
+  } catch { return null; }
+}
+
+function writeDigest(name, data) {
+  try {
+    fs.mkdirSync(path.dirname(digestFile(name)), { recursive: true });
+    fs.writeFileSync(digestFile(name), JSON.stringify(data), 'utf8');
+  } catch (err) {
+    console.log(`[digest] could not cache ${name}: ${err.message}`);
+  }
+}
+
+ipcMain.handle('daily-digest', async (_e, day) => {
+  const list = meetings();
+  const on = day || library.today();
+  return {
+    ...digest.dailyDigest({ meetings: list, items: readReminders(), day: on }),
+    // so the view can offer the previous day that actually had something
+    previous: previousDayWith(list, on)
+  };
+});
+
+function previousDayWith(list, day) {
+  const earlier = [...new Set(list.filter(m => m.date && m.date < day).map(m => m.date))];
+  earlier.sort((a, b) => b.localeCompare(a));
+  return earlier[0] || '';
+}
+
+/**
+ * The week: the facts first, then the written part. They are returned together
+ * and the facts never depend on the model, so a failed call still leaves the
+ * view with something true on screen.
+ */
+ipcMain.handle('weekly-summary', async (_e, opts = {}) => {
+  const list = meetings();
+  const week = library.weekOf(opts.week || library.today());
+  const inWeek = library.inRange(list, week.from, week.to);
+  const facts = digest.weeklyFacts({
+    meetings: list, items: readReminders(), from: week.from, to: week.to, today: library.today()
+  });
+  const base = { week: week.label, from: week.from, to: week.to, facts, previous: previousWeek(week.from) };
+
+  if (facts.empty) return { ...base, reason: 'no-meetings' };
+
+  const input = digest.weeklyInput(inWeek);
+  if (!input.meetings) return { ...base, reason: 'no-notes' };
+  if (facts.thin) return { ...base, reason: 'thin' };
+
+  const key = digest.digestKey(inWeek);
+  const cached = opts.refresh ? null : readDigest(`weekly-${week.label}`, key);
+  if (cached) return { ...base, ...cached.summary, cached: true };
+
+  try {
+    const text = await llm.generate(llmConfig(), {
+      system: digest.WEEKLY_PROMPT,
+      input: input.text,
+      maxTokens: 1200
+    });
+    const parsed = digest.parseWeekly(text, inWeek);
+    const summary = {
+      sections: parsed.sections,
+      dropped: parsed.dropped.length,
+      truncated: input.truncated,
+      fromMeetings: input.meetings
+    };
+    writeDigest(`weekly-${week.label}`, { key, summary });
+    return { ...base, ...summary };
+  } catch (err) {
+    return { ...base, error: err.message };
+  }
+});
+
+function previousWeek(from) {
+  const [y, m, d] = from.split('-').map(Number);
+  return library.today(new Date(y, m - 1, d - 7));
+}
 
 // ---------- meeting auto-detection ----------
 // "Which app is using the microphone right now" is the one signal that catches

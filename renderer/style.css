@@ -1240,6 +1240,116 @@ body.light #status.error, body.light #regen-status.error { color: var(--rec); }
 .kind-risk { color: var(--c-risk); }
 .result-text { font-size: 13px; line-height: 1.55; color: var(--text); }
 
+/* ---- Home: the day and the week ----
+   Both panels are lists of short statements with a source attached, so they
+   share one row shape. The week's numbers are the only thing that looks
+   different, because they are the one part that is not a statement. */
+#view-home { max-width: 780px; margin: 0 auto; animation: fadeUp 0.26s ease; }
+
+.digest-block { margin-bottom: 26px; }
+.digest-h {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.9px;
+  color: var(--text-3);
+  font-weight: 600;
+  margin-bottom: 9px;
+}
+.digest-list { display: flex; flex-direction: column; gap: 7px; }
+.digest-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  padding: 9px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.digest-text { flex: 1; min-width: 200px; color: var(--text); }
+.digest-time {
+  font-size: 11.5px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  min-width: 38px;
+}
+.digest-meta { font-size: 11px; color: var(--text-3); }
+.digest-source {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.digest-source:hover { text-decoration: underline; }
+.digest-source:disabled { color: var(--text-3); cursor: default; text-decoration: none; }
+
+.digest-tag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--surface-4);
+  color: var(--text-2);
+}
+.tag-overdue { color: var(--c-risk); }
+.tag-urgent { color: var(--c-action); }
+.tag-no-notes { color: var(--text-3); }
+
+.digest-empty {
+  padding: 26px 0 18px;
+  font-size: 13px;
+  color: var(--text-3);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.digest-empty.error { color: var(--c-risk); }
+
+.week-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.week-stat {
+  min-width: 74px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.week-stat.stat-warn { border-color: var(--c-risk); }
+.week-stat-n { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.week-stat-l { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--text-3); }
+.week-missing {
+  flex-basis: 100%;
+  font-size: 11.5px;
+  color: var(--text-3);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+.week-none { font-size: 12.5px; color: var(--text-3); font-style: italic; }
+#week-status { font-size: 12.5px; color: var(--text-3); padding: 4px 0 16px; }
+#week-status.error { color: var(--c-risk); }
+#week-foot {
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  gap: 12px;
+}
+
 /* ---- Reminders view ---- */
 #view-reminders { max-width: 720px; margin: 0 auto; animation: fadeUp 0.26s ease; }
 .add-reminder { display: flex; gap: 8px; margin-bottom: 20px; }

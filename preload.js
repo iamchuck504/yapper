@@ -58,6 +58,8 @@ contextBridge.exposeInMainWorld('yapper', {
   refreshLibrary: () => invoke('refresh-library'),
   search: (query, opts) => invoke('search', query, opts),
   ask: question => invoke('ask', question),
+  dailyDigest: day => invoke('daily-digest', day),
+  weeklySummary: opts => invoke('weekly-summary', opts),
   addReminder: (text, source) => invoke('add-reminder', text, source),
   updateReminder: (id, fields) => invoke('update-reminder', id, fields),
   deleteReminder: id => invoke('delete-reminder', id),
