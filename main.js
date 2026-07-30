@@ -1728,6 +1728,23 @@ const MEETING_APPS = {
   'firefox.exe': 'a Firefox call'
 };
 
+// The same apps, named the way macOS names them. A browser bundle id covers
+// Meet and Hangouts exactly as the .exe does on Windows.
+const MEETING_APPS_MAC = {
+  'us.zoom.xos': 'Zoom',
+  'com.microsoft.teams': 'Microsoft Teams',
+  'com.microsoft.teams2': 'Microsoft Teams',
+  'com.tinyspeck.slackmacgap': 'Slack',
+  'com.hnc.Discord': 'Discord',
+  'com.cisco.webexmeetingsapp': 'Webex',
+  'com.google.Chrome': 'a Chrome call (Meet/Hangouts)',
+  'com.microsoft.edgemac': 'an Edge call',
+  'com.brave.Browser': 'a Brave call',
+  'org.mozilla.firefox': 'a Firefox call',
+  'com.apple.Safari': 'a Safari call',
+  'com.apple.FaceTime': 'FaceTime'
+};
+
 const MIC_CONSENT_KEY =
   'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\microphone';
 
@@ -1768,6 +1785,42 @@ function micUsersWindows() {
   });
 }
 
+// macOS answers the same question through CoreAudio, via the small Swift probe
+// in mac/mic-probe.swift. It has to live outside the asar: this process could
+// read it in there, but it cannot be executed from inside one.
+function probePath() {
+  const p = path.join(__dirname, 'build', 'mic-probe');
+  return app.isPackaged ? p.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`) : p;
+}
+
+/**
+ * Bundle ids capturing audio right now, or null when the question could not be
+ * asked. null is not "nobody": a probe that fails must never be read as the
+ * meeting having ended.
+ */
+function micUsersMac() {
+  return new Promise(resolve => {
+    const probe = probePath();
+    if (!fs.existsSync(probe)) return resolve(null);
+    let out = '';
+    let p;
+    try {
+      p = spawn(probe, []);
+    } catch {
+      return resolve(null);
+    }
+    p.stdout.on('data', d => { out += d.toString('utf8'); });
+    p.on('error', () => resolve(null));
+    p.on('close', code => {
+      if (code !== 0) return resolve(null);
+      resolve([...new Set(out.split('\n').map(l => l.trim()).filter(Boolean))]);
+    });
+  });
+}
+
+const meetingApps = () => (process.platform === 'darwin' ? MEETING_APPS_MAC : MEETING_APPS);
+const micUsers = () => (process.platform === 'darwin' ? micUsersMac() : micUsersWindows());
+
 let meetingTimer = null;
 let meetingCurrent = null;
 let autoDetectOn = false;
@@ -1776,9 +1829,11 @@ let rendererRecording = false;
 let meetingGoneStreak = 0;
 
 async function pollMeetings() {
-  if (process.platform !== 'win32') return;
-  const users = await micUsersWindows();
-  const hit = users.find(exe => MEETING_APPS[exe]);
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return;
+  const users = await micUsers();
+  if (users === null) return;            // could not ask; say nothing
+  const apps = meetingApps();
+  const hit = users.find(id => apps[id]);
 
   // While recording, watch for the opposite signal: the meeting app letting go
   // of the microphone. Two clear polls (~10 s) avoids reacting to a blip.
@@ -1795,7 +1850,7 @@ async function pollMeetings() {
   if (meetingCurrent === hit) return;
 
   meetingCurrent = hit;
-  const label = MEETING_APPS[hit];
+  const label = apps[hit];
   if (win && !win.isDestroyed()) win.webContents.send('meeting-detected', { app: label });
   notifyMeeting(label);
 }
@@ -1834,7 +1889,14 @@ function notifyMeeting(label) {
 module.exports = { notifyMeeting };
 
 function startMeetingWatch() {
-  if (meetingTimer || process.platform !== 'win32') return;
+  if (meetingTimer) return;
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return;
+  // No probe on disk means no detection — better silent than a timer that
+  // spawns a missing binary every five seconds.
+  if (process.platform === 'darwin' && !fs.existsSync(probePath())) {
+    console.log('[meetings] no mic probe built; auto-detection stays off');
+    return;
+  }
   meetingCurrent = null;
   meetingTimer = setInterval(pollMeetings, 5000);
 }
