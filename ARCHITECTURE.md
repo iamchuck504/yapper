@@ -95,7 +95,7 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1778 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
+| `main.js` | 1813 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
 | `engine.js` | 640 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 342 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
@@ -116,11 +116,11 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 2521 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
+| `renderer/app.js` | 2545 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
 | `renderer/style.css` | 1494 | Everything visual, light and dark |
 | `renderer/index.html` | 423 | Main window markup |
-| `renderer/bubble.html` | 188 | The always-on-top live transcript overlay |
-| `renderer/bubble.js` | 125 | Its behaviour, including sizing itself to its own controls |
+| `renderer/bubble.html` | 184 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
+| `renderer/bubble.js` | 174 | Its behaviour, including sizing itself to its own contents |
 | `renderer/splash.html` | 104 | Boot screen, including the first-run calibration status |
 | `renderer/pcm-worklet.js` | 33 | The audio-thread tap that produces PCM |
 
@@ -430,6 +430,20 @@ are passages, they are the entire context and the prompt requires a bracketed
 citation per claim. `test-search-ui.js` asks about a topic that appears in no
 meeting and asserts no answer comes back.
 
+**The bubble rests as a capsule, and its hover is watched from the main
+process.** While recording, the overlay is a capsule the size of its own clock —
+the audio level and the time, no buttons. Hovering it opens the live transcript
+and the controls; leaving closes it, unless pinned. Two mechanics make this
+work. Hover cannot be a DOM event: the capsule is one big drag region so it can
+be moved, and Electron delivers no mouse events over a drag region on Windows —
+so the main process polls the cursor against the window's bounds and pushes
+enter/leave through the existing `bubble-state` channel. And opening cannot
+flap: the resize anchors the bottom-right corner and the open card is strictly
+larger, so the expanded window always still contains the cursor that opened it.
+The capsule's bars show the real capture signal (the same buffers the main
+window's waveform draws, throttled to ~9 Hz), not a looping animation — motion
+means audio is actually arriving, and pausing visibly stills it.
+
 **A detected meeting is offered twice, in the two places the person might be.**
 It arrives as an in-window card *and* as a real OS notification, because the
 moment a meeting starts you are looking at Zoom, not at Yapper. On macOS the
@@ -653,7 +667,7 @@ run can never touch a real meeting):
 | `test-smoke.js` | Every view, control and export, while listening for renderer errors |
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
 | `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |
-| `test-bubble-fit.js`, `test-splash-mark.js`, `icon-verify.js` | The overlay fits its own controls; the splash mark loads under CSP; the icon's corners, halo and every `.ico` size |
+| `test-bubble-fit.js`, `test-splash-mark.js`, `icon-verify.js` | The overlay in all three states — capsule, hover-open, pinned — fits its contents, opens and closes on the hover messages, keeps the pin across a reload, migrates the old expanded preference, and its bars track the level they are sent; the splash mark loads under CSP; the icon's corners, halo and every `.ico` size |
 | `probe-empty.js` | Not an assertion — it boots against an empty profile and prints what every view says, so a first run can be read instead of guessed at. It is how the weekly panel's wall of zeros and its dead "write it again" button were found |
 | `probe-notify.js` | Shows one real meeting-detected toast and reports what the OS did with it. `WITH_SHORTCUT=1` adds a Start Menu shortcut first, to test whether the AppUserModelID needs one — on Windows 11 it does not; the toast displays either way |
 

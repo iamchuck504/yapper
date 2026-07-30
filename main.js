@@ -83,12 +83,47 @@ function createBubble() {
   bubble.loadFile(path.join(__dirname, 'renderer', 'bubble.html'));
   bubble.once('ready-to-show', () => { bubble.showInactive(); keepBubbleOnScreen(); });
   bubble.on('moved', keepBubbleOnScreen);          // after the user drags it
-  bubble.on('closed', () => { bubble = null; });
+  bubble.on('closed', () => { bubble = null; stopBubbleHoverWatch(); });
+  startBubbleHoverWatch();
 }
 
 function destroyBubble() {
+  stopBubbleHoverWatch();
   if (bubble && !bubble.isDestroyed()) bubble.close();
   bubble = null;
+}
+
+// The pill opens on hover, but hover cannot be seen from inside the page: the
+// pill is one big drag region so it can be moved, and Electron never delivers
+// mouse events over a drag region on Windows. So the cursor is watched from
+// here instead, against the window's bounds, and enter/leave is pushed through
+// the same bubble-state channel as everything else.
+//
+// The expanded window is anchored at the same bottom-right corner and is
+// strictly larger, so opening always keeps the cursor inside — hover cannot
+// flap open/closed on its own.
+let bubbleHoverTimer = null;
+let bubbleHovered = false;
+
+function startBubbleHoverWatch() {
+  if (bubbleHoverTimer) return;
+  bubbleHovered = false;
+  bubbleHoverTimer = setInterval(() => {
+    if (!bubble || bubble.isDestroyed()) return;
+    const p = screen.getCursorScreenPoint();
+    const b = bubble.getBounds();
+    const inside = p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
+    if (inside !== bubbleHovered) {
+      bubbleHovered = inside;
+      bubble.webContents.send('bubble-state', { hover: inside });
+    }
+  }, 130);
+}
+
+function stopBubbleHoverWatch() {
+  if (bubbleHoverTimer) clearInterval(bubbleHoverTimer);
+  bubbleHoverTimer = null;
+  bubbleHovered = false;
 }
 
 // The bubble is frameless, so Windows will happily let it be dragged off the
