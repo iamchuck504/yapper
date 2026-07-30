@@ -1079,6 +1079,66 @@ body.light #status.error, body.light #regen-status.error { color: var(--rec); }
 .inline-action:hover { filter: brightness(1.08); }
 .inline-action:disabled { background: var(--surface-4); color: var(--text-3); cursor: default; }
 
+/* ---- action items: the one-line summary on the main screen ---- */
+.action-summary {
+  display: block;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  text-align: left;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--c-action);
+  border-radius: var(--r-md);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.action-summary:hover { background: var(--surface-3); border-color: var(--border-2); }
+
+/* ---- action items: filters and the extra facts on each row ---- */
+.filter-row { margin-bottom: 14px; }
+
+.r-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+}
+.r-chip {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--surface-4);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.r-owner { color: var(--text); font-weight: 600; }
+.r-due { color: var(--c-next); }
+.r-prio { color: var(--c-risk); }
+/* urgent is marked on the row itself, so it reads without hunting for a chip */
+.reminder.urgent { border-left: 2px solid var(--c-risk); }
+
+.r-open {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: none;
+  border: 1px solid var(--border-2);
+  color: var(--accent);
+  font-family: inherit;
+  cursor: pointer;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.r-open:hover { background: var(--surface-4); }
+.r-again { font-size: 11px; color: var(--text-3); font-style: italic; cursor: help; }
+.reminder.done .r-meta { opacity: 0.55; }
+
 /* ---- Reminders view ---- */
 #view-reminders { max-width: 720px; margin: 0 auto; animation: fadeUp 0.26s ease; }
 .add-reminder { display: flex; gap: 8px; margin-bottom: 20px; }

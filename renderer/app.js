@@ -346,8 +346,12 @@ const meetingPrompt = $('meeting-prompt');
 window.yapper.onMeetingDetected(info => {
   if (recording) return;
   $('mp-app').textContent = `${info.app} is using your microphone.`;
+  // The prompt appears where it lives and waits. It used to force the record
+  // view, and since detection fires from a five-second poll that meant the page
+  // could change under someone mid-sentence — open a meeting's notes while Zoom
+  // starts and you lose your place. The system notification is what reaches
+  // them wherever they are; this is what greets them when they come back.
   meetingPrompt.classList.remove('hidden');
-  showView('record');
 });
 
 $('mp-start').addEventListener('click', () => {
@@ -1762,33 +1766,84 @@ const btnReminders = $('btn-reminders');
 const remindersCount = $('reminders-count');
 const remindersList = $('reminders-list');
 const newReminderInput = $('new-reminder');
+const actionCountEl = $('action-count');
 
 function updateReminderCount(list) {
   const pending = list.filter(r => !r.done).length;
   remindersCount.textContent = pending;
   remindersCount.classList.toggle('hidden', pending === 0);
+  updateActionSummary(list);
 }
+
+/**
+ * The one-line version for the main screen: "5 action items pending, 2 of them
+ * high priority." Written from the same list the view shows, so the two can
+ * never disagree.
+ */
+function actionSummaryText(list) {
+  const open = list.filter(r => !r.done);
+  if (!open.length) return '';
+  const high = open.filter(r => r.priority === 'high').length;
+  const owned = open.filter(r => r.owner).length;
+  const parts = [`${open.length} action item${open.length === 1 ? '' : 's'} pending`];
+  if (high) parts.push(`${high} high priority`);
+  else if (owned) parts.push(`${owned} with an owner`);
+  return parts.join(', including ') + '.';
+}
+
+// Which slice of the list is on screen. "Open" first, because the question the
+// view answers is "what do I still owe anyone".
+let actionFilter = 'open';
+
+const ACTION_FILTERS = {
+  open: r => !r.done,
+  high: r => !r.done && r.priority === 'high',
+  mine: r => !r.done && !!r.owner,
+  done: r => r.done,
+  all: () => true
+};
+
+const EMPTY_FOR = {
+  open: 'Nothing pending. Action items appear here as your meetings produce them.',
+  high: 'Nothing marked urgent.',
+  mine: 'No action item has a named owner yet. Owners come from what was said in the meeting.',
+  done: 'Nothing checked off yet.',
+  all: 'No action items yet. Add one above, or use the + on an action item inside a meeting.'
+};
 
 function renderReminders(list) {
   remindersList.innerHTML = '';
-  if (list.length === 0) {
+  const shown = list.filter(ACTION_FILTERS[actionFilter] || ACTION_FILTERS.all);
+
+  const open = list.filter(r => !r.done);
+  const high = open.filter(r => r.priority === 'high');
+  actionCountEl.textContent = list.length
+    ? `${shown.length} shown · ${open.length} open${high.length ? `, ${high.length} high priority` : ''}`
+    : '';
+
+  if (shown.length === 0) {
     const li = document.createElement('li');
     li.className = 'reminders-empty';
-    li.textContent = 'No action items yet. Add one above, or use the + on action items inside a meeting.';
+    li.textContent = EMPTY_FOR[actionFilter] || EMPTY_FOR.all;
     remindersList.appendChild(li);
     return;
   }
-  const sorted = [...list].sort((a, b) => (a.done - b.done) || (b.createdAt - a.createdAt));
+
+  // Urgent first, then whatever was said most recently.
+  const rank = r => (r.priority === 'high' ? 0 : r.priority === 'low' ? 2 : 1);
+  const sorted = [...shown].sort((a, b) =>
+    (a.done - b.done) || (rank(a) - rank(b)) || ((b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0)));
+
   for (const r of sorted) {
     const li = document.createElement('li');
-    li.className = 'reminder' + (r.done ? ' done' : '');
+    li.className = 'reminder' + (r.done ? ' done' : '') + (r.priority === 'high' ? ' urgent' : '');
 
     const check = document.createElement('button');
     check.className = 'r-check';
     check.title = r.done ? 'Mark as not done' : 'Mark as done';
     check.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12"><path d="M3 8.5l3 3 7-7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
     check.addEventListener('click', async () => {
-      await window.yapper.updateReminder(r.id, { done: !r.done });
+      await window.yapper.updateReminder(r.id, { done: !r.done, updatedAt: Date.now() });
       await refreshReminders();
     });
 
@@ -1797,15 +1852,41 @@ function renderReminders(list) {
     const text = document.createElement('input');
     text.className = 'r-text';
     text.value = r.text;
-    text.addEventListener('change', () => window.yapper.updateReminder(r.id, { text: text.value.trim() }));
+    text.addEventListener('change', () =>
+      window.yapper.updateReminder(r.id, { text: text.value.trim(), updatedAt: Date.now() }));
     text.addEventListener('keydown', e => { if (e.key === 'Enter') text.blur(); });
     main.appendChild(text);
-    if (r.source) {
-      const src = document.createElement('span');
-      src.className = 'r-source';
-      src.textContent = 'from: ' + r.source;
-      main.appendChild(src);
+
+    // Everything below the text is only shown when the meeting actually said it.
+    const meta = document.createElement('div');
+    meta.className = 'r-meta';
+
+    if (r.owner) meta.appendChild(chip('r-owner', r.owner, 'Owner'));
+    if (r.due) meta.appendChild(chip('r-due', r.due, 'Due'));
+    if (r.priority === 'high') meta.appendChild(chip('r-prio', 'high priority', ''));
+
+    if (r.folder) {
+      const open = document.createElement('button');
+      open.className = 'r-open';
+      open.textContent = r.meeting || 'the meeting';
+      open.title = `Open ${r.meeting || 'the meeting'}${r.meetingDate ? ` — ${r.meetingDate}` : ''}`;
+      open.addEventListener('click', () => openMeetingByFolder(r.folder));
+      meta.appendChild(open);
+    } else if (r.source) {
+      meta.appendChild(chip('r-source', `from: ${r.source}`, ''));
     }
+
+    // Mentioned again in later meetings: one row, all its sources.
+    const extra = (r.mentions || []).filter(x => x.folder !== r.folder);
+    if (extra.length) {
+      const again = document.createElement('span');
+      again.className = 'r-again';
+      again.textContent = `also in ${extra.length} other meeting${extra.length === 1 ? '' : 's'}`;
+      again.title = extra.map(x => `${x.title} — ${x.date}`).join('\n');
+      meta.appendChild(again);
+    }
+
+    if (meta.childNodes.length) main.appendChild(meta);
 
     const del = document.createElement('button');
     del.className = 'r-del';
@@ -1821,11 +1902,43 @@ function renderReminders(list) {
   }
 }
 
+function chip(cls, value, label) {
+  const el = document.createElement('span');
+  el.className = `r-chip ${cls}`;
+  el.textContent = value;
+  if (label) el.title = `${label}: ${value}`;
+  return el;
+}
+
+/** Open a meeting from anywhere that references one. */
+async function openMeetingByFolder(folder) {
+  if (!folder) return;
+  try {
+    const data = await window.yapper.loadMeeting(folder);
+    currentFolder = folder;
+    openMeetingView(data.title || formatMeetingDate(folder.split(/[\\/]/).pop()),
+      data.summary, data.transcript, data.hasRecording, data.participants);
+    renderMeetingList();
+  } catch (err) {
+    setStatus(statusEl, `That meeting could not be opened: ${err.message}`, true);
+  }
+}
+
 async function refreshReminders() {
-  const list = await window.yapper.listReminders();
+  const list = await window.yapper.listActions();
   updateReminderCount(list);
   if (!viewReminders.classList.contains('hidden')) renderReminders(list);
+  return list;
 }
+
+document.querySelectorAll('#action-filter .seg-btn').forEach(b => {
+  b.addEventListener('click', async () => {
+    actionFilter = b.dataset.filter;
+    document.querySelectorAll('#action-filter .seg-btn').forEach(x =>
+      x.classList.toggle('active', x === b));
+    renderReminders(await window.yapper.listActions());
+  });
+});
 
 async function addReminderFromText(text, source) {
   const t = (text || '').trim();
@@ -1835,10 +1948,20 @@ async function addReminderFromText(text, source) {
   return true;
 }
 
+const actionSummaryEl = $('action-summary');
+
+function updateActionSummary(list) {
+  const text = actionSummaryText(list);
+  actionSummaryEl.textContent = text;
+  actionSummaryEl.classList.toggle('hidden', !text);
+}
+
+actionSummaryEl.addEventListener('click', () => btnReminders.click());
+
 btnReminders.addEventListener('click', async () => {
   stopSpeak();
   showView('reminders');
-  const list = await window.yapper.listReminders();
+  const list = await window.yapper.listActions();
   updateReminderCount(list);
   renderReminders(list);
 });
