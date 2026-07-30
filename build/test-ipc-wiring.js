@@ -34,7 +34,7 @@ let fails = 0;
 function report(label, wanted, available) {
   for (const ch of wanted) {
     if (available.has(ch)) console.log(`ok    ${label}: ${ch}`);
-    else { fails++; console.log(`FAIL  ${label}: "${ch}" no tiene contraparte en main.js`); }
+    else { fails++; console.log(`FAIL  ${label}: "${ch}" has no counterpart in main.js`); }
   }
 }
 
@@ -47,7 +47,7 @@ report('on <- webContents.send', listened, emitted);
 for (const ch of [...handled, ...received]) {
   if (!invoked.has(ch) && !sent.has(ch)) {
     fails++;
-    console.log(`FAIL  main.js atiende "${ch}" pero el preload no lo expone`);
+    console.log(`FAIL  main.js handles "${ch}" but the preload does not expose it`);
   }
 }
 

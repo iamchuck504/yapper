@@ -20,7 +20,7 @@ function say(line) {
   console.log(line);
   try { fs.appendFileSync(LOG, line + '\n'); } catch { /* nothing to do */ }
 }
-console.log(`progreso en vivo: ${LOG}`);
+console.log(`live progress: ${LOG}`);
 
 function pickTranscript() {
   const found = [];
@@ -58,7 +58,7 @@ app.whenReady().then(async () => {
       const bare = heads.filter(h => !/\[\d+:\d+(:\d+)?\]$/.test(h));
       const ok = heads.length > 0 && bare.length === 0;
       if (!ok) fails++;
-      say(`  ${ok ? 'ok  ' : 'FAIL'} ${style} ronda ${round}: ${stamped.length}/${heads.length} con marca`
+      say(`  ${ok ? 'ok  ' : 'FAIL'} ${style} round ${round}: ${stamped.length}/${heads.length} stamped`
         + (bare.length ? `\n       sin marca: ${bare.join(' | ')}` : ''));
     }
   }

@@ -42,7 +42,7 @@ app.whenReady().then(async () => {
 
   for (const ext of ['m4a', 'webm']) {
     picked = findAudio(ext);
-    if (!picked) { console.log(`\n(sin ningún .${ext} de prueba en Meetings)`); continue; }
+    if (!picked) { console.log(`\n(no test .${ext} in Meetings)`); continue; }
     const sizeMb = (fs.statSync(picked).size / 1024 / 1024).toFixed(1);
     console.log(`\n=== .${ext} — ${path.basename(path.dirname(picked))} (${sizeMb} MB) ===`);
 
@@ -84,50 +84,50 @@ app.whenReady().then(async () => {
       }, 1000);
     });
     clearInterval(watch);
-    console.log(`tardó ${((Date.now() - t0) / 1000).toFixed(0)} s`);
-    check(`.${ext}: no falló`, !done.err, done.err || '');
+    console.log(`took ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+    check(`.${ext}: did not fail`, !done.err, done.err || '');
     if (done.err) continue;
 
     const folders = fs.readdirSync(path.join(ROOT, 'Meetings')).filter(f => !before.includes(f));
-    check(`.${ext}: creó la reunión`, folders.length === 1, folders.join(', '));
+    check(`.${ext}: created the meeting`, folders.length === 1, folders.join(', '));
     if (!folders.length) continue;
     const folder = path.join(ROOT, 'Meetings', folders[0]);
 
     // The converted WAV is released once there is a transcript, so what it
     // looked like is checked from the copy the test kept before that happened.
     const wav = path.join(folder, 'recording.wav');
-    check(`.${ext}: liberó el WAV convertido al haber transcripción`, !fs.existsSync(wav),
-      'sigue ocupando espacio');
+    check(`.${ext}: released the converted WAV once transcribed`, !fs.existsSync(wav),
+      'is still taking up space');
     const kept = path.join(folder, 'decoded-copy.wav');
-    check(`.${ext}: se pudo inspeccionar la conversión`, fs.existsSync(kept), 'no se copió');
+    check(`.${ext}: the conversion could be inspected`, fs.existsSync(kept), 'was not copied');
     if (!fs.existsSync(kept)) continue;
 
     const buf = fs.readFileSync(kept);
     const secs = (buf.length - engine.WAV_HEADER) / engine.BYTES_PER_SEC;
-    check(`.${ext}: WAV con cabecera válida`,
+    check(`.${ext}: WAV with a valid header`,
       buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WAVE',
       buf.toString('ascii', 0, 12));
     check(`.${ext}: 16 kHz mono 16-bit`,
       buf.readUInt16LE(22) === 1 && buf.readUInt32LE(24) === 16000 && buf.readUInt16LE(34) === 16,
       `canales ${buf.readUInt16LE(22)}, rate ${buf.readUInt32LE(24)}, bits ${buf.readUInt16LE(34)}`);
-    check(`.${ext}: la cabecera declara el tamaño real`,
+    check(`.${ext}: the header declares the real size`,
       buf.readUInt32LE(40) === buf.length - engine.WAV_HEADER,
-      `declara ${buf.readUInt32LE(40)}, hay ${buf.length - engine.WAV_HEADER}`);
-    check(`.${ext}: tiene audio de verdad`, secs > 5, `${secs.toFixed(1)} s`);
-    console.log(`      duración decodificada: ${(secs / 60).toFixed(1)} min`);
+      `declares ${buf.readUInt32LE(40)}, actual ${buf.length - engine.WAV_HEADER}`);
+    check(`.${ext}: genuinely has audio`, secs > 5, `${secs.toFixed(1)} s`);
+    console.log(`      decoded duration: ${(secs / 60).toFixed(1)} min`);
 
     // and it has to be audible content, not silence
     let peak = 0;
     for (let i = engine.WAV_HEADER; i + 1 < buf.length; i += 200) {
       peak = Math.max(peak, Math.abs(buf.readInt16LE(i)));
     }
-    check(`.${ext}: el audio no salió en silencio`, peak > 500, `pico ${peak}`);
+    check(`.${ext}: the audio did not come out silent`, peak > 500, `pico ${peak}`);
 
     const tr = path.join(folder, 'transcript.txt');
-    check(`.${ext}: dejó transcripción`, fs.existsSync(tr), 'no está');
+    check(`.${ext}: left a transcript`, fs.existsSync(tr), 'is missing');
     if (fs.existsSync(tr)) {
       const text = fs.readFileSync(tr, 'utf8');
-      check(`.${ext}: la transcripción tiene contenido`, text.trim().length > 40, `${text.length} caracteres`);
+      check(`.${ext}: the transcript has content`, text.trim().length > 40, `${text.length} caracteres`);
       console.log(`      "${text.slice(0, 120).replace(/\n/g, ' ')}"`);
     }
 
@@ -135,12 +135,12 @@ app.whenReady().then(async () => {
     // NOT be called that — it gets a title from what was said, or falls back to
     // its date.
     const title = await $(`document.getElementById('result-title').textContent`);
-    check(`.${ext}: no se queda con el nombre genérico del archivo`,
-      title !== 'recording' && title.trim().length > 3, `título: "${title}"`);
-    console.log(`      título: "${title}"`);
+    check(`.${ext}: does not keep the generic filename`,
+      title !== 'recording' && title.trim().length > 3, `title: "${title}"`);
+    console.log(`      title: "${title}"`);
 
     // the file the user picked is theirs and must not be touched
-    check(`.${ext}: el archivo original sigue intacto`,
+    check(`.${ext}: the original file is still intact`,
       fs.existsSync(picked) && fs.statSync(picked).size > 100 * 1024, picked);
 
     await $(`document.getElementById('btn-new').click()`);

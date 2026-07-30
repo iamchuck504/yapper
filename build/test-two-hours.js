@@ -96,7 +96,7 @@ app.whenReady().then(async () => {
 
   const src = process.env.WAV || path.join(process.env.TEMP, 'yapper-60s.wav');
   const minute = fs.readFileSync(src).subarray(engine.WAV_HEADER);
-  say(`reunión simulada de ${MINUTES} min (${(MINUTES / 60).toFixed(1)} h)\n`);
+  say(`simulated meeting of ${MINUTES} min (${(MINUTES / 60).toFixed(1)} h)\n`);
   const startRss = rss();
 
   // ---- 1. the recording, written the way the tap writes it ----
@@ -133,22 +133,22 @@ app.whenReady().then(async () => {
   fs.closeSync(fd);
 
   const size = fs.statSync(wav).size;
-  say(`  ${mb(size)} en disco, ${(size - engine.WAV_HEADER) / engine.BYTES_PER_SEC / 60} min de audio`);
-  say(`  ${Math.round(sent / BLOCK)} mensajes IPC en ${writeSecs.toFixed(0)} s`);
-  check('el audio de dos horas queda entero', (size - engine.WAV_HEADER) === sent,
-    `esperaba ${sent} bytes, hay ${size - engine.WAV_HEADER}`);
-  check('la cabecera queda cerrada correctamente',
+  say(`  ${mb(size)} on disk, ${(size - engine.WAV_HEADER) / engine.BYTES_PER_SEC / 60} min of audio`);
+  say(`  ${Math.round(sent / BLOCK)} IPC messages in ${writeSecs.toFixed(0)} s`);
+  check('the two hours of audio are left whole', (size - engine.WAV_HEADER) === sent,
+    `expected ${sent} bytes, actual ${size - engine.WAV_HEADER}`);
+  check('the header is closed correctly',
     fs.readFileSync(wav).readUInt32LE(40) === size - engine.WAV_HEADER, 'no coincide');
   // measured after a settle: 220 MB of audio passes through in blocks, and the
   // question is whether any of it is *kept*, not how high the peak went
   const afterWrite = await settledRss();
-  say(`  memoria tras asentarse: ${mb(afterWrite)} (empezó en ${mb(startRss)})`);
-  check('escribir no retiene el audio en memoria',
-    (afterWrite - startRss) / 1024 / 1024 < 120, `creció ${mb(afterWrite - startRss)}`);
-  say(`  tamaño por hora: ${mb(size / (MINUTES / 60))}`);
+  say(`  memory after settling: ${mb(afterWrite)} (started at ${mb(startRss)})`);
+  check('writing does not hold the audio in memory',
+    (afterWrite - startRss) / 1024 / 1024 < 120, `grew by ${mb(afterWrite - startRss)}`);
+  say(`  size per hour: ${mb(size / (MINUTES / 60))}`);
 
   // ---- 2. the live loop, at real speed ----
-  say(`\n--- 2. el vivo, ${LIVE_MINUTES} min a velocidad real ---`);
+  say(`\n--- 2. live, ${LIVE_MINUTES} min at real speed ---`);
   const live = require('../live');
   const tier = engine.tierConfig(require('../engine').guessTier());
   const lags = [];
@@ -182,46 +182,46 @@ app.whenReady().then(async () => {
   const median = lags.length ? lags[Math.floor(lags.length / 2)] : 0;
   const worst = lags.length ? lags[lags.length - 1] : 0;
   const words = confirmed.split(/\s+/).filter(Boolean).length;
-  say(`  retraso ${median.toFixed(1)} s de mediana, ${worst.toFixed(1)} s el peor`);
-  say(`  ${words} palabras, ${errors} errores, memoria +${mb(rss() - liveRss)}`);
-  check('el vivo no se degrada con los minutos', median < 6, `${median.toFixed(1)} s`);
-  check('y no se va acumulando retraso', worst < 12, `peor ${worst.toFixed(1)} s`);
-  check('el vivo no filtra memoria', (rss() - liveRss) / 1024 / 1024 < 120, mb(rss() - liveRss));
+  say(`  lag ${median.toFixed(1)} s median, ${worst.toFixed(1)} s worst`);
+  say(`  ${words} words, ${errors} errors, memory +${mb(rss() - liveRss)}`);
+  check('live does not degrade as the minutes pass', median < 6, `${median.toFixed(1)} s`);
+  check('and no lag accumulates', worst < 12, `peor ${worst.toFixed(1)} s`);
+  check('live does not leak memory', (rss() - liveRss) / 1024 / 1024 < 120, mb(rss() - liveRss));
   await engine.stop();
 
   // ---- 3. the final transcription ----
-  say('\n--- 3. transcripción final ---');
+  say('\n--- 3. final transcription ---');
   const t3 = Date.now(); const rss3 = rss();
   const tLen = await within(
     $(`window.yapper.transcribe(${JSON.stringify(folder)}).then(t => t.length, e => 'err:' + e.message)`),
-    'transcribir la reunión completa', 20 * 60 * 1000);
+    'transcribing the whole meeting', 20 * 60 * 1000);
   const t3s = (Date.now() - t3) / 1000;
-  say(`  ${t3s.toFixed(0)} s (${(MINUTES * 60 / t3s).toFixed(0)}x tiempo real), memoria +${mb(rss() - rss3)}`);
-  check('transcribe dos horas sin fallar', typeof tLen === 'number' && tLen > 5000, String(tLen).slice(0, 120));
-  check('en menos de cinco minutos', t3s < 300, `${t3s.toFixed(0)} s`);
-  check('sin memoria proporcional al audio', (rss() - rss3) / 1024 / 1024 < 250, mb(rss() - rss3));
+  say(`  ${t3s.toFixed(0)} s (${(MINUTES * 60 / t3s).toFixed(0)}x realtime), memory +${mb(rss() - rss3)}`);
+  check('transcribes two hours without failing', typeof tLen === 'number' && tLen > 5000, String(tLen).slice(0, 120));
+  check('in under five minutes', t3s < 300, `${t3s.toFixed(0)} s`);
+  check('with no memory proportional to the audio', (rss() - rss3) / 1024 / 1024 < 250, mb(rss() - rss3));
 
   const transcript = fs.readFileSync(path.join(folder, 'transcript.txt'), 'utf8');
   const stamps = [...transcript.matchAll(/^\[(\d+):(\d\d):(\d\d)\]/gm)]
     .map(m => +m[1] * 3600 + +m[2] * 60 + +m[3]);
-  say(`  ${(transcript.length / 1024).toFixed(0)} KB, ${stamps.length} líneas, última marca ${
+  say(`  ${(transcript.length / 1024).toFixed(0)} KB, ${stamps.length} lines, last stamp ${
     Math.floor(stamps[stamps.length - 1] / 3600)}h${Math.floor(stamps[stamps.length - 1] / 60) % 60}m`);
-  check('las marcas cubren toda la reunión',
-    stamps[stamps.length - 1] > (MINUTES - 3) * 60, `última a los ${stamps[stamps.length - 1]} s`);
-  check('las marcas nunca van hacia atrás',
+  check('the timestamps cover the whole meeting',
+    stamps[stamps.length - 1] > (MINUTES - 3) * 60, `last one at ${stamps[stamps.length - 1]} s`);
+  check('the timestamps never go backwards',
     stamps.every((s, i) => i === 0 || s >= stamps[i - 1]), 'alguna retrocede');
 
   // ---- 4. the notes, from a two-hour transcript with real, varied content ----
-  say('\n--- 4. notas de una transcripción de dos horas ---');
+  say('\n--- 4. notes from a two-hour transcript ---');
   const real = realisticTranscript(MINUTES);
   say(real.real
-    ? `  transcripción real de ${real.real}: ${real.lines} líneas, ` +
+    ? `  real transcript from ${real.real}: ${real.lines} lines, ` +
       `${(real.text.length / 1024).toFixed(0)} KB, ${Math.round(real.seconds / 60)} min`
-    : `  armada de ${real.sources} reuniones: ${real.lines} líneas, ` +
+    : `  assembled from ${real.sources} meetings: ${real.lines} lines, ` +
       `${(real.text.length / 1024).toFixed(0)} KB, ${Math.round(real.seconds / 60)} min`);
-  if (!real.real) say('  (AVISO: sin una reunión real larga, el título no se puede evaluar)');
-  check('la transcripción de prueba cubre la duración pedida',
-    real.seconds > MINUTES * 60 * 0.8, `${Math.round(real.seconds / 60)} min de ${MINUTES}`);
+  if (!real.real) say('  (WARNING: without a real long meeting, the title cannot be judged)');
+  check('the test transcript covers the requested duration',
+    real.seconds > MINUTES * 60 * 0.8, `${Math.round(real.seconds / 60)} min of ${MINUTES}`);
   fs.writeFileSync(path.join(folder, 'transcript.txt'), real.text, 'utf8');
 
   const t4 = Date.now();
@@ -230,39 +230,39 @@ app.whenReady().then(async () => {
       { style: 'general', detail: 'concise', custom: '',
         participants: 'Maya, Chuck, Richard', markers: ['00:12:30', '01:05:00'] })
       .then(n => n, e => 'err:' + e.message)`),
-    'generar notas de dos horas', 10 * 60 * 1000);
+    'generating notes from two hours', 10 * 60 * 1000);
   const t4s = (Date.now() - t4) / 1000;
   say(`  ${t4s.toFixed(0)} s, ${String(notes).length} caracteres`);
-  check('genera notas de una transcripción así de larga',
+  check('generates notes from a transcript that long',
     typeof notes === 'string' && !notes.startsWith('err:') && notes.length > 500,
     String(notes).slice(0, 200));
   if (typeof notes === 'string' && !notes.startsWith('err:')) {
     const heads = [...notes.matchAll(/^##\s+(.+)$/gm)].map(m => m[1]);
     say(`  secciones: ${heads.map(h => h.replace(/\s*\[[\d:]+\]$/, '')).join(' | ')}`);
-    check('con sus secciones completas', heads.length >= 4, heads.join(' | '));
-    check('y con marcas de tiempo', heads.some(h => /\[\d+:\d+/.test(h)), heads.join(' | '));
+    check('with all its sections', heads.length >= 4, heads.join(' | '));
+    check('and with timestamps', heads.some(h => /\[\d+:\d+/.test(h)), heads.join(' | '));
     const late = [...notes.matchAll(/\[(\d+):(\d\d)(?::(\d\d))?\]/g)]
       .map(m => (m[3] ? +m[1] * 3600 + +m[2] * 60 : +m[1] * 60 + +m[2]));
-    say(`  marca más tardía en las notas: ${Math.floor(Math.max(...late) / 60)} min`);
-    check('cubre también la segunda mitad de la reunión',
-      Math.max(...late) > MINUTES * 60 * 0.4, `la más tardía a los ${Math.max(...late)} s`);
+    say(`  latest timestamp in the notes: ${Math.floor(Math.max(...late) / 60)} min`);
+    check('covers the second half of the meeting too',
+      Math.max(...late) > MINUTES * 60 * 0.4, `the latest at ${Math.max(...late)} s`);
   }
 
   // ---- 5. the automatic title ----
-  say('\n--- 5. título automático ---');
+  say('\n--- 5. auto-title ---');
   const title = await within($(`window.yapper.generateTitle(${JSON.stringify(folder)})`),
     'titular', 3 * 60 * 1000);
   say(`  "${title}"`);
   if (real.real) {
-    check('nombra una reunión de dos horas con contenido real',
-      typeof title === 'string' && title.trim().length > 3, `devolvió "${title}"`);
+    check('names a two-hour meeting with real content',
+      typeof title === 'string' && title.trim().length > 3, `returned "${title}"`);
   } else {
-    check('no inventa un título para una transcripción sin tema',
+    check('does not invent a title for a transcript with no subject',
       typeof title === 'string', String(title));
   }
 
   // ---- 6. the meeting view and the exports ----
-  say('\n--- 6. abrir y exportar ---');
+  say('\n--- 6. open and export ---');
   const t6 = Date.now();
   await $(`(async () => {
     currentFolder = ${JSON.stringify(folder)};
@@ -270,9 +270,9 @@ app.whenReady().then(async () => {
     openMeetingView(d.title || 'Two hour meeting', d.summary, d.transcript, true, d.participants);
   })()`);
   await new Promise(r => setTimeout(r, 500));
-  say(`  la vista abre en ${Date.now() - t6} ms`);
-  check('abrir la reunión no congela la interfaz', Date.now() - t6 < 6000, `${Date.now() - t6} ms`);
-  check('el transcript entero está en pantalla',
+  say(`  the view opens in ${Date.now() - t6} ms`);
+  check('opening the meeting does not freeze the interface', Date.now() - t6 < 6000, `${Date.now() - t6} ms`);
+  check('the whole transcript is on screen',
     (await $("document.getElementById('transcript').textContent.length")) > 5000,
     await $("document.getElementById('transcript').textContent.length"));
 
@@ -280,24 +280,24 @@ app.whenReady().then(async () => {
     const t = Date.now();
     const out = await within($(`runExport(${JSON.stringify(kind)})`), `export ${kind}`, 90000);
     const okFile = !!out && fs.existsSync(out);
-    say(`  ${kind.padEnd(14)} ${okFile ? mb(fs.statSync(out).size) : 'FALLÓ'} en ${Date.now() - t} ms`);
-    check(`export ${kind} de dos horas`, okFile, String(out));
+    say(`  ${kind.padEnd(14)} ${okFile ? mb(fs.statSync(out).size) : 'FAILED'} in ${Date.now() - t} ms`);
+    check(`export ${kind} for two hours`, okFile, String(out));
   }
   const t7 = Date.now();
   const pdf = await within($(`runExport('pdf')`), 'export pdf', 180000);
-  say(`  pdf            ${pdf && fs.existsSync(pdf) ? mb(fs.statSync(pdf).size) : 'FALLÓ'} en ${Date.now() - t7} ms`);
-  check('export pdf de dos horas', !!pdf && fs.existsSync(pdf) && fs.statSync(pdf).size > 2000, String(pdf));
+  say(`  pdf            ${pdf && fs.existsSync(pdf) ? mb(fs.statSync(pdf).size) : 'FAILED'} in ${Date.now() - t7} ms`);
+  check('export pdf for two hours', !!pdf && fs.existsSync(pdf) && fs.statSync(pdf).size > 2000, String(pdf));
 
   // ---- 7. what it costs to keep ----
-  say('\n--- 7. lo que ocupa guardarlas ---');
+  say('\n--- 7. what keeping them costs ---');
   const perHour = size / (MINUTES / 60);
-  say(`  una reunión de 2 h: ${mb(size)}`);
-  say(`  una al día durante un mes: ${mb(size * 22)}`);
-  say(`  dos al día durante un año: ${(size * 2 * 250 / 1024 / 1024 / 1024).toFixed(1)} GB`);
-  check('el audio por hora es razonable', perHour < 200 * 1024 * 1024, mb(perHour));
-  say(`  memoria total del proceso al terminar: ${mb(rss())} (empezó en ${mb(startRss)})`);
-  check('la memoria no se fue de las manos', (rss() - startRss) / 1024 / 1024 < 500,
-    `creció ${mb(rss() - startRss)}`);
+  say(`  one 2 h meeting: ${mb(size)}`);
+  say(`  one a day for a month: ${mb(size * 22)}`);
+  say(`  two a day for a year: ${(size * 2 * 250 / 1024 / 1024 / 1024).toFixed(1)} GB`);
+  check('the audio per hour is reasonable', perHour < 200 * 1024 * 1024, mb(perHour));
+  say(`  total process memory at the end: ${mb(rss())} (started at ${mb(startRss)})`);
+  check('memory did not get out of hand', (rss() - startRss) / 1024 / 1024 < 500,
+    `grew by ${mb(rss() - startRss)}`);
 
   clearTimeout(dog);
   say(fails ? `\n${fails} fallos` : '\nPASS');

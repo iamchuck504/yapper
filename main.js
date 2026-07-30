@@ -231,7 +231,7 @@ function createWindow() {
   // the window says otherwise.
   try { win.setIcon(appIconPath()); } catch { /* the constructor already tried */ }
 
-  // Loopback de Windows: entrega el audio del sistema cuando el renderer pide getDisplayMedia
+  // Windows loopback: hands over system audio when the renderer calls getDisplayMedia
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
     desktopCapturer.getSources({ types: ['screen'] }).then(sources => {
       callback({ video: sources[0], audio: 'loopback' });

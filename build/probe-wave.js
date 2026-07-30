@@ -55,11 +55,11 @@ app.whenReady().then(async () => {
   const b = await shot();
 
   say(`recording: ${b.recording}`);
-  say(`rAF id: ${a.raf} -> ${b.raf}  ${a.raf === b.raf ? '(EL LOOP ESTÁ MUERTO)' : '(vivo)'}`);
+  say(`rAF id: ${a.raf} -> ${b.raf}  ${a.raf === b.raf ? '(THE LOOP IS DEAD)' : '(alive)'}`);
   say(`canvas sys cambia entre frames: ${a.sysPix !== b.sysPix}`);
   say(`canvas mic cambia entre frames: ${a.micPix !== b.micPix}`);
-  say(`mensajes de nivel a la burbuja: ${levelMsgs}`);
-  say(`errores de consola (${consoleErrors.length}):`);
+  say(`level messages to the bubble: ${levelMsgs}`);
+  say(`console errors (${consoleErrors.length}):`);
   for (const e of consoleErrors.slice(0, 6)) say(`  ${e}`);
 
   app.exit(0);

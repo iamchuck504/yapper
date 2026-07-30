@@ -18,10 +18,10 @@ function pick() {
 
 (async () => {
   const wav = pick();
-  if (!wav) { console.log('FAIL  no hay grabación .wav para probar'); process.exit(1); }
+  if (!wav) { console.log('FAIL  no .wav recording to test with'); process.exit(1); }
   const secs = (fs.statSync(wav).size - engine.WAV_HEADER) / engine.BYTES_PER_SEC;
-  console.log(`archivo : ${wav}`);
-  console.log(`duración: ${(secs / 60).toFixed(1)} min\n`);
+  console.log(`file    : ${wav}`);
+  console.log(`duration: ${(secs / 60).toFixed(1)} min\n`);
 
   const tier = engine.tierConfig(engine.guessTier());
   const seen = [];
@@ -35,14 +35,14 @@ function pick() {
   await engine.stop();
   const took = (Date.now() - t0) / 1000;
 
-  console.log(`modelo  : ${tier.finalModel}`);
-  console.log(`tardó   : ${took.toFixed(1)} s  (${(secs / took).toFixed(1)}x tiempo real)`);
-  console.log(`líneas  : ${lines.length}`);
+  console.log(`model   : ${tier.finalModel}`);
+  console.log(`took    : ${took.toFixed(1)} s  (${(secs / took).toFixed(1)}x realtime)`);
+  console.log(`lines   : ${lines.length}`);
   console.log(`progreso: ${seen.join('% ')}%`);
   console.log(`\n${lines.slice(0, 6).join('\n')}\n...\n${lines.slice(-2).join('\n')}`);
 
-  if (!lines.length) { console.log('\nFAIL  no salió ninguna línea'); process.exit(1); }
-  if (!/^\[\d\d:\d\d:\d\d\] ./.test(lines[0])) { console.log('\nFAIL  formato de marca de tiempo inesperado'); process.exit(1); }
-  if (seen[seen.length - 1] !== 100) { console.log('\nFAIL  el progreso no llegó a 100%'); process.exit(1); }
+  if (!lines.length) { console.log('\nFAIL  not a single line came out'); process.exit(1); }
+  if (!/^\[\d\d:\d\d:\d\d\] ./.test(lines[0])) { console.log('\nFAIL  unexpected timestamp format'); process.exit(1); }
+  if (seen[seen.length - 1] !== 100) { console.log('\nFAIL  progress never reached 100%'); process.exit(1); }
   console.log('\nPASS');
 })().catch(e => { console.log('FAIL', e.message); process.exit(1); });

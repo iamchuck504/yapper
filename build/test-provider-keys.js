@@ -55,51 +55,51 @@ app.whenReady().then(async () => {
   await new Promise(r => setTimeout(r, 700));
 
   let s = stored();
-  check('guarda la key bajo su proveedor',
+  check('stores the key under its provider',
     !!(s.llmByProvider && s.llmByProvider.gemini && s.llmByProvider.gemini.key),
     JSON.stringify(Object.keys(s.llmByProvider || {})));
-  check('no queda ninguna casilla de key compartida',
-    s.llmKey === undefined, 'sigue habiendo llmKey en la raíz');
-  check('la key sigue sin ser legible', !JSON.stringify(s).includes(GEMINI), 'aparece en claro');
-  check('guarda también su modelo',
+  check('no shared key field is left',
+    s.llmKey === undefined, 'there is still an llmKey at the root');
+  check('the key is still unreadable', !JSON.stringify(s).includes(GEMINI), 'appears in cleartext');
+  check('stores its model too',
     s.llmByProvider.gemini.model === 'gemini-3.5-flash', s.llmByProvider.gemini.model);
 
   // --- switch to OpenRouter: nothing of Gemini's may follow ---
   await pick('openrouter');
   let r = await row();
-  check('al cambiar, OpenRouter no hereda la key',
+  check('on switching, OpenRouter does not inherit the key',
     /sk-or/.test(r.keyPlaceholder) && !/saved/.test(r.keyPlaceholder), r.keyPlaceholder);
-  check('y avisa que le falta la suya', r.kind === 'needs-key', JSON.stringify(r));
-  check('tampoco hereda el modelo', r.model === '', `modelo "${r.model}"`);
+  check('and warns that its own is missing', r.kind === 'needs-key', JSON.stringify(r));
+  check('it does not inherit the model either', r.model === '', `modelo "${r.model}"`);
 
   const cfg = await $('window.yapper.getLlmSettings()');
-  check('el proceso principal tampoco cree que tenga key', cfg.hasKey === false, JSON.stringify(cfg));
+  check('the main process does not think it has a key either', cfg.hasKey === false, JSON.stringify(cfg));
 
   // what the app would actually send: no key at all, so it refuses rather than
   // handing Google's key to someone else
   const err = await $(`window.yapper.testLlm({ provider: 'openrouter' }).then(r => r.error || 'ok')`);
-  check('no intenta usar la key de otro proveedor',
+  check('does not try to use another provider key',
     /needs an API key/.test(err), String(err));
 
   // --- set up OpenRouter too, then go back ---
   await type(ROUTER);
   s = stored();
-  check('ahora hay dos keys guardadas, una por proveedor',
+  check('there are now two keys stored, one per provider',
     !!s.llmByProvider.gemini.key && !!s.llmByProvider.openrouter.key,
     JSON.stringify(Object.keys(s.llmByProvider)));
-  check('ninguna de las dos es legible',
-    !JSON.stringify(s).includes(GEMINI) && !JSON.stringify(s).includes(ROUTER), 'alguna aparece en claro');
+  check('neither of them is readable',
+    !JSON.stringify(s).includes(GEMINI) && !JSON.stringify(s).includes(ROUTER), 'one of them appears in cleartext');
 
   await pick('gemini');
   r = await row();
-  check('al volver a Gemini su key sigue ahí',
+  check('switching back to Gemini, its key is still there',
     /saved/.test(r.keyPlaceholder), r.keyPlaceholder);
-  check('y su modelo también', r.model === 'gemini-3.5-flash', `modelo "${r.model}"`);
-  check('sin avisos pendientes', r.kind !== 'needs-key', JSON.stringify(r));
+  check('and so is its model', r.model === 'gemini-3.5-flash', `modelo "${r.model}"`);
+  check('no pending warnings', r.kind !== 'needs-key', JSON.stringify(r));
 
   const back = await $('window.yapper.getLlmSettings()');
-  check('el proceso principal usa la de Gemini', back.hasKey === true, JSON.stringify(back));
-  check('sabe qué proveedores están listos',
+  check('the main process uses the Gemini one', back.hasKey === true, JSON.stringify(back));
+  check('knows which providers are ready',
     Array.isArray(back.configured) && back.configured.includes('gemini')
     && back.configured.includes('openrouter'), JSON.stringify(back.configured));
 
@@ -107,11 +107,11 @@ app.whenReady().then(async () => {
   const legacy = { llmProvider: 'anthropic', llmKey: { enc: false, v: 'sk-ant-old' }, llmModel: 'claude-sonnet-5' };
   fs.writeFileSync(SETTINGS, JSON.stringify(legacy), 'utf8');
   const migrated = await $('window.yapper.getLlmSettings()');
-  check('un perfil viejo migra a la nueva forma',
+  check('an old profile migrates to the new shape',
     migrated.provider === 'anthropic' && migrated.hasKey === true
     && migrated.model === 'claude-sonnet-5', JSON.stringify(migrated));
   const after = stored();
-  check('y la migración se escribe en disco',
+  check('and the migration is written to disk',
     after.llmKey === undefined && !!after.llmByProvider.anthropic.key,
     JSON.stringify(after));
 

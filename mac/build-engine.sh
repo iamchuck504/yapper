@@ -15,10 +15,10 @@ REPO="iamchuck504/yapper-releases"
 WORK="$(mktemp -d)"
 OUT="$PWD/whisper-mac-arm64.zip"
 
-echo "== clonando whisper.cpp $TAG"
+echo "== cloning whisper.cpp $TAG"
 git clone --depth 1 --branch "$TAG" https://github.com/ggml-org/whisper.cpp "$WORK/whisper.cpp"
 
-echo "== compilando (Metal, estático)"
+echo "== building (Metal, static)"
 cmake -B "$WORK/whisper.cpp/build" -S "$WORK/whisper.cpp" \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_SHARED_LIBS=OFF \
@@ -26,18 +26,18 @@ cmake -B "$WORK/whisper.cpp/build" -S "$WORK/whisper.cpp" \
 cmake --build "$WORK/whisper.cpp/build" --config Release -j "$(sysctl -n hw.ncpu)" --target whisper-server
 
 BIN="$WORK/whisper.cpp/build/bin"
-test -x "$BIN/whisper-server" || { echo "FALLO: no se produjo whisper-server"; exit 1; }
+test -x "$BIN/whisper-server" || { echo "FAILED: whisper-server was not produced"; exit 1; }
 
-echo "== probando que arranca"
+echo "== checking it starts"
 "$BIN/whisper-server" --help >/dev/null 2>&1 || true   # exits nonzero on --help, that is fine
 file "$BIN/whisper-server"
 
-echo "== empaquetando"
+echo "== packaging"
 # any .metallib next to the binary comes along; static build should need none
 (cd "$BIN" && zip -r "$OUT" whisper-server ./*.metallib 2>/dev/null || (cd "$BIN" && zip "$OUT" whisper-server))
 unzip -l "$OUT"
 
-echo "== publicando en el feed ($REPO, tag engine-$TAG)"
+echo "== publishing to the feed ($REPO, tag engine-$TAG)"
 if gh release view "engine-$TAG" --repo "$REPO" >/dev/null 2>&1; then
   gh release upload "engine-$TAG" "$OUT" --repo "$REPO" --clobber
 else
@@ -48,4 +48,4 @@ fi
 
 rm -rf "$WORK"
 echo ""
-echo "listo: https://github.com/$REPO/releases/tag/engine-$TAG"
+echo "done: https://github.com/$REPO/releases/tag/engine-$TAG"

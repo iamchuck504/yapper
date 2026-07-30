@@ -28,9 +28,9 @@ app.whenReady().then(async () => {
 
   // --- Memo is offered, and it is a real style ---
   const styles = await $(`[...document.querySelectorAll('#style-pills .seg-btn')].map(b => b.dataset.style)`);
-  check('Memo aparece entre los estilos', styles.includes('memo'), styles.join(', '));
+  check('Memo appears among the styles', styles.includes('memo'), styles.join(', '));
   const regenStyles = await $(`[...document.getElementById('regen-style').options].map(o => o.value)`);
-  check('Memo también al regenerar', regenStyles.includes('memo'), regenStyles.join(', '));
+  check('Memo on regenerate too', regenStyles.includes('memo'), regenStyles.join(', '));
 
   // --- attendees are per meeting, not a preference ---
   await $(`(() => {
@@ -44,9 +44,9 @@ app.whenReady().then(async () => {
   await new Promise(r => setTimeout(r, 300));
 
   const stored = await $(`localStorage.getItem('yapper-options')`);
-  check('los nombres NO se guardan en las preferencias',
+  check('the names are NOT saved in the preferences',
     !stored.includes('Maya'), stored);
-  check('lo que sí es preferencia se guarda',
+  check('what genuinely is a preference is saved',
     stored.includes('memo') && stored.includes('focus on the launch'), stored);
 
   // reload: this is what a next launch looks like
@@ -54,13 +54,13 @@ app.whenReady().then(async () => {
   await new Promise(r => win.webContents.once('did-finish-load', r));
   await new Promise(r => setTimeout(r, 1200));
 
-  check('al reabrir, el campo de asistentes está vacío',
+  check('on reopen, the attendees field is empty',
     (await $(`document.getElementById('participants-rec').value`)) === '',
     await $(`document.getElementById('participants-rec').value`));
-  check('al reabrir, el estilo elegido sí se recuerda',
+  check('on reopen, the chosen style is remembered',
     (await $(`document.querySelector('#style-pills .seg-btn.active').dataset.style`)) === 'memo',
     await $(`document.querySelector('#style-pills .seg-btn.active').dataset.style`));
-  check('al reabrir, las instrucciones sí se recuerdan',
+  check('on reopen, the instructions are remembered',
     (await $(`document.getElementById('custom-instructions').value`)) === 'focus on the launch',
     await $(`document.getElementById('custom-instructions').value`));
 
@@ -71,7 +71,7 @@ app.whenReady().then(async () => {
     document.getElementById('btn-new').click();
   })()`);
   await new Promise(r => setTimeout(r, 300));
-  check('"New" limpia los asistentes',
+  check('"New" clears the attendees',
     (await $(`document.getElementById('participants-rec').value`)) === '',
     await $(`document.getElementById('participants-rec').value`));
 

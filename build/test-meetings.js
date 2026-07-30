@@ -32,19 +32,19 @@ const outside = [
   ''
 ];
 
-for (const p of inside) check(`permite borrar dentro: ${p}`, insideMeetings(p), 'lo bloqueó');
-for (const p of outside) check(`bloquea fuera: ${p || '(vacío)'}`, !insideMeetings(p), 'lo permitió');
+for (const p of inside) check(`permite borrar dentro: ${p}`, insideMeetings(p), 'blocked it');
+for (const p of outside) check(`blocks outside: ${p || '(empty)'}`, !insideMeetings(p), 'allowed it');
 
 // --- what counts as an empty meeting ---
 const isEmpty = m => m.audioSec === 0 && !m.hasTranscript && !m.hasSummary;
-check('una grabación fallida cuenta como vacía',
-  isEmpty({ audioSec: 0, hasTranscript: false, hasSummary: false }), 'no la marcó');
-check('con audio no cuenta como vacía',
-  !isEmpty({ audioSec: 42, hasTranscript: false, hasSummary: false }), 'la marcó');
-check('una grabación vieja comprimida no cuenta como vacía',
-  !isEmpty({ audioSec: -1, hasTranscript: false, hasSummary: false }), 'la marcó');
-check('sin audio pero con transcript no cuenta como vacía',
-  !isEmpty({ audioSec: 0, hasTranscript: true, hasSummary: false }), 'la marcó');
+check('a failed recording counts as empty',
+  isEmpty({ audioSec: 0, hasTranscript: false, hasSummary: false }), 'did not flag it');
+check('with audio it does not count as empty',
+  !isEmpty({ audioSec: 42, hasTranscript: false, hasSummary: false }), 'flagged it');
+check('an old compressed recording does not count as empty',
+  !isEmpty({ audioSec: -1, hasTranscript: false, hasSummary: false }), 'flagged it');
+check('no audio but with a transcript does not count as empty',
+  !isEmpty({ audioSec: 0, hasTranscript: true, hasSummary: false }), 'flagged it');
 
 console.log(fails ? `\n${fails} fallos` : '\nPASS');
 process.exit(fails ? 1 : 0);

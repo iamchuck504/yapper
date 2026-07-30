@@ -64,8 +64,8 @@ async function run(cfg) {
 }
 
 (async () => {
-  console.log(`replay: ${PLAY_SEC} s de ${path.basename(WAV)}, en tiempo real\n`);
-  console.log('modelo  cadencia  ventana  espera   retraso  peor  1ª conf.  palabras');
+  console.log(`replay: ${PLAY_SEC} s of ${path.basename(WAV)}, in real time\n`);
+  console.log('model   cadence   window   hold     lag      worst 1st conf. words');
   const results = [];
   for (const cfg of CONFIGS) {
     if (!engine.hasModel(cfg.model)) { console.log(`${cfg.model} — no descargado`); continue; }

@@ -3,9 +3,8 @@
 Yapper records meetings on Windows, transcribes them **on the machine** with
 whisper.cpp, and writes structured notes with an LLM the user chooses. Nothing
 is uploaded to record or transcribe; every meeting is a plain folder of files
-the user can open. It is a working clone of the another meeting-notes app idea with a different
-architecture underneath — local-first instead of cloud — and this document
-describes both what it does well and what it does not do yet, without
+the user can open. The architecture is local-first rather than cloud, and this
+document describes both what it does well and what it does not do yet, without
 decoration, so the gaps can be planned rather than discovered.
 
 For internals — module map, IPC surface, measured performance, the reasoning

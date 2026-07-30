@@ -30,35 +30,35 @@ function suite(label, ss, expectEncrypted) {
   const KEY = 'sk-ant-super-secret-0123456789';
 
   const sealed = keystore.seal(ss, KEY);
-  check(`${label}: guarda algo`, !!sealed, 'devolvió null');
-  check(`${label}: marca si va cifrada`, sealed.enc === expectEncrypted, `enc=${sealed.enc}`);
+  check(`${label}: stores something`, !!sealed, 'returned null');
+  check(`${label}: records whether it is encrypted`, sealed.enc === expectEncrypted, `enc=${sealed.enc}`);
   if (expectEncrypted) {
-    check(`${label}: la clave NO aparece en lo guardado`,
+    check(`${label}: the key does NOT appear in what was stored`,
       !JSON.stringify(sealed).includes(KEY), JSON.stringify(sealed).slice(0, 80));
   }
-  check(`${label}: se recupera igual`, keystore.open(ss, sealed) === KEY,
-    `recuperó "${keystore.open(ss, sealed)}"`);
+  check(`${label}: round-trips unchanged`, keystore.open(ss, sealed) === KEY,
+    `recovered "${keystore.open(ss, sealed)}"`);
 
-  check(`${label}: una clave vacía borra`, keystore.seal(ss, '') === null, 'no devolvió null');
-  check(`${label}: solo espacios también borra`, keystore.seal(ss, '   ') === null, 'no devolvió null');
-  check(`${label}: recorta espacios alrededor`,
-    keystore.open(ss, keystore.seal(ss, `  ${KEY}  `)) === KEY, 'no recortó');
-  check(`${label}: abrir nada devuelve cadena vacía`, keystore.open(ss, null) === '', 'devolvió algo');
-  check(`${label}: un blob corrupto no revienta`,
-    keystore.open(ss, { enc: true, v: 'no-es-base64-valido!!' }) === '', 'no devolvió cadena vacía');
+  check(`${label}: an empty key clears it`, keystore.seal(ss, '') === null, 'did not return null');
+  check(`${label}: whitespace only clears it too`, keystore.seal(ss, '   ') === null, 'did not return null');
+  check(`${label}: trims surrounding whitespace`,
+    keystore.open(ss, keystore.seal(ss, `  ${KEY}  `)) === KEY, 'did not trim');
+  check(`${label}: opening nothing returns an empty string`, keystore.open(ss, null) === '', 'returned something');
+  check(`${label}: a corrupt blob does not blow up`,
+    keystore.open(ss, { enc: true, v: 'not-valid-base64!!' }) === '', 'did not return an empty string');
 }
 
 function run() {
-  suite('con keystore', fake, true);
+  suite('with keystore', fake, true);
   suite('sin keystore', none, false);
 
   let real = null;
   try { real = require('electron').safeStorage; } catch { /* plain node */ }
   if (real) {
-    suite(real.isEncryptionAvailable() ? 'keystore real del sistema' : 'sistema sin keystore',
+    suite(real.isEncryptionAvailable() ? 'real system keystore' : 'sistema sin keystore',
       real, real.isEncryptionAvailable());
   } else {
-    console.log('\n(sin Electron: no se probó el keystore real del sistema)');
+    console.log('\n(no Electron: the real system keystore was not tested)');
   }
 
   console.log(fails ? `\n${fails} fallos` : '\nPASS');

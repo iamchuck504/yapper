@@ -30,21 +30,21 @@ function meeting(name, files) {
 
 // ---------------------------------------------------------------- dates
 
-check('la fecha sale del nombre de la carpeta', lib.dateOf('2026-07-30_1415'), '2026-07-30');
-check('un nombre raro no da fecha', lib.dateOf('borrador'), '');
-check('un nombre con sufijo también', lib.dateOf('2026-07-30_1415_2'), '2026-07-30');
+check('the date comes from the folder name', lib.dateOf('2026-07-30_1415'), '2026-07-30');
+check('an odd name yields no date', lib.dateOf('borrador'), '');
+check('a name with a suffix too', lib.dateOf('2026-07-30_1415_2'), '2026-07-30');
 
 // Thursday 30 July 2026 — its week runs Monday 27 to Sunday 2 August
 const w = lib.weekOf('2026-07-30');
-check('la semana empieza el lunes', w.from, '2026-07-27');
-check('y termina el domingo', w.to, '2026-08-02');
-check('un domingo pertenece a la semana que acaba', lib.weekOf('2026-08-02').from, '2026-07-27');
-check('un lunes empieza la suya', lib.weekOf('2026-08-03').from, '2026-08-03');
-check('la etiqueta de semana es estable',
+check('the week starts on Monday', w.from, '2026-07-27');
+check('and ends on Sunday', w.to, '2026-08-02');
+check('a Sunday belongs to the week that is ending', lib.weekOf('2026-08-02').from, '2026-07-27');
+check('a Monday starts its own', lib.weekOf('2026-08-03').from, '2026-08-03');
+check('the week label is stable',
   lib.weekOf('2026-07-30').label === lib.weekOf('2026-07-27').label, true);
-check('y cambia al pasar a la siguiente',
+check('and it changes moving into the next one',
   lib.weekOf('2026-08-03').label !== lib.weekOf('2026-07-30').label, true);
-check('una semana a caballo entre meses no se parte',
+check('a week straddling two months is not split',
   [lib.weekOf('2026-07-31').from, lib.weekOf('2026-07-31').to], ['2026-07-27', '2026-08-02']);
 
 // ---------------------------------------------------------------- reading
@@ -66,67 +66,67 @@ Agreed to launch.
 });
 
 let { meetings, changed } = lib.refresh({ meetingsDir: MEETINGS, indexFile: INDEX });
-check('encuentra la reunión', meetings.length, 1);
-check('la lee entera', changed.length, 1);
+check('finds the meeting', meetings.length, 1);
+check('reads it whole', changed.length, 1);
 const m = meetings[0];
-check('lee el título', m.title, 'Launch Sync');
-check('lee los participantes', m.participants, ['Maya', 'Chuck']);
-check('sabe que tiene notas y transcript', [m.hasNotes, m.hasTranscript], [true, true]);
-check('indexa las secciones de las notas',
+check('reads the title', m.title, 'Launch Sync');
+check('reads the participants', m.participants, ['Maya', 'Chuck']);
+check('knows it has notes and a transcript', [m.hasNotes, m.hasTranscript], [true, true]);
+check('indexes the sections of the notes',
   m.sections.map(s => s.heading), ['Summary', 'Decisions', 'Action items']);
-check('extrae los action items', m.items.length, 2);
-check('con su responsable', m.items.map(i => i.owner), ['Maya', 'Chuck']);
-check('y su reunión de origen', m.items[0].meeting, 'Launch Sync');
+check('extracts the action items', m.items.length, 2);
+check('with their owner', m.items.map(i => i.owner), ['Maya', 'Chuck']);
+check('and its source meeting', m.items[0].meeting, 'Launch Sync');
 
 // ---------------------------------------------------------------- the cache
 
 ({ meetings, changed } = lib.refresh({ meetingsDir: MEETINGS, indexFile: INDEX }));
-check('la segunda vez no vuelve a leerla', changed.length, 0);
-check('pero sigue estando', meetings.length, 1);
+check('the second time it is not read again', changed.length, 0);
+check('but it is still there', meetings.length, 1);
 
 // editing the notes must invalidate it
 fs.writeFileSync(path.join(MEETINGS, '2026-07-30_0900', 'notes.md'),
   '## Action items\n- Maya: prepare the rollout plan\n- Chuck: review the deck\n- Send the contract\n', 'utf8');
 ({ meetings, changed } = lib.refresh({ meetingsDir: MEETINGS, indexFile: INDEX }));
-check('editar las notas la vuelve a leer', changed.length, 1);
-check('y los items se actualizan', meetings[0].items.length, 3);
+check('editing the notes makes it read again', changed.length, 1);
+check('and the items are updated', meetings[0].items.length, 3);
 
 // a brand new meeting appears
 meeting('2026-07-28_1500', { 'title.txt': 'Planning', 'transcript.txt': '[00:00:01] Hello.' });
 ({ meetings, changed } = lib.refresh({ meetingsDir: MEETINGS, indexFile: INDEX }));
-check('una reunión nueva se añade', meetings.length, 2);
-check('y solo se lee la nueva', changed.map(c => c.title), ['Planning']);
-check('las más nuevas van primero', meetings.map(x => x.name),
+check('a new meeting is added', meetings.length, 2);
+check('and only the new one is read', changed.map(c => c.title), ['Planning']);
+check('the newest come first', meetings.map(x => x.name),
   ['2026-07-30_0900', '2026-07-28_1500']);
 
 // a deleted meeting disappears
 fs.rmSync(path.join(MEETINGS, '2026-07-28_1500'), { recursive: true, force: true });
 ({ meetings } = lib.refresh({ meetingsDir: MEETINGS, indexFile: INDEX }));
-check('una reunión borrada desaparece del índice', meetings.length, 1);
+check('a deleted meeting disappears from the index', meetings.length, 1);
 
 // a corrupt index must not be fatal
 fs.writeFileSync(INDEX, 'not json at all', 'utf8');
 ({ meetings, changed } = lib.refresh({ meetingsDir: MEETINGS, indexFile: INDEX }));
-check('un índice corrupto se reconstruye', meetings.length, 1);
-check('leyéndolo todo de nuevo', changed.length, 1);
+check('a corrupt index is rebuilt', meetings.length, 1);
+check('by reading everything again', changed.length, 1);
 
 // ---------------------------------------------------------------- selecting
 
 meeting('2026-07-29_1000', { 'title.txt': 'Yesterday', 'transcript.txt': '[00:00:01] x' });
 meeting('2026-07-30_1600', { 'title.txt': 'Later today', 'transcript.txt': '[00:00:01] y' });
 meeting('2026-07-20_1000', { 'title.txt': 'Last week', 'transcript.txt': '[00:00:01] z' });
-meeting('2026-07-30_1100', { 'title.txt': 'Sin nada' });          // no transcript, no notes
+meeting('2026-07-30_1100', { 'title.txt': 'Nothing at all' });          // no transcript, no notes
 ({ meetings } = lib.refresh({ meetingsDir: MEETINGS, indexFile: INDEX }));
 
-check('las de un día concreto', lib.onDay(meetings, '2026-07-30').length, 3);
-check('ordenadas por hora, la última primero',
-  lib.onDay(meetings, '2026-07-30').map(x => x.title), ['Later today', 'Sin nada', 'Launch Sync']);
-check('las de un rango de fechas',
+check('the ones from a given day', lib.onDay(meetings, '2026-07-30').length, 3);
+check('sorted by time, latest first',
+  lib.onDay(meetings, '2026-07-30').map(x => x.title), ['Later today', 'Nothing at all', 'Launch Sync']);
+check('the ones in a date range',
   lib.inRange(meetings, '2026-07-27', '2026-08-02').map(x => x.title).sort(),
-  ['Later today', 'Launch Sync', 'Sin nada', 'Yesterday']);
-check('la de la semana anterior queda fuera',
+  ['Later today', 'Launch Sync', 'Nothing at all', 'Yesterday']);
+check('the one from the previous week is left out',
   lib.inRange(meetings, '2026-07-27', '2026-08-02').some(x => x.title === 'Last week'), false);
-check('solo las que tienen contenido',
+check('only the ones with content',
   lib.withContent(lib.onDay(meetings, '2026-07-30')).map(x => x.title),
   ['Later today', 'Launch Sync']);
 

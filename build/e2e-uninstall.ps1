@@ -15,7 +15,7 @@ if (Test-Path $un) {
 foreach ($d in @("$env:LOCALAPPDATA\Programs\Yapper", "$env:LOCALAPPDATA\Yapper", "$env:APPDATA\Yapper")) {
     if (Test-Path $d) { Remove-Item $d -Recurse -Force -ErrorAction SilentlyContinue }
 }
-Write-Host "ok    sin restos en LOCALAPPDATA/APPDATA"
+Write-Host "ok    no leftovers in LOCALAPPDATA/APPDATA"
 
 # the dev shortcut, exactly as setup.ps1 writes it
 $ws = New-Object -ComObject WScript.Shell
@@ -26,4 +26,4 @@ $s.WorkingDirectory = $repo
 $s.IconLocation = "$repo\build\yapper-icon.ico,0"
 $s.Description = "Yapper - AI meeting notes"
 $s.Save()
-Write-Host "ok    acceso directo de desarrollo restaurado"
+Write-Host "ok    development shortcut restored"

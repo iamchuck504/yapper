@@ -18,11 +18,11 @@ function check(name, ok, detail) {
 // --- the line counts in the module tables ---
 const claimed = [...doc.matchAll(/\|\s*`?([\w./+ -]+?\.(?:js|css|html))`?[^|]*\|\s*(\d+)\s*\|/g)]
   .map(m => ({ file: m[1].trim(), n: Number(m[2]) }));
-check('el documento cita conteos de líneas', claimed.length >= 8, `${claimed.length} encontrados`);
+check('the document quotes line counts', claimed.length >= 8, `${claimed.length} encontrados`);
 
 for (const c of claimed) {
   if (!fs.existsSync(path.join(root, c.file))) {
-    check(`existe ${c.file}`, false, 'el documento nombra un archivo que no está');
+    check(`existe ${c.file}`, false, 'the document names a file that is missing');
     continue;
   }
   const real = lines(c.file);
@@ -31,7 +31,7 @@ for (const c of claimed) {
   // node, since PowerShell's Measure-Object disagrees and that mismatch is what
   // made these numbers wrong in the first place.
   const off = Math.abs(real - c.n) / Math.max(real, c.n);
-  check(`${c.file}: ${c.n} líneas`, off < 0.08, `el archivo tiene ${real}`);
+  check(`${c.file}: ${c.n} lines`, off < 0.08, `the file has ${real}`);
 }
 
 // --- the IPC channel count ---
@@ -43,84 +43,84 @@ const on = count(/ipcRenderer\.on\('/g);
 const total = invoke + send + on;
 
 const stated = Number((doc.match(/(\d+) channels, all declared in/) || [])[1]);
-check(`el total de canales (${total}) coincide con el documento`, stated === total, `dice ${stated}`);
+check(`the channel total (${total}) matches the document`, stated === total, `says ${stated}`);
 for (const [label, real, re] of [
   ['Request/response', invoke, /\*\*Request\/response \((\d+)\)\*\*/],
   ['Fire-and-forget', send, /\*\*Fire-and-forget \((\d+)\)\*\*/],
   ['Main → renderer', on, /\*\*Main → renderer \((\d+)\)\*\*/]
 ]) {
   const said = Number((doc.match(re) || [])[1]);
-  check(`${label}: ${real}`, said === real, `el documento dice ${said}`);
+  check(`${label}: ${real}`, said === real, `the document says ${said}`);
 }
-check('la lista de canales del documento coincide con el puente',
-  total === Number(stated) && /open-external/.test(doc), 'falta algún canal nuevo');
+check('the channel list in the document matches the bridge',
+  total === Number(stated) && /open-external/.test(doc), 'a new channel is missing');
 
 // --- the providers ---
 const llm = require('../llm');
 const ids = llm.providerList().map(p => p.id);
 for (const id of ids) {
-  check(`el documento describe el proveedor "${id}"`, doc.includes(`\`${id}\``), 'no aparece');
+  check(`the document describes the provider "${id}"`, doc.includes(`\`${id}\``), 'no aparece');
 }
 // only the provider table, or the tier table below it gets caught up in this
 const providerTable = doc.slice(doc.indexOf('## 6.'), doc.indexOf('## 7.'));
 const rows = [...providerTable.matchAll(/^\| `([\w-]+)` \| /gm)].map(m => m[1]);
-check('el documento lista una fila por proveedor', rows.length === ids.length,
-  `documento: ${rows.join(', ')}\n      código: ${ids.join(', ')}`);
+check('the document lists one row per provider', rows.length === ids.length,
+  `document: ${rows.join(', ')}\n      code: ${ids.join(', ')}`);
 const extra = rows.filter(r => !ids.includes(r));
-check('no describe proveedores que ya no existen', extra.length === 0, extra.join(', '));
+check('does not describe providers that no longer exist', extra.length === 0, extra.join(', '));
 
 // --- the tiers ---
 const engine = require('../engine');
 for (const tier of Object.keys(engine.TIERS)) {
-  check(`el documento describe el nivel "${tier}"`, doc.includes(`\`${tier}\``), 'no aparece');
+  check(`the document describes the "${tier}" tier`, doc.includes(`\`${tier}\``), 'no aparece');
 }
 const fast = engine.tierConfig('fast');
-check('la cadencia del nivel fast concuerda',
-  doc.includes(`every ${fast.cadenceMs / 1000} s`), `el código dice ${fast.cadenceMs} ms`);
-check('lo que el documento dice de medium coincide con el código',
+check('the fast tier cadence agrees',
+  doc.includes(`every ${fast.cadenceMs / 1000} s`), `the code says ${fast.cadenceMs} ms`);
+check('what the document says about medium matches the code',
   /`small` is used everywhere/.test(doc)
   && !Object.values(engine.TIERS).some(t => t.liveModel === 'medium' || t.finalModel === 'medium'),
-  'el documento y la tabla de niveles no dicen lo mismo');
-check('el documento describe la limpieza de repeticiones',
+  'the document and the tier table disagree');
+check('the document describes the repetition cleanup',
   /Stutters are removed/.test(doc) && typeof engine.deduplicate === 'function',
-  'falta en el documento o en el código');
-check('el documento describe la política del audio',
+  'missing from the document or the code');
+check('the document describes the audio policy',
   /## 9b\./.test(doc) && /audio.s job ends with the transcript/i.test(doc),
-  'falta la sección del audio');
+  'the audio section is missing');
 
 // --- the security claims ---
 const main = read('main.js');
-check('contextIsolation está en todas las ventanas',
-  (main.match(/contextIsolation: true/g) || []).length === 3, 'no en las tres');
-check('nodeIntegration está apagado en todas',
-  (main.match(/nodeIntegration: false/g) || []).length === 3, 'no en las tres');
+check('contextIsolation is on in every window',
+  (main.match(/contextIsolation: true/g) || []).length === 3, 'not in all three');
+check('nodeIntegration is off in all of them',
+  (main.match(/nodeIntegration: false/g) || []).length === 3, 'not in all three');
 for (const page of ['index.html', 'bubble.html', 'splash.html']) {
-  check(`${page} declara una CSP`,
-    /Content-Security-Policy/.test(read(path.join('renderer', page))), 'no la trae');
+  check(`${page} declares a CSP`,
+    /Content-Security-Policy/.test(read(path.join('renderer', page))), 'does not carry it');
 }
 // The dependency footprint is a documented claim (§10): exactly electron and
 // electron-builder to develop, exactly electron-updater at runtime. Anything
 // new showing up here has to be argued for in ARCHITECTURE.md first.
 const pkg = JSON.parse(read('package.json'));
-check('las devDependencies siguen siendo exactamente electron y electron-builder',
+check('the devDependencies are still exactly electron and electron-builder',
   JSON.stringify(Object.keys(pkg.devDependencies).sort()) === '["electron","electron-builder"]',
   JSON.stringify(Object.keys(pkg.devDependencies)));
-check('la única dependencia de ejecución sigue siendo electron-updater',
+check('the only runtime dependency is still electron-updater',
   JSON.stringify(Object.keys(pkg.dependencies || {})) === '["electron-updater"]',
   JSON.stringify(Object.keys(pkg.dependencies || {})));
 
 // --- the files the docs point a reviewer at ---
 for (const f of ['preload.js', 'engine.js', 'live.js', 'main.js', 'llm.js',
   'keystore.js', 'bounds.js', 'setup.ps1', 'build/calibration.wav', 'README.md']) {
-  check(`existe ${f}`, fs.existsSync(path.join(root, f)), 'el documento lo nombra y no está');
+  check(`existe ${f}`, fs.existsSync(path.join(root, f)), 'the document names it and it is not there');
 }
-check('el README enlaza la arquitectura', /ARCHITECTURE\.md/.test(read('README.md')), 'sin enlace');
+check('the README links to the architecture', /ARCHITECTURE\.md/.test(read('README.md')), 'sin enlace');
 
 // --- every test the docs list, exists ---
 const named = [...doc.matchAll(/`((?:test-|icon-)[\w-]+\.js)`/g)].map(m => m[1]);
-check('el documento nombra pruebas', named.length >= 10, `${named.length}`);
+check('the document names tests', named.length >= 10, `${named.length}`);
 for (const t of [...new Set(named)]) {
-  check(`existe build/${t}`, fs.existsSync(path.join(root, 'build', t)), 'no está');
+  check(`existe build/${t}`, fs.existsSync(path.join(root, 'build', t)), 'is missing');
 }
 
 console.log(fails ? `\n${fails} fallos` : '\nPASS');

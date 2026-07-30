@@ -49,7 +49,7 @@ function say(line) {
   console.log(line);
   try { fs.appendFileSync(LOG, line + '\n'); } catch { /* nothing to be done */ }
 }
-console.log(`progreso en vivo: ${LOG}`);
+console.log(`live progress: ${LOG}`);
 
 let fails = 0;
 function check(name, ok, detail) {
@@ -67,12 +67,12 @@ app.whenReady().then(async () => {
   const styles = await $(`[...document.querySelectorAll('#style-pills .seg-btn')].map(b => b.dataset.style)`);
   const promised = await $(`window.yapper.styleSections()`);
 
-  say(`transcripción: ${path.basename(path.dirname(src.p))} (${(src.size / 1024).toFixed(0)} KB)`);
-  say(`estilos en la UI: ${styles.join(', ')}\n`);
+  say(`transcript: ${path.basename(path.dirname(src.p))} (${(src.size / 1024).toFixed(0)} KB)`);
+  say(`styles in the UI: ${styles.join(', ')}\n`);
 
-  check('cada estilo de la UI tiene secciones definidas',
+  check('every UI style has defined sections',
     styles.every(s => promised[s]), styles.filter(s => !promised[s]).join(', '));
-  check('no hay secciones definidas para estilos que la UI no ofrece',
+  check('there are no sections defined for styles the UI does not offer',
     Object.keys(promised).every(s => styles.includes(s)),
     Object.keys(promised).filter(s => !styles.includes(s)).join(', '));
 
@@ -88,28 +88,28 @@ app.whenReady().then(async () => {
     const got = [...md.matchAll(/^##\s+(.+)$/gm)]
       .map(m => m[1].replace(/\s*\[[\d:]+\]\s*$/, '').trim());
 
-    say(`  pidió : ${want.join(' | ')}`);
+    say(`  asked for : ${want.join(' | ')}`);
     say(`  obtuvo: ${got.join(' | ')}`);
 
     // sections may be omitted when the prompt says so, but nothing may be invented
     const extra = got.filter(g => !want.some(w => norm(w) === norm(g)));
-    check(`${style}: no inventa secciones`, extra.length === 0, `sobran: ${extra.join(', ')}`);
+    check(`${style}: invents no sections`, extra.length === 0, `sobran: ${extra.join(', ')}`);
 
     const missing = want.filter(w => !got.some(g => norm(g) === norm(w)));
-    check(`${style}: trae al menos la mitad de las secciones`,
-      got.length >= Math.ceil(want.length / 2), `faltan ${missing.length} de ${want.length}: ${missing.join(', ')}`);
+    check(`${style}: carries at least half the sections`,
+      got.length >= Math.ceil(want.length / 2), `missing ${missing.length} of ${want.length}: ${missing.join(', ')}`);
 
-    check(`${style}: la primera sección es la que pidió`,
+    check(`${style}: the first section is the one it asked for`,
       got[0] && norm(got[0]) === norm(want[0]), `esperaba "${want[0]}", vino "${got[0]}"`);
 
-    check(`${style}: las secciones llevan marca de tiempo`,
-      /^##\s+.+\[\d+:\d+\]\s*$/m.test(md), 'ninguna la trae');
+    check(`${style}: the sections carry a timestamp`,
+      /^##\s+.+\[\d+:\d+\]\s*$/m.test(md), 'none of them carries one');
 
     // every heading must be one the UI recognises, not one that fell through
     const known = await $(`(${JSON.stringify(got)}).map(h => sectionMeta(h).matched)`);
     const unknown = got.filter((_, i) => !known[i]);
-    check(`${style}: la UI reconoce todas sus secciones`,
-      unknown.length === 0, `sin regla de color: ${unknown.join(', ')}`);
+    check(`${style}: the UI recognises all of its sections`,
+      unknown.length === 0, `no colour rule: ${unknown.join(', ')}`);
   }
 
   say(fails ? `\n${fails} fallos` : '\nPASS');

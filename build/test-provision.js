@@ -96,39 +96,39 @@ server.listen(0, '127.0.0.1', async () => {
   try {
     // ---- a clean install, CPU only ----
     const A = path.join(ROOT, 'homeA');
-    check('instala CPU + modelos', await provision.run({ ...opts(A), gpu: false }));
-    check('el server quedó donde el engine lo busca',
+    check('installs CPU + models', await provision.run({ ...opts(A), gpu: false }));
+    check('the server landed where the engine looks for it',
       fs.readFileSync(path.join(A, 'bin', 'win-x64', 'whisper-server.exe'), 'utf8'), 'fake cpu server');
-    check('la dll vino con él',
+    check('the dll came with it',
       fs.existsSync(path.join(A, 'bin', 'win-x64', 'whisper.dll')));
-    check('los dos modelos', ['base', 'small'].every(m =>
+    check('both models', ['base', 'small'].every(m =>
       fs.existsSync(path.join(A, 'models', `ggml-${m}.bin`))));
-    check('el redirect del CDN se siguió', hits['/cdn/ggml-base.bin'], 1);
-    check('no descargó el build GPU sin GPU', hits['/engine/whisper-cublas-12.4.0-bin-x64.zip'] || 0, 0);
-    check('la carpeta temporal no quedó tirada', fs.existsSync(path.join(A, 'tmp')), false);
-    check('el progreso llegó a "listo"',
+    check('the CDN redirect was followed', hits['/cdn/ggml-base.bin'], 1);
+    check('did not download the GPU build without a GPU', hits['/engine/whisper-cublas-12.4.0-bin-x64.zip'] || 0, 0);
+    check('the temp folder was not left behind', fs.existsSync(path.join(A, 'tmp')), false);
+    check('progress reached "ready"',
       progressLog.some(p => /engine ready/i.test(p.label)));
-    check('y trae paso y total', progressLog.every(p => p.steps === 3 && p.step >= 0 && p.step <= 3));
+    check('and it carries step and total', progressLog.every(p => p.steps === 3 && p.step >= 0 && p.step <= 3));
 
     // ---- run it again: nothing re-downloads ----
     const before = { ...hits };
-    check('correrlo de nuevo es instantáneo', await provision.run({ ...opts(A), gpu: false }));
-    check('y no vuelve a bajar nada', hits, before);
+    check('running it again is instant', await provision.run({ ...opts(A), gpu: false }));
+    check('and it downloads nothing again', hits, before);
 
     // ---- with GPU: the nested zip lands in the gpu dir ----
     const B = path.join(ROOT, 'homeB');
     progressLog = [];
-    check('con GPU instala ambos builds', await provision.run({ ...opts(B), gpu: true }));
-    check('el binario GPU quedó en su lugar, aunque el zip lo anide',
+    check('with a GPU it installs both builds', await provision.run({ ...opts(B), gpu: true }));
+    check('the GPU binary landed in place, even though the zip nests it',
       fs.readFileSync(path.join(B, 'bin', 'win-x64-gpu', 'whisper-server.exe'), 'utf8'), 'fake gpu server');
 
     // ---- a GPU failure does not block the install ----
     const C = path.join(ROOT, 'homeC');
     failGpu = true;
     progressLog = [];
-    check('si el build GPU falla, el CPU igual queda', await provision.run({ ...opts(C), gpu: true }));
-    check('sin binario GPU', fs.existsSync(path.join(C, 'bin', 'win-x64-gpu', 'whisper-server.exe')), false);
-    check('y el progreso lo dice en vez de esconderlo',
+    check('if the GPU build fails, the CPU one still lands', await provision.run({ ...opts(C), gpu: true }));
+    check('no GPU binary', fs.existsSync(path.join(C, 'bin', 'win-x64-gpu', 'whisper-server.exe')), false);
+    check('and progress says so instead of hiding it',
       progressLog.some(p => /GPU build skipped/i.test(p.label)));
     failGpu = false;
 
@@ -137,36 +137,36 @@ server.listen(0, '127.0.0.1', async () => {
     corruptSmall = true;
     let result = null;
     try { result = await provision.run({ ...opts(D), gpu: false }); } catch { result = 'threw'; }
-    check('una descarga cortada no se reporta como éxito', result === true, false);
-    check('no quedó un modelo a medias',
+    check('a truncated download is not reported as success', result === true, false);
+    check('no half-written model was left',
       fs.existsSync(path.join(D, 'models', 'ggml-small.bin')), false);
-    check('ni un .part suelto',
+    check('not a single stray .part',
       fs.existsSync(path.join(D, 'models', 'ggml-small.bin.part')), false);
     corruptSmall = false;
 
     // ---- and the retry after the failure completes it ----
-    check('reintentar completa lo que faltaba', await provision.run({ ...opts(D), gpu: false }));
+    check('retrying completes what was missing', await provision.run({ ...opts(D), gpu: false }));
 
     // ---- version comparison, what the mac update notice hangs on ----
-    check('0.1.1 es más nueva que 0.1.0', provision.newerVersion('0.1.1', '0.1.0'));
+    check('0.1.1 is newer than 0.1.0', provision.newerVersion('0.1.1', '0.1.0'));
     check('0.2.0 gana a 0.1.9', provision.newerVersion('0.2.0', '0.1.9'));
-    check('0.1.10 gana a 0.1.9 (numérico, no alfabético)', provision.newerVersion('0.1.10', '0.1.9'));
-    check('la misma versión no es más nueva', provision.newerVersion('0.1.0', '0.1.0'), false);
-    check('una vieja no es más nueva', provision.newerVersion('0.1.0', '0.1.1'), false);
+    check('0.1.10 beats 0.1.9 (numeric, not alphabetic)', provision.newerVersion('0.1.10', '0.1.9'));
+    check('the same version is not newer', provision.newerVersion('0.1.0', '0.1.0'), false);
+    check('an older one is not newer', provision.newerVersion('0.1.0', '0.1.1'), false);
     check('1.0 contra 1.0.1 pierde', provision.newerVersion('1.0', '1.0.1'), false);
 
     // ---- macOS: one Metal build from our own feed, no gpu variant ----
     const E = path.join(ROOT, 'homeE');
     progressLog = [];
-    check('mac instala desde nuestro feed', await provision.run({
+    check('mac installs from our feed', await provision.run({
       ...opts(E), platform: 'mac-arm64', gpu: false,
       macZip: `${base}/engine/whisper-mac-arm64.zip`
     }));
-    check('el binario mac quedó donde engine.binDir() lo busca',
+    check('the mac binary landed where engine.binDir() looks for it',
       fs.readFileSync(path.join(E, 'bin', 'mac-arm64', 'whisper-server'), 'utf8'), 'fake mac server');
-    check('sin variante -gpu en mac',
+    check('no -gpu variant on mac',
       fs.existsSync(path.join(E, 'bin', 'mac-arm64-gpu')), false);
-    check('en mac son 3 pasos (motor + 2 modelos)',
+    check('on mac it is 3 steps (engine + 2 models)',
       progressLog.every(p => p.steps === 3));
   } catch (err) {
     fails++;

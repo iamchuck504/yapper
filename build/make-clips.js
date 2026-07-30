@@ -30,7 +30,7 @@ app.whenReady().then(async () => {
     }
   }
   found.sort((a, b) => a.size - b.size);
-  console.log(`${found.length} grabaciones reales encontradas\n`);
+  console.log(`${found.length} real recordings found\n`);
 
   const win = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
   await win.loadFile(path.join(__dirname, '..', 'renderer', 'splash.html'));
@@ -39,7 +39,7 @@ app.whenReady().then(async () => {
   for (const rec of found) {
     if (made >= HOW_MANY) break;
     const out = path.join(OUT, `${rec.name}.wav`);
-    if (fs.existsSync(out)) { console.log(`ya estaba  ${rec.name}`); made++; continue; }
+    if (fs.existsSync(out)) { console.log(`already there  ${rec.name}`); made++; continue; }
 
     // the renderer can only fetch from its own folder
     const staged = path.join(__dirname, '..', 'renderer', '.clip-src' + rec.ext);
@@ -64,10 +64,10 @@ app.whenReady().then(async () => {
       fs.writeFileSync(out, engine.wavFromPcm(Buffer.from(got.bytes)));
       const secs = (fs.statSync(out).size - engine.WAV_HEADER) / engine.BYTES_PER_SEC;
       console.log(`ok         ${rec.name}  ${secs.toFixed(0)} s `
-        + `(de ${(got.duration / 60).toFixed(0)} min, ${rec.ext})`);
+        + `(from ${(got.duration / 60).toFixed(0)} min, ${rec.ext})`);
       made++;
     } catch (err) {
-      console.log(`FALLÓ      ${rec.name}: ${String(err.message).slice(0, 80)}`);
+      console.log(`FAILED     ${rec.name}: ${String(err.message).slice(0, 80)}`);
     } finally {
       fs.rmSync(staged, { force: true });
     }

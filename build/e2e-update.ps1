@@ -8,7 +8,7 @@ Set-Location $repo
 
 function Step($m) { Write-Host "`n== $m" -ForegroundColor Cyan }
 
-Step "construyendo v0.1.0 y v0.1.1 (feed local)"
+Step "building v0.1.0 and v0.1.1 (local feed)"
 $env:UP_VERSION = '0.1.0'; $env:UP_OUT = 'dist-up-a'
 npx electron-builder --win --config build\e2e-update.config.js | Out-Null
 $env:UP_VERSION = '0.1.1'; $env:UP_OUT = 'dist-up-b'
@@ -25,13 +25,13 @@ Start-Process -FilePath 'dist-up-a\Yapper-Setup-0.1.0.exe' -ArgumentList '/S' -W
 $exe = "$env:LOCALAPPDATA\Programs\Yapper\Yapper.exe"
 $v0 = (Get-Item $exe).VersionInfo.ProductVersion
 Write-Host "ok    instalado: $v0"
-if ($v0 -notmatch '^0\.1\.0') { Write-Host 'FAIL la base no es 0.1.0'; exit 1 }
+if ($v0 -notmatch '^0\.1\.0') { Write-Host 'FAIL the baseline is not 0.1.0'; exit 1 }
 
-Step "sirviendo v0.1.1 en 127.0.0.1:8123"
+Step "serving v0.1.1 on 127.0.0.1:8123"
 $server = Start-Process -FilePath 'node' -ArgumentList 'build\e2e-update-server.js', 'dist-up-b' -PassThru -WindowStyle Hidden -RedirectStandardOutput "$env:TEMP\upfeed.txt"
 Start-Sleep -Seconds 2
 
-Step "lanzando la app; el updater debe encontrar y bajar v0.1.1"
+Step "launching the app; the updater should find and download v0.1.1"
 Start-Process -FilePath $exe
 $deadline = (Get-Date).AddSeconds(90)
 $downloaded = $false
@@ -42,10 +42,10 @@ while ((Get-Date) -lt $deadline) {
 }
 $feedLog = (Get-Content "$env:TEMP\upfeed.txt" -ErrorAction SilentlyContinue) -join ' | '
 Write-Host "      feed: $feedLog"
-Write-Host ("{0}    el updater pidio el instalador nuevo" -f ($(if ($downloaded) { 'ok  ' } else { 'FAIL' })))
+Write-Host ("{0}    the updater requested the new installer" -f ($(if ($downloaded) { 'ok  ' } else { 'FAIL' })))
 Start-Sleep -Seconds 8   # let the download land and update-downloaded fire
 
-Step "cerrando la app (autoInstallOnAppQuit hace el resto)"
+Step "closing the app (autoInstallOnAppQuit does the rest)"
 Get-Process Yapper -ErrorAction SilentlyContinue | ForEach-Object { $_.CloseMainWindow() | Out-Null }
 $deadline = (Get-Date).AddSeconds(120)
 $v1 = $v0

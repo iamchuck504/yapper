@@ -32,7 +32,7 @@ run('npx', ['electron-builder', '--win']);
 
 for (const a of assets) {
   if (!fs.existsSync(path.join(root, a))) {
-    console.error(`falta ${a} — el build no lo produjo`);
+    console.error(`missing ${a} — the build did not produce it`);
     process.exit(1);
   }
 }

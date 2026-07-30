@@ -60,9 +60,9 @@ app.whenReady().then(async () => {
   console.log(`WAV          ${(wavSize / 1024 / 1024).toFixed(1)} MB   (110 MB/h)`);
   console.log(`Opus 24 kbps ${(r.bytes / 1024 / 1024).toFixed(2)} MB   (${perHour.toFixed(1)} MB/h)`
     + `   ${(wavSize / r.bytes).toFixed(0)}x mas pequeno`);
-  console.log(`codificar    ${r.ms} ms para ${r.seconds.toFixed(0)} s de audio`
+  console.log(`encode       ${r.ms} ms for ${r.seconds.toFixed(0)} s of audio`
     + `  =  ${(r.seconds / (r.ms / 1000)).toFixed(0)}x tiempo real`);
-  console.log(`una reunion de 2 h: ${(perHour * 2).toFixed(0)} MB en vez de 220 MB`);
-  console.log(`una al dia un mes : ${(perHour * 2 * 22 / 1024).toFixed(2)} GB en vez de 4.8 GB`);
+  console.log(`one 2 h meeting: ${(perHour * 2).toFixed(0)} MB instead of 220 MB`);
+  console.log(`one a day for a month: ${(perHour * 2 * 22 / 1024).toFixed(2)} GB instead of 4.8 GB`);
   app.exit(0);
 }).catch(e => { console.log('FAIL', e.message); app.exit(1); });

@@ -21,9 +21,9 @@ app.whenReady().then(() => {
     console.log(`${label.padEnd(22)} (${x},${y})  rgb ${p.r},${p.g},${p.b}  alpha ${p.a}`);
   };
 
-  console.log(`archivo : ${SRC}`);
-  console.log(`tamaño  : ${w} × ${h}`);
-  console.log(`bytes   : ${bmp.length} (${bmp.length / (w * h)} por píxel)\n`);
+  console.log(`file    : ${SRC}`);
+  console.log(`size    : ${w} × ${h}`);
+  console.log(`bytes   : ${bmp.length} (${bmp.length / (w * h)} per pixel)\n`);
 
   show('esquina sup-izq', 0, 0);
   show('esquina sup-der', w - 1, 0);
@@ -41,21 +41,21 @@ app.whenReady().then(() => {
   let right = w - 1;
   while (right > 0 && !same(at(right, 0))) right--;
 
-  console.log(`\ncolor del cuerpo   : rgb ${mid.r},${mid.g},${mid.b}`);
+  console.log(`\nbody colour        : rgb ${mid.r},${mid.g},${mid.b}`);
   console.log(`fila 0 ocupada de  : x=${left} a x=${right}`);
-  console.log(`radio implícito    : ${left} px izq / ${w - 1 - right} px der`);
+  console.log(`implied radius     : ${left} px left / ${w - 1 - right} px right`);
 
   // and down the first column, for the vertical radius
   const midL = at(0, Math.floor(h / 2));
   const sameL = p => Math.abs(p.r - midL.r) < 30 && Math.abs(p.g - midL.g) < 30 && Math.abs(p.b - midL.b) < 30;
   let top = 0;
   while (top < h && !sameL(at(0, top))) top++;
-  console.log(`columna 0 empieza en: y=${top}`);
+  console.log(`column 0 starts at : y=${top}`);
 
   // is anything transparent already?
   let clear = 0;
   for (let i = 3; i < bmp.length; i += 4) if (bmp[i] < 250) clear++;
-  console.log(`píxeles no opacos  : ${clear} de ${w * h}`);
+  console.log(`non-opaque pixels  : ${clear} of ${w * h}`);
 
   app.exit(0);
 });

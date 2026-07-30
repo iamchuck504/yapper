@@ -24,7 +24,7 @@ function say(line) {
   console.log(line);
   try { fs.appendFileSync(LOG, line + '\n'); } catch { /* nothing to do */ }
 }
-console.log(`progreso en vivo: ${LOG}`);
+console.log(`live progress: ${LOG}`);
 
 let fails = 0;
 function check(name, ok, detail) {
@@ -54,8 +54,8 @@ app.whenReady().then(async () => {
   const $ = js => win.webContents.executeJavaScript(js);
 
   const pcm = speech();
-  if (!pcm) { say('FAIL  no hay audio real para alimentar la prueba'); return app.exit(1); }
-  say(`audio de prueba: ${(pcm.length / engine.BYTES_PER_SEC).toFixed(0)} s\n`);
+  if (!pcm) { say('FAIL  no real audio to feed the test'); return app.exit(1); }
+  say(`test audio: ${(pcm.length / engine.BYTES_PER_SEC).toFixed(0)} s\n`);
 
   // --- start, exactly as the record button does ---
   const folder = await $(`(async () => {
@@ -66,14 +66,14 @@ app.whenReady().then(async () => {
     window.yapper.setRecordingState(true);
     return currentFolder;
   })()`);
-  check('abrió la carpeta de la reunión', !!folder && fs.existsSync(folder), String(folder));
-  check('guardó los participantes',
+  check('opened the meeting folder', !!folder && fs.existsSync(folder), String(folder));
+  check('saved the participants',
     fs.existsSync(path.join(folder, 'participants.txt'))
-    && fs.readFileSync(path.join(folder, 'participants.txt'), 'utf8').includes('Maya'), 'no está');
+    && fs.readFileSync(path.join(folder, 'participants.txt'), 'utf8').includes('Maya'), 'is missing');
 
   const wav = path.join(folder, 'recording.wav');
-  check('creó recording.wav de inmediato', fs.existsSync(wav), 'no existe');
-  check('empieza con solo la cabecera', fs.statSync(wav).size === engine.WAV_HEADER,
+  check('created recording.wav immediately', fs.existsSync(wav), 'no existe');
+  check('starts with the header only', fs.statSync(wav).size === engine.WAV_HEADER,
     `${fs.statSync(wav).size} bytes`);
 
   // --- feed it in 200 ms blocks, like the tap ---
@@ -93,23 +93,23 @@ app.whenReady().then(async () => {
         await $(`(() => { if (!recording || paused) return; window.yapper.recordingChunk(new Uint8Array(3200).buffer); })()`);
       }
       await new Promise(r => setTimeout(r, 150));
-      check('en pausa no se escribe nada', fs.statSync(wav).size === before,
-        `creció ${fs.statSync(wav).size - before} bytes`);
+      check('nothing is written while paused', fs.statSync(wav).size === before,
+        `grew by ${fs.statSync(wav).size - before} bytes`);
       await $('setPaused(false); addMarker();');
     }
   }
   await new Promise(r => setTimeout(r, 300));
 
   const growing = fs.statSync(wav).size;
-  check('el audio se escribió según llegaba', growing === engine.WAV_HEADER + sent,
-    `esperaba ${engine.WAV_HEADER + sent}, hay ${growing}`);
+  check('the audio was written as it arrived', growing === engine.WAV_HEADER + sent,
+    `expected ${engine.WAV_HEADER + sent}, actual ${growing}`);
 
   // --- a crash right now must still leave something playable ---
   const head = Buffer.alloc(4);
   const fd = fs.openSync(wav, 'r');
   fs.readSync(fd, head, 0, 4, 40);
   fs.closeSync(fd);
-  check('mientras graba la cabecera aún no está cerrada', head.readUInt32LE(0) === 0,
+  check('while recording, the header is not closed yet', head.readUInt32LE(0) === 0,
     `declara ${head.readUInt32LE(0)} bytes`);
 
   // --- stop, and check the file the moment it is closed ---
@@ -120,13 +120,13 @@ app.whenReady().then(async () => {
     recording = false;
     return window.yapper.recordingFinish('', markers);
   })()`);
-  check('la grabación se guardó', closed && closed.bytes === sent,
-    `${closed && closed.bytes} bytes de ${sent}`);
+  check('the recording was saved', closed && closed.bytes === sent,
+    `${closed && closed.bytes} bytes of ${sent}`);
   const buf = fs.readFileSync(wav);
-  check('la cabecera quedó cerrada con el tamaño real',
+  check('the header was closed with the real size',
     buf.readUInt32LE(40) === buf.length - engine.WAV_HEADER,
-    `declara ${buf.readUInt32LE(40)}, hay ${buf.length - engine.WAV_HEADER}`);
-  check('el WAV es reproducible en ese momento',
+    `declares ${buf.readUInt32LE(40)}, actual ${buf.length - engine.WAV_HEADER}`);
+  check('the WAV is playable at that point',
     buf.toString('ascii', 0, 4) === 'RIFF' && buf.readUInt32LE(24) === 16000, 'cabecera inesperada');
 
   // --- and then the rest of the pipeline the Stop button runs ---
@@ -140,34 +140,34 @@ app.whenReady().then(async () => {
     window.yapper.setRecordingState(false);
     return { saved, tLen: transcript.length, sLen: summary.length, title, markers };
   })()`);
-  say(`\nel ciclo completo tardó ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+  say(`\nthe full cycle took ${((Date.now() - t0) / 1000).toFixed(0)} s`);
 
-  check('quedó una marca del momento señalado',
+  check('a marker for the flagged moment was left',
     result.markers.length === 1 && fs.existsSync(path.join(folder, 'markers.txt')),
     JSON.stringify(result.markers));
 
   // the transcript is the record now, so the audio should be gone
-  check('el audio se liberó al haber transcripción', !fs.existsSync(wav),
-    `sigue ocupando ${fs.existsSync(wav) ? (fs.statSync(wav).size / 1024 / 1024).toFixed(0) + ' MB' : ''}`);
+  check('the audio was released once transcribed', !fs.existsSync(wav),
+    `still taking up ${fs.existsSync(wav) ? (fs.statSync(wav).size / 1024 / 1024).toFixed(0) + ' MB' : ''}`);
 
-  check('dejó transcripción', result.tLen > 100, `${result.tLen} caracteres`);
-  check('dejó notas', result.sLen > 200, `${result.sLen} caracteres`);
+  check('left a transcript', result.tLen > 100, `${result.tLen} caracteres`);
+  check('left notes', result.sLen > 200, `${result.sLen} caracteres`);
 
   // Naming is allowed to come back empty: the prompt tells the model to say so
   // when a recording is too unintelligible to title, and this test clip is a
   // noisy huddle. What matters is that whatever it decides is consistent.
-  say(`título: "${result.title}"`);
+  say(`title: "${result.title}"`);
   if (result.title) {
-    check('el título se guardó en disco',
+    check('the title was saved to disk',
       fs.existsSync(path.join(folder, 'title.txt'))
       && fs.readFileSync(path.join(folder, 'title.txt'), 'utf8').trim() === result.title, 'no coincide');
   } else {
-    check('sin título no deja un title.txt vacío',
-      !fs.existsSync(path.join(folder, 'title.txt')), 'lo creó igual');
+    check('with no title it leaves no empty title.txt',
+      !fs.existsSync(path.join(folder, 'title.txt')), 'created it anyway');
   }
 
   for (const f of ['transcript.txt', 'notes.md', 'participants.txt', 'markers.txt']) {
-    check(`quedó ${f}`, fs.existsSync(path.join(folder, f)), 'falta');
+    check(`left ${f}`, fs.existsSync(path.join(folder, f)), 'falta');
   }
 
   // --- and the meeting shows up correctly in the sidebar ---
@@ -177,21 +177,21 @@ app.whenReady().then(async () => {
     title: li.querySelector('.m-title').textContent,
     empty: li.classList.contains('m-void')
   }))`);
-  check('aparece en la lista', rows.length === 1, JSON.stringify(rows));
-  check('no la marca como vacía', rows[0] && !rows[0].empty, JSON.stringify(rows[0]));
-  check('la lista concuerda con el título',
+  check('shows up in the list', rows.length === 1, JSON.stringify(rows));
+  check('does not flag it as empty', rows[0] && !rows[0].empty, JSON.stringify(rows[0]));
+  check('the list agrees with the title',
     rows[0] && (result.title ? rows[0].title === result.title : rows[0].title === 'Untitled meeting'),
     `lista "${rows[0] && rows[0].title}" vs "${result.title}"`);
-  check('la lista nunca la llama solo "Meeting"', rows[0] && rows[0].title !== 'Meeting',
-    'una lista de reuniones llamadas Meeting no dice nada');
+  check('the list never calls it just "Meeting"', rows[0] && rows[0].title !== 'Meeting',
+    'a list of meetings all called Meeting says nothing');
 
   // --- reopening it has to show everything back ---
   const back = await $(`window.yapper.loadMeeting(${JSON.stringify(folder)})`);
-  check('al reabrirla trae las notas', back.summary.length > 200, `${back.summary.length} caracteres`);
-  check('al reabrirla trae la transcripción', back.transcript.length > 100, `${back.transcript.length} caracteres`);
-  check('al reabrirla trae los participantes', back.participants.includes('Maya'), back.participants);
+  check('reopening it brings the notes', back.summary.length > 200, `${back.summary.length} caracteres`);
+  check('reopening it brings the transcript', back.transcript.length > 100, `${back.transcript.length} caracteres`);
+  check('reopening it brings the participants', back.participants.includes('Maya'), back.participants);
   // no audio any more, and that is correct: the transcript is what it has
-  check('sabe que ya no hay grabación', back.hasRecording === false, String(back.hasRecording));
+  check('knows the recording is gone', back.hasRecording === false, String(back.hasRecording));
 
   say(fails ? `\n${fails} fallos` : '\nPASS');
   app.exit(fails ? 1 : 0);

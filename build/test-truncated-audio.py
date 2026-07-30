@@ -24,7 +24,7 @@ def pick_recording():
 
 src = pick_recording()
 if not src:
-    print("no hay grabación grande para probar")
+    print("no large recording to test with")
     sys.exit(1)
 
 full = open(src, "rb").read()
@@ -33,13 +33,13 @@ print(f"origen: {os.path.basename(os.path.dirname(src))}  {len(full)/1e6:.1f} MB
 cut = int(len(full) * 0.60)
 with open(TMP, "wb") as f:
     f.write(full[:cut])
-print(f"truncado a {cut/1e6:.1f} MB (como si se hubiera ido la luz)")
+print(f"truncated to {cut/1e6:.1f} MB (as if the power had gone out)")
 
 try:
     whole = decode_audio(src, sampling_rate=16000)
     part = decode_audio(TMP, sampling_rate=16000)
 except Exception as e:
-    print(f"FAIL  el archivo truncado no decodifica: {e}")
+    print(f"FAIL  the truncated file does not decode: {e}")
     sys.exit(1)
 
 print(f"audio completo : {len(whole)/16000/60:6.2f} min")
@@ -49,8 +49,8 @@ ratio = len(part) / len(whole)
 rms = float(np.sqrt(np.mean(part[-16000 * 5:] ** 2))) if len(part) > 16000 * 5 else 0
 ok = 0.4 < ratio < 0.8 and len(part) > 16000 * 10
 
-print(f"conserva el {ratio*100:.0f}% del audio, RMS del final = {rms:.4f}")
-print("PASS  la grabación interrumpida sigue siendo transcribible" if ok
-      else "FAIL  no se recuperó lo esperado")
+print(f"keeps {ratio*100:.0f}% of the audio, RMS at the end = {rms:.4f}")
+print("PASS  the interrupted recording is still transcribable" if ok
+      else "FAIL  did not recover what was expected")
 os.remove(TMP)
 sys.exit(0 if ok else 1)

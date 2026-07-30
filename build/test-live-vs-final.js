@@ -44,8 +44,8 @@ app.whenReady().then(async () => {
       else if (o.commit) confirmed += o.commit.split(/\s+/).filter(Boolean).length;
     }
   });
-  check('el vivo arranca', started === true, String(started));
-  say(`  vivo con ${tier.liveModel}, final usaría ${tier.finalModel}`);
+  check('live starts', started === true, String(started));
+  say(`  live on ${tier.liveModel}, final would use ${tier.finalModel}`);
 
   // feed it in real time in the background
   let feeding = true;
@@ -62,30 +62,30 @@ app.whenReady().then(async () => {
   // long enough to load the model and get several passes in
   await new Promise(r => setTimeout(r, 16000));
   const beforeWords = confirmed;
-  say(`  tras 16 s de vivo: ${beforeWords} palabras confirmadas`);
-  check('el vivo está funcionando antes de interferir', beforeWords > 5, `${beforeWords} palabras`);
+  say(`  after 16 s of live: ${beforeWords} words confirmed`);
+  check('live is working before anything interferes', beforeWords > 5, `${beforeWords} palabras`);
 
   // now the collision: a full transcription of another meeting, mid-recording
-  say('  --- pido "Transcribe now" de una reunión vieja ---');
+  say('  --- requesting "Transcribe now" on an old meeting ---');
   const t0 = Date.now();
   const res = await within(
     $(`window.yapper.transcribe(${JSON.stringify(old)}).then(t => t.length, e => 'err:' + e.message)`),
-    'transcribir mientras el vivo corre', 180000).catch(e => 'colgado:' + e.message);
+    'transcribing while live is running', 180000).catch(e => 'colgado:' + e.message);
   say(`  resultado: ${String(res).slice(0, 90)} en ${((Date.now() - t0) / 1000).toFixed(0)} s`);
-  check('la transcripción de la vieja funciona', typeof res === 'number' && res > 50, String(res));
+  check('transcribing the old one works', typeof res === 'number' && res > 50, String(res));
 
   // and the live loop has to still be alive afterwards
   const midWords = confirmed;
   await new Promise(r => setTimeout(r, 8000));
   feeding = false;
   const afterWords = confirmed;
-  say(`  palabras del vivo: ${beforeWords} antes, ${midWords} al terminar, ${afterWords} después`);
-  say(`  errores del vivo durante la colisión: ${errors.length}`);
+  say(`  live words: ${beforeWords} before, ${midWords} at the end, ${afterWords} after`);
+  say(`  live errors during the collision: ${errors.length}`);
   if (errors.length) say(`    ${errors.slice(0, 3).join(' | ')}`);
 
-  check('el vivo sigue confirmando después de la colisión',
-    afterWords > midWords, `se quedó en ${afterWords}`);
-  check('el vivo no se llenó de errores', errors.length <= 2,
+  check('live keeps confirming after the collision',
+    afterWords > midWords, `stalled at ${afterWords}`);
+  check('live did not fill up with errors', errors.length <= 2,
     `${errors.length} errores: ${errors.slice(0, 2).join(' | ')}`);
 
   await live.stop();

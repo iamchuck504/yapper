@@ -27,7 +27,7 @@ app.whenReady().then(() => {
     return { b: px[i], g: px[i + 1], r: px[i + 2], a: px[i + 3] };
   };
 
-  check('el PNG se lee', w > 0 && h > 0, `${w}×${h}`);
+  check('the PNG reads', w > 0 && h > 0, `${w}×${h}`);
 
   // --- the corners must be gone ---
   for (const [name, x, y] of [
@@ -39,17 +39,17 @@ app.whenReady().then(() => {
 
   // --- and the artwork must not be ---
   const mid = at(w >> 1, h >> 1);
-  check('el centro sigue opaco', mid.a === 255, `alpha ${mid.a}`);
-  check('la marca sigue oscura', luma(mid.r, mid.g, mid.b) < 60, `luma ${luma(mid.r, mid.g, mid.b).toFixed(0)}`);
+  check('the centre is still opaque', mid.a === 255, `alpha ${mid.a}`);
+  check('the mark is still dark', luma(mid.r, mid.g, mid.b) < 60, `luma ${luma(mid.r, mid.g, mid.b).toFixed(0)}`);
   for (const [name, x, y] of [['borde sup', w >> 1, 2], ['borde izq', 2, h >> 1]]) {
     const p = at(x, y);
-    check(`${name} conserva el cuerpo`, p.a === 255 && p.r > 200, `rgb ${p.r},${p.g},${p.b} a${p.a}`);
+    check(`${name} keeps the body`, p.a === 255 && p.r > 200, `rgb ${p.r},${p.g},${p.b} a${p.a}`);
   }
 
   let opaque = 0;
   for (let i = 3; i < px.length; i += 4) if (px[i] === 255) opaque++;
   const kept = opaque / (w * h);
-  check('conserva casi todo el lienzo', kept > 0.95 && kept < 0.99, `${(kept * 100).toFixed(1)}% opaco`);
+  check('keeps almost the whole canvas', kept > 0.95 && kept < 0.99, `${(kept * 100).toFixed(1)}% opaco`);
 
   // --- no dark halo: every partially transparent pixel must be body-coloured,
   // not a leftover blend with the black that was cut away ---
@@ -63,12 +63,12 @@ app.whenReady().then(() => {
     const f = a / 255;
     if (luma(px[p * 4 + 2] / f, px[p * 4 + 1] / f, px[p * 4] / f) < 120) fringe++;
   }
-  check('el borde no dejó halo oscuro', fringe === 0, `${fringe} de ${partial} píxeles del borde son oscuros`);
-  check('el borde quedó suavizado', partial > 200, `solo ${partial} píxeles intermedios (¿borde duro?)`);
+  check('the edge left no dark halo', fringe === 0, `${fringe} of ${partial} edge pixels are dark`);
+  check('the edge came out antialiased', partial > 200, `only ${partial} intermediate pixels (hard edge?)`);
 
   // --- the .ico really holds every size ---
   const ico = fs.readFileSync(ICO);
-  check('el .ico es un icono', ico.readUInt16LE(0) === 0 && ico.readUInt16LE(2) === 1, 'cabecera inesperada');
+  check('the .ico is an icon', ico.readUInt16LE(0) === 0 && ico.readUInt16LE(2) === 1, 'cabecera inesperada');
   const count = ico.readUInt16LE(4);
   const sizes = [];
   let ok256 = false;
@@ -83,16 +83,16 @@ app.whenReady().then(() => {
     const isDib = ico.readUInt32LE(off) === 40
       && ico.readInt32LE(off + 4) === s
       && ico.readInt32LE(off + 8) === s * 2;
-    if (off + len > ico.length) { fails++; console.log(`FAIL  la entrada de ${s}px apunta fuera del archivo`); }
+    if (off + len > ico.length) { fails++; console.log(`FAIL  the ${s}px entry points outside the file`); }
     if (s === 256) {
       ok256 = true;
-      if (!isPng) { fails++; console.log('FAIL  la entrada de 256px debería ser PNG'); }
+      if (!isPng) { fails++; console.log('FAIL  the 256px entry should be PNG'); }
     } else if (!isDib) {
       fails++;
-      console.log(`FAIL  la entrada de ${s}px no es un DIB de 32 bits que el shell entienda`);
+      console.log(`FAIL  the ${s}px entry is not a 32-bit DIB the shell understands`);
     }
   }
-  check('trae los tamaños que Windows usa',
+  check('carries the sizes Windows uses',
     [16, 24, 32, 48, 64, 128].every(s => sizes.includes(s)) && ok256, sizes.join(', '));
 
   // --- a preview a human can judge ---

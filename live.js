@@ -198,7 +198,7 @@ async function pass(s) {
   if (s.bytes > maxBytes) {
     const skipped = (s.bytes - maxBytes) / BYTES_PER_SEC;
     dropFront(s, s.bytes - maxBytes);
-    if (DEBUG) console.log(`[live] backlog: salté ${skipped.toFixed(1)} s para no atrasarme más`);
+    if (DEBUG) console.log(`[live] backlog: skipped ${skipped.toFixed(1)} s to stop falling further behind`);
   }
 
   const pcm = Buffer.concat(s.chunks, s.bytes);

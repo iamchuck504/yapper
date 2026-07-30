@@ -63,11 +63,11 @@ app.whenReady().then(async () => {
 
   const sys = await wave('viz-sys');
   const mic = await wave('viz-mic');
-  say(`sys píxeles encendidos por frame: ${sys.join(', ')}`);
-  say(`mic píxeles encendidos por frame: ${mic.join(', ')}`);
+  say(`sys pixels lit per frame: ${sys.join(', ')}`);
+  say(`mic pixels lit per frame: ${mic.join(', ')}`);
   const moving = a => new Set(a).size > 1;
-  say(`sys se mueve: ${moving(sys)}   mic se mueve: ${moving(mic)}`);
-  say(`errores de consola (${consoleErrors.length}):`);
+  say(`sys moving: ${moving(sys)}   mic moving: ${moving(mic)}`);
+  say(`console errors (${consoleErrors.length}):`);
   for (const e of consoleErrors.slice(0, 6)) say(`  ${e}`);
 
   await $('stopRecording && stopRecording()').catch(() => {});

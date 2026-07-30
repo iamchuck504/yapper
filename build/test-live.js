@@ -22,11 +22,11 @@ function pickRecording() {
 
 (async () => {
   const wav = pickRecording();
-  if (!wav) { console.log('FAIL  no encontré ninguna grabación .wav para probar'); process.exit(1); }
-  console.log('grabación :', wav);
+  if (!wav) { console.log('FAIL  no .wav recording found to test with'); process.exit(1); }
+  console.log('recording  :', wav);
 
   const tier = engine.tierConfig(engine.guessTier());
-  console.log(`tier      : ${engine.guessTier()} (modelo ${tier.liveModel}, cada ${tier.cadenceMs} ms, ventana ${tier.windowSec} s)\n`);
+  console.log(`tier      : ${engine.guessTier()} (model ${tier.liveModel}, every ${tier.cadenceMs} ms, window ${tier.windowSec} s)\n`);
 
   const fd = fs.openSync(wav, 'r');
   const totalBytes = Math.min(fs.statSync(wav).size - engine.WAV_HEADER,
@@ -44,8 +44,8 @@ function pickRecording() {
     windowSec: tier.windowSec,
     language: 'en',
     onLine: obj => {
-      if (obj.status) { console.log(`listo en ${Date.now() - started} ms\n`); return; }
-      if (obj.error) { console.log('ERROR de la pasada:', obj.error); return; }
+      if (obj.status) { console.log(`ready in ${Date.now() - started} ms\n`); return; }
+      if (obj.error) { console.log('ERROR from the pass:', obj.error); return; }
       passes++;
       if (obj.commit) {
         if (!firstAt) firstAt = Date.now() - started;
@@ -54,7 +54,7 @@ function pickRecording() {
       tentative = obj.tentative || '';
     }
   });
-  if (!ok) { console.log('FAIL  live.start devolvió false'); process.exit(1); }
+  if (!ok) { console.log('FAIL  live.start returned false'); process.exit(1); }
 
   // hand over 200 ms of audio every 200 ms, like a real meeting does
   const perChunk = Math.floor(engine.BYTES_PER_SEC * CHUNK_MS / 1000) & ~1;
@@ -72,14 +72,14 @@ function pickRecording() {
   await engine.stop();
 
   const words = confirmed.split(/\s+/).filter(Boolean).length;
-  console.log(`\n--- ${PLAY_SEC} s de reunión reproducidos en tiempo real ---`);
-  console.log(`primera confirmación : ${firstAt} ms después de empezar`);
+  console.log(`\n--- ${PLAY_SEC} s of meeting replayed in real time ---`);
+  console.log(`first confirmation   : ${firstAt} ms after start`);
   console.log(`pasadas              : ${passes}`);
   console.log(`palabras confirmadas : ${words}`);
-  console.log(`cola tentativa       : ${tentative || '(vacía)'}`);
+  console.log(`tentative tail       : ${tentative || '(empty)'}`);
   console.log(`\ntexto confirmado:\n${confirmed}\n`);
 
-  if (!words) { console.log('FAIL  no se confirmó nada'); process.exit(1); }
-  if (words < PLAY_SEC * 0.4) console.log(`AVISO  solo ${(words / PLAY_SEC).toFixed(1)} palabras/s — ¿silencio o va atrasado?`);
+  if (!words) { console.log('FAIL  nothing was confirmed'); process.exit(1); }
+  if (words < PLAY_SEC * 0.4) console.log(`WARNING  only ${(words / PLAY_SEC).toFixed(1)} words/s — silence, or falling behind?`);
   console.log('PASS');
 })().catch(e => { console.log('FAIL', e.message); process.exit(1); });

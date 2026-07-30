@@ -26,7 +26,7 @@ app.whenReady().then(async () => {
 
   say(`plataforma: ${process.platform}`);
   say(`Notification.isSupported(): ${Notification.isSupported()}`);
-  say(`acceso directo en Inicio: ${fs.existsSync(START_MENU)}`);
+  say(`Start menu shortcut: ${fs.existsSync(START_MENU)}`);
 
   if (process.env.WITH_SHORTCUT === '1' && !fs.existsSync(START_MENU)) {
     const ok = shell.writeShortcutLink(START_MENU, 'create', {
@@ -37,7 +37,7 @@ app.whenReady().then(async () => {
       appUserModelId: 'com.yapper.meetingnotes',
       description: 'Yapper'
     });
-    say(`creado para la prueba: ${ok} -> ${START_MENU}`);
+    say(`created for the test: ${ok} -> ${START_MENU}`);
     await new Promise(r => setTimeout(r, 1500));    // let the shell notice it
   }
 
@@ -57,15 +57,15 @@ app.whenReady().then(async () => {
   };
 
   const n = main.notifyMeeting('Slack');
-  if (!n) { say('FAIL  notifyMeeting no devolvió nada — no se intentó mostrar'); app.exit(1); return; }
+  if (!n) { say('FAIL  notifyMeeting returned nothing — no attempt to show'); app.exit(1); return; }
 
   await new Promise(r => setTimeout(r, 6000));
 
   say('');
-  if (seen.includes('failed')) say('RESULTADO: Windows rechazó el toast.');
-  else if (seen.includes('show')) say('RESULTADO: el toast se mostró en el sistema.');
-  else say('RESULTADO: ni show ni failed — el toast se entregó sin confirmación observable.');
-  say(`eventos vistos: ${seen.join(', ') || '(ninguno)'}`);
+  if (seen.includes('failed')) say('RESULT: Windows rejected the toast.');
+  else if (seen.includes('show')) say('RESULT: the toast was shown by the system.');
+  else say('RESULT: neither show nor failed — the toast was delivered with no observable confirmation.');
+  say(`events seen: ${seen.join(', ') || '(none)'}`);
 
   app.exit(0);
 }).catch(e => { say('FAIL ' + (e.stack || e.message)); app.exit(1); });

@@ -38,9 +38,9 @@ const ok = (req, res) => {
 (async () => {
   // --- the providers a user can pick ---
   const ids = llm.providerList().map(p => p.id);
-  check('hay un proveedor sin key (la suscripción)',
+  check('there is a provider with no key (the subscription)',
     llm.providerList().some(p => !p.needsKey), `proveedores: ${ids.join(', ')}`);
-  check('hay una salida genérica para una API oficial futura',
+  check('there is a generic seam for a future official API',
     ids.includes('compatible'), `proveedores: ${ids.join(', ')}`);
 
   // --- routing and payload ---
@@ -49,29 +49,29 @@ const ok = (req, res) => {
     { provider: 'compatible', apiKey: 'k-123', baseUrl: srv.url, model: 'some-model' },
     { system: 'INSTRUCTIONS', input: 'TRANSCRIPT', maxTokens: 1234 });
   const req = srv.seen[0];
-  check('devuelve el texto del modelo', out === 'the notes', `devolvió "${out}"`);
-  check('pega en /chat/completions', req.url === '/v1/chat/completions', req.url);
-  check('manda la key como Bearer', req.headers.authorization === 'Bearer k-123', req.headers.authorization);
-  check('el prompt va como system y la transcripción como user',
+  check('returns the model text', out === 'the notes', `returned "${out}"`);
+  check('posts to /chat/completions', req.url === '/v1/chat/completions', req.url);
+  check('sends the key as Bearer', req.headers.authorization === 'Bearer k-123', req.headers.authorization);
+  check('the prompt goes as system and the transcript as user',
     req.body.messages[0].role === 'system' && req.body.messages[0].content === 'INSTRUCTIONS'
     && req.body.messages[1].content === 'TRANSCRIPT',
     JSON.stringify(req.body.messages));
-  check('respeta el modelo elegido', req.body.model === 'some-model', req.body.model);
+  check('respects the chosen model', req.body.model === 'some-model', req.body.model);
   await srv.close();
 
   // an unset model falls back to the provider's own default
   srv = await fakeServer(ok);
   await llm.generate({ provider: 'openrouter', apiKey: 'k', baseUrl: srv.url, model: '' },
     { system: 's', input: 'i' });
-  check('sin modelo usa el default del proveedor',
-    !!srv.seen[0].body.model, `mandó "${srv.seen[0].body.model}"`);
+  check('with no model it uses the provider default',
+    !!srv.seen[0].body.model, `sent "${srv.seen[0].body.model}"`);
   await srv.close();
 
   // a trailing slash in the endpoint must not produce //chat/completions
   srv = await fakeServer(ok);
   await llm.generate({ provider: 'compatible', apiKey: 'k', baseUrl: srv.url + '/', model: 'm' },
     { system: 's', input: 'i' });
-  check('tolera la barra final en el endpoint',
+  check('tolerates a trailing slash on the endpoint',
     srv.seen[0].url === '/v1/chat/completions', srv.seen[0].url);
   await srv.close();
 
@@ -79,15 +79,15 @@ const ok = (req, res) => {
   const expectError = async (label, cfg, want) => {
     try {
       await llm.generate(cfg, { system: 's', input: 'i' });
-      check(label, false, 'no lanzó ningún error');
+      check(label, false, 'threw no error');
     } catch (e) {
       check(label, e.message.includes(want), `dijo "${e.message}"`);
     }
   };
 
-  await expectError('sin key lo dice claro',
+  await expectError('with no key it says so plainly',
     { provider: 'anthropic', apiKey: '' }, 'needs an API key');
-  await expectError('sin endpoint lo dice claro',
+  await expectError('with no endpoint it says so plainly',
     { provider: 'compatible', apiKey: 'k', baseUrl: '' }, 'needs an endpoint');
   await expectError('proveedor desconocido no revienta feo',
     { provider: 'nope' }, 'No note provider');
@@ -96,7 +96,7 @@ const ok = (req, res) => {
     res.writeHead(401, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: { message: 'invalid key' } }));
   });
-  await expectError('401 se explica como key rechazada',
+  await expectError('401 is explained as a rejected key',
     { provider: 'compatible', apiKey: 'bad', baseUrl: srv.url, model: 'm' }, 'key was rejected');
   await srv.close();
 
@@ -104,7 +104,7 @@ const ok = (req, res) => {
     res.writeHead(429, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: { message: 'slow down' } }));
   });
-  await expectError('429 se explica como límite o saldo',
+  await expectError('429 is explained as a rate limit or credit issue',
     { provider: 'compatible', apiKey: 'k', baseUrl: srv.url, model: 'm' }, 'Rate limited');
   await srv.close();
 
@@ -114,9 +114,9 @@ const ok = (req, res) => {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify([{ error: { code: 400, message: 'Please pass a valid API key', status: 'INVALID_ARGUMENT' } }]));
   });
-  await expectError('un error envuelto en array se lee igual',
+  await expectError('an error wrapped in an array still reads',
     { provider: 'gemini', apiKey: 'bad', baseUrl: srv.url, model: 'm' }, 'Please pass a valid API key');
-  await expectError('y un 400 por la key se explica como key rechazada',
+  await expectError('and a 400 caused by the key is explained as a rejected key',
     { provider: 'gemini', apiKey: 'bad', baseUrl: srv.url, model: 'm' }, 'key was rejected');
   await srv.close();
 
@@ -127,9 +127,9 @@ const ok = (req, res) => {
   try {
     await llm.generate({ provider: 'gemini', apiKey: 'bad', baseUrl: srv.url, model: 'm' },
       { system: 's', input: 'i' });
-    check('el error no muestra JSON crudo', false, 'no lanzó');
+    check('the error does not show raw JSON', false, 'did not throw');
   } catch (e) {
-    check('el error no muestra JSON crudo',
+    check('the error does not show raw JSON',
       !e.message.includes('{') && !e.message.includes('"'), `dijo "${e.message}"`);
   }
   await srv.close();
@@ -138,7 +138,7 @@ const ok = (req, res) => {
     res.writeHead(500, { 'Content-Type': 'text/plain' });
     res.end('upstream exploded');
   });
-  await expectError('un cuerpo que no es JSON no revienta',
+  await expectError('a non-JSON body does not blow up',
     { provider: 'compatible', apiKey: 'k', baseUrl: srv.url, model: 'm' }, 'upstream exploded');
   await srv.close();
 
@@ -146,11 +146,11 @@ const ok = (req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ choices: [{ message: { content: '   ' } }] }));
   });
-  await expectError('una respuesta vacía no se guarda como notas',
+  await expectError('an empty response is not saved as notes',
     { provider: 'compatible', apiKey: 'k', baseUrl: srv.url, model: 'm' }, 'empty response');
   await srv.close();
 
-  await expectError('una URL inválida se explica',
+  await expectError('an invalid URL is explained',
     { provider: 'compatible', apiKey: 'k', baseUrl: 'not a url', model: 'm' }, 'not a valid URL');
 
   console.log(fails ? `\n${fails} fallos` : '\nPASS');

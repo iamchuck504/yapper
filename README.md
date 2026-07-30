@@ -1,192 +1,319 @@
 # Yapper
 
-Clon de another meeting-notes app AI: graba tus reuniones, las transcribe **localmente** con Whisper y genera un acta en markdown (resumen, puntos clave, decisiones y pendientes) usando Claude Code con tu suscripción Max. Nada de audio sale de tu PC; solo la transcripción de texto se envía a Claude para el resumen.
+A desktop app for meetings: it records the call, transcribes it **on your own
+machine** with Whisper, and turns the transcript into a structured markdown
+write-up — summary, key points, decisions, action items. The audio never leaves
+the device. Only text is sent for the notes, and only to the provider you pick,
+which can be a model running locally if you want nothing to leave at all.
 
-> Para revisar la arquitectura y la estructura de build: **[ARCHITECTURE.md](ARCHITECTURE.md)** (en inglés).
+> Architecture and build structure: **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 >
-> **Manual con capturas + evaluación honesta** (qué hace bien, qué le falta, y la
-> comparación con another meeting-notes app en ambas direcciones): **[docs/MANUAL.md](docs/MANUAL.md)** (en inglés).
+> **Manual with screenshots and an honest assessment** (what it does well, what
+> it is missing, and how it stacks up against the commercial options):
+> **[docs/MANUAL.md](docs/MANUAL.md)**.
 >
-> **Para instalar sin clonar nada:** el instalador vive en
+> **To install without cloning anything:** the installer lives in
 > [yapper-releases](https://github.com/iamchuck504/yapper-releases/releases/latest)
-> (repo público solo de instaladores; el código sigue aquí, privado). Instala por
-> usuario, baja el motor solo en el primer arranque y se auto-actualiza desde ese feed.
-> Publicar una versión nueva: subir `version` en `package.json` y `npm run release`.
+> (a public installers-only repo; the code stays here, private). It installs per
+> user, downloads the engine on first launch only, and auto-updates from that
+> feed. To publish a new version: bump `version` in `package.json` and run
+> `npm run release`.
 
-## En vivo (estilo another meeting-notes app)
+## Live transcription
 
-- **Transcripción en streaming.** El renderer manda PCM continuo; `live.js` mantiene un buffer rodante de 12 s y lo re-transcribe cada ~0.7 s. Una palabra solo se "confirma" cuando dos pasadas seguidas coinciden (LocalAgreement-2); la cola tentativa se muestra atenuada y se corrige sola. Las pausas largas abren párrafo nuevo.
-- **Qué tan atrás va.** Medido reproduciendo un minuto de reunión real a velocidad de reloj en una RTX 4080 SUPER: **2.6 s de mediana** entre lo que se dice y lo que queda confirmado (peor caso 4.8 s). La cola tentativa aparece antes, cerca de 1 s. Una válvula de seguridad confirma lo que lleve más de 1.5 s sin acuerdo, para que un pasaje difícil no congele el transcript.
-- **Burbuja flotante.** En reposo es una **cápsula** del tamaño de su reloj: nivel de audio real (las barras se mueven con la señal capturada, no es animación) + cronómetro. Al pasar el mouse se abre al transcript en vivo con los controles; al salir se vuelve cápsula, con un pin para dejarla abierta. Arrastrable, sigue el tema claro/oscuro. Toggle "Floating bubble".
-- **Auto-detección de reuniones.** Detecta qué app está usando el micrófono (Zoom, Teams, Slack, Discord, Webex y llamadas en el navegador: Meet/Hangouts) y **manda una notificación del sistema**: un clic empieza a grabar, sin tener que ir a buscar la ventana. Cuando Yapper ya está enfrente, el aviso aparece dentro de la app. Toggle "Auto-detect meetings". Solo Windows por ahora; en Mac llega con el rework de audio.
+- **Streaming transcript.** The renderer sends continuous PCM; `live.js` keeps a
+  rolling 12 s buffer and re-transcribes it every ~0.7 s. A word is only
+  "confirmed" once two consecutive passes agree (LocalAgreement-2); the tentative
+  tail is shown dimmed and corrects itself. Long pauses start a new paragraph.
+- **How far behind it runs.** Measured by replaying a minute of a real meeting at
+  wall-clock speed on an RTX 4080 SUPER: **2.6 s median** between something being
+  said and it being confirmed (4.8 s worst case). The tentative tail shows up
+  earlier, around 1 s. A safety valve confirms anything that has gone 1.5 s
+  without agreement, so a difficult passage cannot freeze the transcript.
+- **Floating bubble.** At rest it is a **capsule** the size of its own clock: real
+  audio level (the bars move with the captured signal — it is not an animation)
+  plus a timer. Hovering expands it to the live transcript with the controls;
+  leaving collapses it back, and a pin keeps it open. Draggable, follows the
+  light/dark theme. Toggle: "Floating bubble".
+- **Meeting auto-detection.** It detects which app is using the microphone (Zoom,
+  Teams, Slack, Discord, Webex, and browser calls: Meet/Hangouts) and **fires a
+  system notification**: one click starts recording, with no hunting for the
+  window. When Yapper is already in front, the prompt appears inside the app.
+  Toggle: "Auto-detect meetings". Windows only for now; macOS gets it with the
+  audio rework.
 
-El preview en vivo es *solo un adelanto*: al detener, la transcripción final se rehace con una pasada completa de más calidad, y de ahí salen las notas.
+The live preview is *only a preview*: on stop, the final transcript is redone
+with a full, higher-quality pass, and that is what the notes are built from.
 
-## El motor y los niveles
+## The engine and the tiers
 
-La transcripción corre sobre **whisper.cpp** (`whisper-server` en localhost). No hay Python, ni módulos nativos de Node que haya que recompilar por plataforma: son binarios sueltos y modelos `.bin`.
+Transcription runs on **whisper.cpp** (`whisper-server` on localhost). No Python,
+no native Node modules to rebuild per platform: just standalone binaries and
+`.bin` models.
 
-La primera vez que arranca, Yapper **mide esta máquina** en vez de adivinar por marca: corre unas pasadas de 10 s y guarda el resultado en ajustes.
+On first launch, Yapper **measures this machine** instead of guessing from the
+brand name: it runs a few 10 s passes and stores the result in settings.
 
-Anclas medidas en la misma PC con la muestra de calibración: RTX 4080 SUPER **75 ms**, i7-12700K solo CPU **736 ms**.
+Anchors measured on the same PC with the calibration sample: RTX 4080 SUPER
+**75 ms**, i7-12700K CPU-only **736 ms**.
 
-| Nivel | Cuándo | Vivo | Final | Retraso medido |
+| Tier | When | Live | Final | Measured lag |
 |---|---|---|---|---|
-| `fast` | pasada de `base` ≤ 250 ms (GPU) | `small`, cada 0.7 s | `small` | 2.6 s |
-| `steady` | ≤ 1200 ms | `base`, cada 2 s | `small` | 4.4 s |
-| `modest` | más lento | sin vivo | `small` | — |
+| `fast` | `base` pass ≤ 250 ms (GPU) | `small`, every 0.7 s | `small` | 2.6 s |
+| `steady` | ≤ 1200 ms | `base`, every 2 s | `small` | 4.4 s |
+| `modest` | slower than that | no live | `small` | — |
 
-**`medium` no se usa en ningún lado**, aunque en papel transcribe mejor. En vivo sus pasadas son tan lentas que dos ventanas seguidas ya no coinciden y se confirma menos texto. Y en la pasada final entra en bucles de repetición con audio real de reunión: en un minuto de un huddle ruidoso devolvió *"I'm not asking you to do it. I actually very much"* seis veces seguidas, con y sin beam search, donde `small` transcribió lo mismo limpio. Con voz limpia (la muestra de JFK) los dos van bien; las reuniones no son voz limpia.
+**`medium` is not used anywhere**, even though on paper it transcribes better.
+Live, its passes are so slow that two consecutive windows no longer agree and
+less text gets confirmed. And on the final pass it falls into repetition loops on
+real meeting audio: in one minute of a noisy huddle it returned *"I'm not asking
+you to do it. I actually very much"* six times in a row, with and without beam
+search, where `small` transcribed the same stretch cleanly. On clean speech (the
+JFK sample) both do fine; meetings are not clean speech.
 
-Si una máquina resulta más lenta de lo que midió (batería, CPU ocupada, otra app en la GPU), el vivo **estira solo su cadencia** en vez de irse quedando cada vez más atrás.
+If a machine turns out slower than it measured (battery, busy CPU, another app on
+the GPU), the live pass **stretches its own cadence** instead of falling further
+and further behind.
 
-## Quién escribe las notas
+## Who writes the notes
 
-La transcripción es siempre local. Las notas no, y no todo el mundo paga un modelo igual, así que el proveedor se elige en la app (**Notes by**):
+Transcription is always local. The notes are not, and not everyone pays for the
+same model, so the provider is chosen in the app (**Notes by**):
 
-| Proveedor | Qué necesita | Costo |
+| Provider | What it needs | Cost |
 |---|---|---|
-| **Claude Code** | el CLI instalado y con sesión (la suscripción Max) | incluido |
-| **Google Gemini** | key gratis de [aistudio.google.com](https://aistudio.google.com/apikey), **sin tarjeta**, ~1 min | gratis |
-| **OpenRouter** | key propia; sus modelos `:free` no cobran | gratis o de pago |
-| **Ollama** | Ollama instalado en la misma máquina | gratis y privado |
-| **Anthropic API** | key propia de console.anthropic.com | de pago |
-| **Other (OpenAI-compatible)** | cualquier endpoint que hable `/chat/completions` | según el endpoint |
+| **Claude Code** | the CLI installed and signed in | included in your plan |
+| **Google Gemini** | a free key from [aistudio.google.com](https://aistudio.google.com/apikey), **no credit card**, ~1 min | free |
+| **OpenRouter** | your own key; their `:free` models do not bill | free or paid |
+| **Ollama** | Ollama installed on the same machine | free and private |
+| **Anthropic API** | your own key from console.anthropic.com | paid |
+| **Other (OpenAI-compatible)** | any endpoint that speaks `/chat/completions` | depends on the endpoint |
 
-Esa última fila es a propósito la salida hacia adelante: si esto termina siendo un producto con una API oficial, se agrega una entrada en `llm.js` y ya — los tres lugares que generan notas (resumen, regenerar, título automático) no se tocan.
+That last row is deliberately the way forward: if this ever becomes a product
+with an official API, it is one more entry in `llm.js` and nothing else — the
+three places that generate notes (summary, regenerate, auto-title) stay
+untouched.
 
-**Por qué no hay una opción de cero configuración.** No existe. Toda API hospedada necesita una credencial, y esa credencial sale de uno de tres lugares: metida dentro de la app (la abusan en días y viola los términos de cualquier proveedor), servida por un backend que alguien paga, o la del propio usuario. Lo más cerca que se puede llegar honestamente es **Gemini**: gratis, sin tarjeta, y sacar la key toma alrededor de un minuto. La única alternativa realmente sin credencial es correr el modelo localmente — de ahí la opción de **Ollama** para quien ya lo tenga.
+**Why there is no zero-setup option.** There isn't one. Every hosted API needs a
+credential, and that credential comes from one of three places: shipped inside
+the app (abused within days, and against every provider's terms), served by a
+backend somebody pays for, or the user's own. The closest honest option is
+**Gemini**: free, no card, and getting the key takes about a minute. The only
+genuinely credential-free alternative is running the model locally — hence
+**Ollama** for anyone who already has it.
 
-**Ojo con los planes gratis:** casi todos entrenan con lo que les mandas. La app lo dice en pantalla al elegirlos, porque una transcripción de reunión no siempre es tuya para compartir. Para reuniones confidenciales, Claude Code, la API de pago u Ollama.
+**A word on free tiers:** almost all of them train on what you send. The app says
+so on screen when you pick one, because a meeting transcript is not always yours
+to share. For confidential meetings: Claude Code, a paid API, or Ollama.
 
-Si el modelo configurado deja de existir (los proveedores retiran ids), **Test connection** le pregunta al endpoint qué modelos sí tiene y los lista en el error, en vez de dejarte adivinando.
+If the configured model stops existing (providers retire ids), **Test
+connection** asks the endpoint which models it does have and lists them in the
+error, instead of leaving you guessing.
 
-La key se guarda **cifrada con el llavero del sistema** (DPAPI en Windows, Keychain en macOS), no en texto plano dentro de `settings.json`, y nunca sale del proceso principal: el renderer solo se entera de si hay una o no. Si el sistema no tiene llavero, la app lo dice en vez de fingir que está protegida.
+The key is stored **encrypted with the system keyring** (DPAPI on Windows,
+Keychain on macOS), not in plaintext inside `settings.json`, and it never leaves
+the main process: the renderer only learns whether one exists. If the system has
+no keyring, the app says so instead of pretending to be protected.
 
-Hay un botón **Test connection** que hace una llamada mínima y responde "working" o el error real (key rechazada, sin saldo, modelo inexistente).
+There is a **Test connection** button that makes a minimal call and answers
+"working" or the real error (key rejected, no credit, model does not exist).
 
-## Reuniones de una a dos horas
+## One- to two-hour meetings
 
-Medido de punta a punta con una reunión de 2 h en el tier `fast` (`build/test-two-hours.js`):
+Measured end to end with a 2 h meeting on the `fast` tier
+(`build/test-two-hours.js`):
 
-| Etapa | 2 horas de audio |
+| Stage | 2 hours of audio |
 |---|---|
-| Grabar | 220 MB en disco, 36.000 bloques escritos, nada retenido en memoria |
-| Vivo | 2.2 s de retraso, sin irse acumulando |
-| Transcribir | 115 s (63× tiempo real), +19 MB de memoria |
-| Transcripción | 84 KB, 2.040 líneas, última marca a 1h59m |
-| Notas | 73 s, todas las secciones, marcas hasta el minuto 208 |
-| Abrir la reunión | 512 ms |
-| Exportar | .md 8 KB · .txt 159 KB · PDF 133 KB en 497 ms |
+| Record | 220 MB on disk, 36,000 blocks written, nothing held in memory |
+| Live | 2.2 s lag, no drift |
+| Transcribe | 115 s (63× realtime), +19 MB memory |
+| Transcript | 84 KB, 2,040 lines, last stamp at 1h59m |
+| Notes | 73 s, every section, stamps out to minute 208 |
+| Open the meeting | 512 ms |
+| Export | .md 8 KB · .txt 159 KB · PDF 133 KB in 497 ms |
 
-**El audio se borra al transcribir.** La transcripción es el registro: de ahí salen las notas, es lo que se lee, se busca y se exporta, y es lo que se guarda. El audio existe para producirla y para sobrevivir a un apagón por el camino; una vez que hay transcripción en disco, la grabación se va. Son 110 MB por hora que, si no, serían 4.8 GB al mes por una reunión diaria — y una grabación de tus compañeros es más delicada que su transcripción. another meeting-notes app hace lo mismo: nunca guarda audio.
+**Audio is deleted once transcribed.** The transcript is the record: it is what
+the notes come from, what you read, search and export, and what gets kept. The
+audio exists to produce it and to survive a power cut along the way; once the
+transcript is on disk, the recording goes. That is 110 MB per hour which would
+otherwise be 4.8 GB a month for one daily meeting — and a recording of your
+colleagues is more sensitive than its transcript. another meeting-notes app takes the same posture:
+it never stores audio at all.
 
-- Primero se escribe la transcripción, después se libera el audio. Un fallo entre ambos no cuesta nada.
-- Si la transcripción **falla**, el audio se conserva para reintentar. Es justo para eso que existe.
-- **Keep this meeting's audio** conserva el audio de **esa reunión y solo esa**. Arranca apagado siempre, y se apaga solo —y se desmarca en pantalla— en cuanto lo ha cumplido. No es una preferencia guardada: enciéndelo antes de una reunión delicada y no tienes que acordarte de apagarlo.
-- Las reuniones anteriores a este cambio siguen con su audio. La app te dice cuánto ocupan y ofrece liberarlo (a la papelera) cuando tú lo pidas — no borra tus grabaciones por su cuenta.
+- The transcript is written first, then the audio is released. A failure in
+  between costs nothing.
+- If transcription **fails**, the audio is kept so it can be retried. That is
+  exactly what it is there for.
+- **Keep this meeting's audio** keeps the audio for **that meeting and only that
+  one**. It always starts off, and turns itself off — unchecking on screen — as
+  soon as it has done its job. It is not a saved preference: switch it on before
+  a sensitive meeting and you do not have to remember to switch it back.
+- Meetings from before this change keep their audio. The app tells you how much
+  space they take and offers to free it (to the recycle bin) when you ask — it
+  does not delete your recordings on its own.
 
-## Cómo funciona
+## How it works
 
-1. **Grabar reunión** — captura el audio del sistema (lo que escuchas: Meet, Zoom, Teams…) por loopback de Windows **y** tu micrófono, mezclados en un solo audio.
-2. El audio se escribe a disco **según llega**, ya en el formato que consume el transcriptor (WAV 16 kHz mono). Si se va la luz a media reunión, lo grabado hasta ese momento se reproduce y se transcribe igual.
-3. **Detener y resumir** — pasada completa de whisper.cpp por ventanas, y luego `claude -p` para generar el acta.
-4. Cada reunión queda en `Documents\Meetings\AAAA-MM-DD_HHMM\`:
-   - `recording.wav` — el audio
-   - `transcript.txt` — la transcripción con marcas de tiempo
-   - `notes.md` — el acta generada
-5. La barra lateral lista las reuniones anteriores; clic para volver a ver el acta.
+1. **Record meeting** — captures system audio (what you hear: Meet, Zoom,
+   Teams…) via Windows loopback **and** your microphone, mixed into one stream.
+2. Audio is written to disk **as it arrives**, already in the format the
+   transcriber consumes (WAV 16 kHz mono). If the power goes out mid-meeting,
+   what was recorded up to that point still plays and still transcribes.
+3. **Stop and summarize** — a full windowed whisper.cpp pass, then the configured
+   provider generates the write-up.
+4. Each meeting lands in `Documents\Meetings\YYYY-MM-DD_HHMM\`:
+   - `recording.wav` — the audio
+   - `transcript.txt` — the transcript with timestamps
+   - `notes.md` — the generated notes
+5. The sidebar lists previous meetings; click to open the notes again.
 
-## Importar notas de voz
+## Importing voice notes
 
-Cualquier formato que Chromium sepa decodificar (mp3, m4a, opus, flac, ogg, wav, mp4…) se convierte dentro de la app al WAV que usa el transcriptor. No hace falta ffmpeg ni ninguna dependencia extra: los códecs ya vienen dentro de Electron.
+Any format Chromium can decode (mp3, m4a, opus, flac, ogg, wav, mp4…) is
+converted inside the app to the WAV the transcriber uses. No ffmpeg, no extra
+dependency: the codecs already ship inside Electron.
 
-Una nota de voz importada recibe **el mismo trato que una reunión grabada**: transcripción, notas y título automático. Si el archivo se llama algo genérico (`recording`, `New Recording 3`, `WhatsApp Audio…`, o solo una fecha), el título lo pone el modelo según lo que se habló, en vez de llamar a la reunión "recording".
+An imported voice note gets **the same treatment as a recorded meeting**:
+transcript, notes and auto-title. If the file is named something generic
+(`recording`, `New Recording 3`, `WhatsApp Audio…`, or just a date), the model
+titles it from what was actually said, instead of calling the meeting
+"recording".
 
-Medido con archivos reales: un `.m4a` de 2.5 min tarda 3 s en total; un `.webm` de 24 min, 27 s.
+Measured with real files: a 2.5 min `.m4a` takes 3 s end to end; a 24 min
+`.webm`, 27 s.
 
-## Uso
+## Usage
 
 ```
 npm start
 ```
 
-o el acceso directo **Yapper** del Escritorio.
+or the **Yapper** shortcut on the Desktop.
 
-## Opciones de notas (UI en inglés)
+## Note options
 
-- **Note style**: General, Minutes, **Memo**, Stand-up, 1:1, Client call, Brainstorm — cambia las secciones del acta. *Memo* está pensado para reenviar a alguien que no estuvo: prosa en vez de viñetas, lenguaje neutro, y dice explícitamente cuando algo se discutió pero no se decidió.
-- **Detail**: Concise (bullets cortos) o Detailed (exhaustivo).
-- **Extra instructions**: contexto libre para Claude (asistentes, proyecto, en qué enfocarse).
-- **Participants**: los nombres se le pasan a Whisper como prompt inicial, así deja de escribir "Maya" como "Nympho". Es un dato **de esa reunión**, no una preferencia: el campo arranca vacío cada vez, para que los nombres de la semana pasada no se cuelen en el acta de hoy.
-- **Borrar reuniones**: cada fila de la barra lateral tiene una papelera que aparece al pasar el cursor. Las grabaciones fallidas (sin audio) se ven atenuadas y etiquetadas *Empty recording*. Siempre pregunta antes, enumerando lo que contiene, y va a la papelera del sistema — nunca borra audio de forma irreversible.
-- **↻ Regenerate**: rehace las notas de cualquier reunión guardada con otro estilo/detalle.
-- **Título automático**: si no escribes título, Claude nombra la reunión según lo que se habló (2-6 palabras); si la grabación no da para tanto, cae a la fecha.
-- **Export** (menú): notas en PDF, notas en Markdown, **transcripción completa en Markdown** (marcas de tiempo en negrita, párrafo nuevo tras un minuto de silencio), transcripción en .txt, o notas + transcripción en un solo .md.
-- **Start with Windows**: arranca Yapper al iniciar sesión (encendido por defecto, se apaga desde el toggle).
-- Las notas salen **en inglés** y se muestran como tarjetas con código de color: Summary (violeta), Key points (cian), Decisions (verde), Action items (ámbar), Open questions (rosa), Blockers/Risks (rojo), Next steps (teal).
+- **Note style**: General, Minutes, **Memo**, Stand-up, 1:1, Client call,
+  Brainstorm — changes the sections in the write-up. *Memo* is meant for
+  forwarding to someone who was not there: prose instead of bullets, neutral
+  language, and it says explicitly when something was discussed but not decided.
+- **Detail**: Concise (short bullets) or Detailed (exhaustive).
+- **Extra instructions**: free-form context for the model (attendees, project,
+  what to focus on).
+- **Participants**: the names are passed to Whisper as an initial prompt, so it
+  stops writing "Maya" as "Nympho". This is **per meeting**, not a preference:
+  the field starts empty every time, so last week's names cannot leak into
+  today's write-up.
+- **Deleting meetings**: every sidebar row has a trash icon that appears on
+  hover. Failed recordings (no audio) are dimmed and labelled *Empty recording*.
+  It always asks first, listing what would be lost, and it goes to the system
+  recycle bin — it never deletes audio irreversibly.
+- **↻ Regenerate**: redoes the notes for any saved meeting with a different
+  style or detail level.
+- **Auto-title**: if you do not type a title, the model names the meeting from
+  what was said (2–6 words); if the recording is too thin for that, it falls back
+  to the date.
+- **Export** (menu): notes as PDF, notes as Markdown, **full transcript as
+  Markdown** (bold timestamps, new paragraph after a minute of silence),
+  transcript as .txt, or notes plus transcript in a single .md.
+- **Start with Windows**: launches Yapper at sign-in (on by default, switched off
+  from the toggle).
+- Notes come out **in English** and are shown as colour-coded cards: Summary
+  (violet), Key points (cyan), Decisions (green), Action items (amber), Open
+  questions (pink), Blockers/Risks (red), Next steps (teal).
 
-## Compartir con compañeros
+## Sharing with colleagues
 
-1. Copia la carpeta del proyecto (sin `node_modules`, `bin` ni `models` si quieres que pese poco: setup los baja).
-2. En la PC nueva: instala Node (`winget install OpenJS.NodeJS.LTS`) si no está.
-3. Corre `powershell -ExecutionPolicy Bypass -File setup.ps1` — baja el motor de whisper.cpp (y la build CUDA si hay GPU NVIDIA), los modelos, instala Electron y crea el acceso directo.
-4. Para las notas cada quien elige su proveedor en la app: su propia sesión de Claude Code, o su propia key. La grabación y la transcripción funcionan sin nada de eso.
+1. Copy the project folder (without `node_modules`, `bin` or `models` if you want
+   it small: setup downloads them).
+2. On the new PC: install Node (`winget install OpenJS.NodeJS.LTS`) if it is not
+   there.
+3. Run `powershell -ExecutionPolicy Bypass -File setup.ps1` — it downloads the
+   whisper.cpp engine (and the CUDA build if there is an NVIDIA GPU), the models,
+   installs Electron and creates the shortcut.
+4. For notes, everyone picks their own provider in the app: their own Claude Code
+   session, or their own key. Recording and transcription work without any of
+   that.
 
-La app avisa al arrancar si falta algún requisito. Si una transcripción falla o se interrumpe, la grabación nunca se pierde: la reunión queda como "not transcribed" en la sidebar y un botón **Transcribe now** la recupera.
+The app warns at startup if a requirement is missing. If a transcription fails or
+is interrupted, the recording is never lost: the meeting shows as "not
+transcribed" in the sidebar and a **Transcribe now** button recovers it.
 
-## Requisitos
+## Requirements
 
-- Node + Electron (en `node_modules`)
-- whisper.cpp en `bin/` y modelos en `models/` (los baja `setup.ps1`)
-- Para las notas: Claude Code con sesión iniciada, **o** una API key en ajustes
+- Node + Electron (in `node_modules`)
+- whisper.cpp in `bin/` and models in `models/` (downloaded by `setup.ps1`)
+- For notes: Claude Code signed in, **or** an API key in settings
 
-## Configuración opcional (variables de entorno)
+## Optional configuration (environment variables)
 
-- `YAPPER_LANG` — fuerza el idioma de transcripción (`es`, `en`); por defecto se autodetecta.
-- `YAPPER_LIVE_DEBUG=1` — imprime una línea por pasada del vivo (costo, tamaño del buffer, cuántas palabras coincidieron y cuántas se confirmaron).
+- `YAPPER_LANG` — forces the transcription language (`es`, `en`); auto-detected
+  by default.
+- `YAPPER_LIVE_DEBUG=1` — prints one line per live pass (cost, buffer size, how
+  many words agreed and how many were confirmed).
 
-## El icono
+## The icon
 
-El arte original viene con las esquinas rellenas de negro en vez de transparentes. `build/icon-cut.js` las recorta y genera todo lo que la app usa:
+The original art ships with its corners filled in black rather than transparent.
+`build/icon-cut.js` trims them and generates everything the app uses:
 
 ```
 node_modules\electron\dist\electron.exe build\icon-cut.js [build\icon-source.png]
 node_modules\electron\dist\electron.exe build\icon-verify.js
 ```
 
-- `build/yapper-icon.ico` — lo que usa la ventana y el acceso directo (16, 24, 32, 48, 64, 128 y 256 px, cada uno remuestreado del original, no escalado del grande).
-- `build/yapper-icon.png` — el arte recortado a tamaño completo.
-- `renderer/app-mark.png` — la marca del splash, para que no haya un dibujo aparte que se quede viejo.
+- `build/yapper-icon.ico` — what the window and the shortcut use (16, 24, 32, 48,
+  64, 128 and 256 px, each resampled from the original rather than scaled down
+  from the largest).
+- `build/yapper-icon.png` — the trimmed art at full size.
+- `renderer/app-mark.png` — the splash mark, so there is no separate drawing that
+  can go stale.
 
-No borra "los píxeles negros": la marca es del mismo negro, así que eso la vaciaría. Rellena el negro **hacia adentro desde las cuatro esquinas**, lo que sigue la curva real del arte y no puede alcanzar la marca porque la marca no toca el borde. El borde antialiaseado se recalcula: cuánto color de cuerpo tiene cada píxel se convierte en su alfa, para no dejar un halo oscuro de un píxel.
+It does not delete "the black pixels": the mark is the same black, so that would
+hollow it out. It floods the black **inward from the four corners**, which
+follows the real curve of the art and cannot reach the mark, because the mark
+does not touch the edge. The antialiased edge is recomputed: how much body colour
+each pixel holds becomes its alpha, so there is no one-pixel dark halo left
+behind.
 
-Dentro del `.ico`, los tamaños hasta 128 van como **DIB clásico** y solo el de 256 como PNG. Chromium lee PNG sin problema, pero el shell de Windows —lo que dibuja el escritorio y la barra de tareas— es más viejo y quisquilloso; con PNG en todos los tamaños el icono se ve dentro de la app y no fuera.
+Inside the `.ico`, sizes up to 128 go in as **classic DIB** and only 256 as PNG.
+Chromium reads PNG without complaint, but the Windows shell — what draws the
+desktop and the taskbar — is older and fussier; with PNG at every size the icon
+shows up inside the app and not outside it.
 
-`icon-verify.js` comprueba las esquinas, que la marca siga intacta, que no haya halo, y que cada entrada del `.ico` tenga el formato que le toca; además deja una vista previa sobre fondo claro, oscuro y cuadrícula en `build/icon-preview.png`.
+`icon-verify.js` checks the corners, that the mark is still intact, that there is
+no halo, and that each `.ico` entry has the format it should; it also leaves a
+preview over light, dark and checkerboard backgrounds in
+`build/icon-preview.png`.
 
-**Los accesos directos se reparan solos.** Un `.lnk` guarda su propia copia de la ruta del icono, así que cambiar el icono de la app no mueve nada en el escritorio ni en la barra de tareas hasta reescribirlo — y nadie vuelve a correr `setup.ps1` después de una actualización. Al arrancar, la app revisa el acceso directo del escritorio, el de la barra de tareas anclada y el del menú inicio, y solo los reescribe si están desactualizados. De paso les pone el mismo AppUserModelID que usa la ventana, para que Windows no trate al botón anclado y a la app en ejecución como dos programas distintos.
+**Shortcuts repair themselves.** A `.lnk` stores its own copy of the icon path,
+so changing the app icon moves nothing on the desktop or the taskbar until it is
+rewritten — and nobody re-runs `setup.ps1` after an update. At startup the app
+checks the desktop shortcut, the pinned taskbar one and the start menu one, and
+rewrites them only if they are out of date. While it is there, it gives them the
+same AppUserModelID the window uses, so Windows does not treat the pinned button
+and the running app as two different programs.
 
-## Pruebas
+## Tests
 
 ```
-npm test                          # todo lo que corre sin modelo ni GPU
+npm test                          # everything that runs without a model or GPU
 ```
 
 ```
-node build\test-llm.js            # proveedores de notas, contra un servidor falso
-node build\test-keystore.js       # la key no queda legible (con electron usa el llavero real)
-node build\test-live-logic.js     # reglas de confirmación del vivo
-node build\test-meetings.js       # el borrado no puede salirse de la carpeta de reuniones
-node build\test-section-coverage.js  # cada estilo tiene botón y cada sección tiene color
-node build\test-ipc-wiring.js     # todo canal del preload tiene contraparte
-node build\test-bounds.js         # la burbuja nunca sale de la pantalla
-node build\test-engine.js         # arranca el servidor y mide una pasada
-node build\test-steady-cpu.js     # el nivel steady se sostiene sin GPU
-node build\tune-live.js           # replay de audio real comparando configuraciones
+node build\test-llm.js            # note providers, against a fake server
+node build\test-keystore.js       # the key is never left readable (with electron, real keyring)
+node build\test-live-logic.js     # live confirmation rules
+node build\test-meetings.js       # deletion cannot escape the meetings folder
+node build\test-section-coverage.js  # every style has a button, every section a colour
+node build\test-ipc-wiring.js     # every preload channel has a counterpart
+node build\test-bounds.js         # the bubble never leaves the screen
+node build\test-engine.js         # starts the server and times one pass
+node build\test-steady-cpu.js     # the steady tier holds up without a GPU
+node build\tune-live.js           # real-audio replay comparing configurations
 ```
 
-Los que abren ventana van con Electron:
+The ones that open a window run under Electron:
 
 ```
 node_modules\electron\dist\electron.exe build\test-record-cycle.js
@@ -205,18 +332,44 @@ node_modules\electron\dist\electron.exe build\test-styles.js
 node_modules\electron\dist\electron.exe build\test-stamps.js
 ```
 
-`test-record-cycle.js` es el ciclo completo de grabar: mete audio real por el mismo IPC que usa el micrófono, pausa a mitad para comprobar que en pausa **no se escribe nada**, y al parar verifica el WAV cerrado, la transcripción, las notas, el marcador y cómo queda en la barra lateral. Lo único que no cubre es el grafo de Web Audio, que necesita micrófono y una persona.
+`test-record-cycle.js` is the full recording cycle: it pushes real audio through
+the same IPC the microphone uses, pauses halfway to check that **nothing is
+written** while paused, and on stop verifies the closed WAV, the transcript, the
+notes, the marker and how the row ends up in the sidebar. The only thing it does
+not cover is the Web Audio graph, which needs a microphone and a person.
 
-`test-record-recovery.js` fuerza los dos fallos que van a pasar en la máquina de un compañero (captura denegada, y el dispositivo desapareciendo a mitad de arranque) y comprueba que la app se recupera. `test-smoke.js` recorre toda la interfaz escuchando errores del renderer, que de otro modo no se ven: un botón simplemente deja de funcionar.
+`test-record-recovery.js` forces the two failures that will happen on a
+colleague's machine (capture denied, and the device disappearing mid-startup) and
+checks that the app recovers. `test-smoke.js` walks the whole interface listening
+for renderer errors, which are otherwise invisible: a button simply stops
+working.
 
-Los que arrancan la app lo hacen contra carpetas temporales, nunca contra tus reuniones reales. Comparten `build/harness.js`, que resuelve una carrera que tenían todos: esperar `did-finish-load` **después** de encontrar la ventana cuelga la prueba para siempre si la página ya había cargado. `test-llm-ui.js` guarda una key y comprueba que no aparece ni en `settings.json` ni de vuelta en el renderer; `test-delete-ui.js` verifica que cancelar no borra, que se borra solo la fila elegida y que el aviso enumera lo que se perdería; `test-import.js` importa un `.m4a` y un `.webm` reales y revisa que el WAV resultante sea de verdad reproducible (cabecera, 16 kHz mono, y que no salga en silencio).
+The ones that launch the app do so against temporary folders, never against your
+real meetings. They share `build/harness.js`, which resolves a race they all had:
+waiting for `did-finish-load` **after** finding the window hangs the test forever
+if the page had already loaded. `test-llm-ui.js` saves a key and checks it
+appears neither in `settings.json` nor back in the renderer; `test-delete-ui.js`
+verifies that cancelling does not delete, that only the chosen row is deleted,
+and that the warning lists what would be lost; `test-import.js` imports a real
+`.m4a` and a real `.webm` and checks the resulting WAV is genuinely playable
+(header, 16 kHz mono, and not silent).
 
-`test-memo.js`, `test-styles.js` y `test-stamps.js` sí gastan llamadas al modelo. `test-styles.js` es el chequeo de coherencia: corre **cada** estilo contra la misma transcripción y compara las secciones que devuelve con las que ese estilo pidió — que no invente ninguna, que empiece por la que corresponde, y que la interfaz sepa colorearlas todas. Fue el que descubrió que *Minutes* devolvía las secciones sin marca de tiempo; `test-stamps.js` repite los estilos más propensos varias veces para confirmar que ya no pasa.
+`test-memo.js`, `test-styles.js` and `test-stamps.js` do spend model calls.
+`test-styles.js` is the consistency check: it runs **every** style against the
+same transcript and compares the sections it returns with the ones that style
+asked for — that it invents none, that it starts with the right one, and that the
+interface knows how to colour them all. It is the one that caught *Minutes*
+returning its sections without a timestamp; `test-stamps.js` repeats the most
+prone styles several times to confirm it no longer happens.
 
-Ojo: escriben el avance a un `progress.log` además de a stdout, porque Electron en Windows no vacía su salida hasta que el proceso termina, y una corrida de siete llamadas al modelo tarda unos diez minutos.
+Note: they write progress to a `progress.log` as well as stdout, because Electron
+on Windows does not flush its output until the process exits, and a run of seven
+model calls takes about ten minutes.
 
-## Notas
+## Notes
 
-- La primera transcripción tras encender el PC tarda un poco más (carga del modelo).
-- Si la reunión es larga, la transcripción en CPU puede tardar varios minutos; la app muestra el avance en vivo.
-- El audio del sistema requiere Windows (Electron `audio: 'loopback'`).
+- The first transcription after booting the PC takes a little longer (model
+  load).
+- For a long meeting, CPU transcription can take several minutes; the app shows
+  live progress.
+- System audio requires Windows (Electron `audio: 'loopback'`).

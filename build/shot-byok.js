@@ -25,13 +25,13 @@ app.whenReady().then(async () => {
 
   // 1. first launch: what does it say about notes?
   const warning = await $(`document.getElementById('status').textContent`);
-  console.log(`\naviso de arranque:\n  "${warning.trim()}"\n`);
+  console.log(`\nstartup warning:\n  "${warning.trim()}"\n`);
   await shot('1-primer-arranque');
 
   // 2. the friend opens the "Notes by" dropdown and picks the free one
   const options = await $(`[...document.getElementById('llm-provider').options]
     .map(o => o.value + ' — ' + o.textContent)`);
-  console.log('opciones del desplegable:');
+  console.log('dropdown options:');
   options.forEach(o => console.log(`  ${o}`));
 
   await $(`(() => { const s = document.getElementById('llm-provider');
@@ -47,7 +47,7 @@ app.whenReady().then(async () => {
     keyPlaceholder: document.getElementById('llm-key').placeholder,
     modelPlaceholder: document.getElementById('llm-model').placeholder
   })`);
-  console.log('\nlo que aparece al elegirla:');
+  console.log('\nwhat appears when you pick it:');
   for (const [k, v] of Object.entries(shown)) console.log(`  ${k.padEnd(17)} ${v}`);
 
   // 3. they paste a key
@@ -62,14 +62,14 @@ app.whenReady().then(async () => {
     placeholder: document.getElementById('llm-key').placeholder,
     notes: (await window.yapper.checkEnvironment()).notes
   }))()`);
-  console.log('\ndespués de pegarla:');
+  console.log('\nafter pasting it:');
   for (const [k, v] of Object.entries(after)) console.log(`  ${k.padEnd(12)} ${JSON.stringify(v)}`);
 
   // 4. Test connection, with a key that is not real: the error has to be useful
   await $(`document.getElementById('btn-llm-test').click()`);
   await new Promise(r => setTimeout(r, 8000));
   const status = await $(`document.getElementById('llm-status').textContent`);
-  console.log(`\nTest connection con una key falsa:\n  "${status}"`);
+  console.log(`\nTest connection with a fake key:\n  "${status}"`);
   await shot('4-test-connection');
 
   console.log(`\ncapturas en ${OUT}`);

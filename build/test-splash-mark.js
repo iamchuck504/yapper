@@ -28,15 +28,15 @@ app.whenReady().then(async () => {
   await win.loadFile(path.join(__dirname, '..', 'renderer', 'splash.html'));
   await new Promise(r => setTimeout(r, 900));
 
-  check('la política de seguridad no bloqueó nada', blocked.length === 0, blocked.join('\n      '));
+  check('the security policy blocked nothing', blocked.length === 0, blocked.join('\n      '));
 
   const loaded = await win.webContents.executeJavaScript(`(() => {
     const m = document.querySelector('img.mark');
     if (!m) return { found: false };
     return { found: true, complete: m.complete, w: m.naturalWidth, h: m.naturalHeight };
   })()`);
-  check('el splash tiene la marca', loaded.found, 'no hay <img class="mark">');
-  check('la imagen cargó de verdad',
+  check('the splash carries the mark', loaded.found, 'there is no <img class="mark">');
+  check('the image genuinely loaded',
     loaded.complete && loaded.naturalWidth !== 0 && loaded.w > 0,
     `complete=${loaded.complete} natural=${loaded.w}×${loaded.h}`);
 
@@ -52,7 +52,7 @@ app.whenReady().then(async () => {
     const b = px[i], g = px[i + 1], r = px[i + 2];
     if (r > 180 && g > 110 && g < 200 && b < 120) orange++;
   }
-  check('se ve el naranja de la marca', orange > 300, `${orange} píxeles naranjas en ${w}×${h}`);
+  check('the orange of the mark is visible', orange > 300, `${orange} orange pixels in ${w}×${h}`);
   console.log(`\ncaptura: ${SHOT}`);
 
   win.destroy();

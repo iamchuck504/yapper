@@ -33,7 +33,7 @@ require('../main.js');
 app.whenReady().then(async () => {
   await new Promise(r => trap.listen(0, '127.0.0.1', r));
   const TRAP = `http://127.0.0.1:${trap.address().port}/v1`;
-  console.log(`trampa escuchando en ${TRAP}\n`);
+  console.log(`trap listening on ${TRAP}\n`);
 
   const win = await mainWindow({ settleMs: 1800 });
   const $ = js => win.webContents.executeJavaScript(js);
@@ -49,18 +49,18 @@ app.whenReady().then(async () => {
 
   // --- 1. does anything hand the key back to the renderer? ---
   const s = await $('window.yapper.getLlmSettings()');
-  check('getLlmSettings no devuelve la key', !JSON.stringify(s).includes(KEY), JSON.stringify(s));
+  check('getLlmSettings does not return the key', !JSON.stringify(s).includes(KEY), JSON.stringify(s));
   const env = await $('window.yapper.checkEnvironment()');
-  check('checkEnvironment tampoco', !JSON.stringify(env).includes(KEY), JSON.stringify(env));
+  check('checkEnvironment does not either', !JSON.stringify(env).includes(KEY), JSON.stringify(env));
   const styles = await $('window.yapper.styleSections()');
-  check('styleSections tampoco', !JSON.stringify(styles).includes(KEY), 'la contiene');
+  check('styleSections does not either', !JSON.stringify(styles).includes(KEY), 'contains it');
 
   // --- 2. can the renderer point another provider at the stored key? ---
   // This is the shape of the bug just fixed for storage, on the test path.
   const r1 = await $(`window.yapper.testLlm({ provider: 'compatible',
     baseUrl: ${JSON.stringify(TRAP)}, model: 'm' })`);
   console.log(`      testLlm(compatible -> trampa) => ${JSON.stringify(r1)}`);
-  check('la key de anthropic no viaja a otro proveedor',
+  check('the anthropic key does not travel to another provider',
     !seen.some(h => h.auth.includes(KEY) || h.body.includes(KEY)),
     JSON.stringify(seen.map(h => h.auth)));
 
@@ -69,9 +69,9 @@ app.whenReady().then(async () => {
   const r2 = await $(`window.yapper.testLlm({ provider: 'anthropic',
     baseUrl: ${JSON.stringify(TRAP)}, model: 'm' })`);
   console.log(`      testLlm(anthropic + baseUrl ajeno) => ${JSON.stringify(r2)}`);
-  check('anthropic ignora un endpoint impuesto',
+  check('anthropic ignores an imposed endpoint',
     !seen.some(h => h.auth.includes(KEY) || h.body.includes(KEY)),
-    `llegó a la trampa: ${JSON.stringify(seen.map(h => h.auth))}`);
+    `reached the trap: ${JSON.stringify(seen.map(h => h.auth))}`);
 
   // --- 4. does a provider error echo the key back into the UI? ---
   seen.length = 0;
@@ -89,8 +89,8 @@ app.whenReady().then(async () => {
   await $(`window.yapper.setLlmSettings({ provider: 'compatible',
     baseUrl: ${JSON.stringify(ECHO)}, apiKey: ${JSON.stringify(KEY)} })`);
   const r3 = await $(`window.yapper.testLlm({ provider: 'compatible' })`);
-  console.log(`      error devuelto => ${JSON.stringify(r3)}`);
-  check('un error del proveedor no muestra la key',
+  console.log(`      error returned => ${JSON.stringify(r3)}`);
+  check('a provider error does not reveal the key',
     !JSON.stringify(r3).includes(KEY), JSON.stringify(r3));
 
   // --- 5. is it on disk in the clear anywhere? ---
@@ -106,7 +106,7 @@ app.whenReady().then(async () => {
   const exposed = files.filter(f => {
     try { return fs.readFileSync(f, 'utf8').includes(KEY); } catch { return false; }
   });
-  check(`la key no está en claro en ninguno de los ${files.length} archivos de texto`,
+  check(`the key is not in cleartext in any of the ${files.length} text files`,
     exposed.length === 0, exposed.join(', '));
 
   trap.close(); echo.close();

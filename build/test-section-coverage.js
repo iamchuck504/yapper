@@ -23,36 +23,36 @@ const optionStyles = [...html.matchAll(/<option value="([^"]+)">/g)]
   .map(m => m[1])
   .filter(v => promptStyles.includes(v) || pillStyles.includes(v));
 
-check('los botones de estilo coinciden con los prompts',
+check('the style buttons match the prompts',
   pillStyles.length === promptStyles.length && pillStyles.every(s => promptStyles.includes(s)),
   `botones: ${pillStyles.join(', ')}\n      prompts: ${promptStyles.join(', ')}`);
-check('el desplegable de regenerar ofrece los mismos estilos',
+check('the regenerate dropdown offers the same styles',
   pillStyles.every(s => optionStyles.includes(s)),
-  `faltan al regenerar: ${pillStyles.filter(s => !optionStyles.includes(s)).join(', ')}`);
+  `missing from regenerate: ${pillStyles.filter(s => !optionStyles.includes(s)).join(', ')}`);
 
 // --- every heading a style asks for has a colour rule ---
 const metaSrc = app.slice(app.indexOf('const SECTION_META = ['));
 const rules = eval(metaSrc.slice(metaSrc.indexOf('['), metaSrc.indexOf('];') + 1));   // eslint-disable-line no-eval
-check('hay reglas de color cargadas', rules.length > 0, `${rules.length} reglas`);
+check('colour rules are loaded', rules.length > 0, `${rules.length} reglas`);
 
 // the first heading of each style sits on the same line as the key
 // (`general: ` + backtick + "## Summary"), so it does not start a line
 const headings = [...setsBlock.matchAll(/(?:^|`)##\s+(.+)$/gm)].map(m => m[1].trim());
 const unique = [...new Set(headings)];
 const orphans = unique.filter(h => !rules.some(r => r.match.test(h)));
-check('cada sección de cada estilo tiene regla de color',
+check('every section of every style has a colour rule',
   orphans.length === 0, `sin regla: ${orphans.join(' | ')}`);
-console.log(`      (${unique.length} secciones distintas en ${promptStyles.length} estilos)`);
+console.log(`      (${unique.length} distinct sections across ${promptStyles.length} styles)`);
 
 // --- and no rule is dead weight ---
 const unused = rules.filter(r => !unique.some(h => r.match.test(h)));
-check('no hay reglas de color que ya no apliquen a nada',
+check('there are no colour rules that no longer apply to anything',
   unused.length === 0, `sobran: ${unused.map(r => r.match.source).join(' | ')}`);
 
 // --- the styles the prompts define are actually reachable ---
-check('ningún estilo definido queda sin botón',
+check('no defined style is left without a button',
   promptStyles.every(s => pillStyles.includes(s)),
-  `sin botón: ${promptStyles.filter(s => !pillStyles.includes(s)).join(', ')}`);
+  `no button: ${promptStyles.filter(s => !pillStyles.includes(s)).join(', ')}`);
 
 console.log(fails ? `\n${fails} fallos` : '\nPASS');
 process.exit(fails ? 1 : 0);

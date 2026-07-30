@@ -43,7 +43,7 @@ app.whenReady().then(async () => {
   // the header (top 44px) must be reachable, which is the whole point
   const b = win.getBounds();
   const headerVisible = b.y >= area.y && b.y + 44 <= area.y + area.height;
-  console.log(`${headerVisible ? 'PASS' : 'FAIL'}  la cabecera queda alcanzable`);
+  console.log(`${headerVisible ? 'PASS' : 'FAIL'}  the header stays reachable`);
   if (!headerVisible) failed++;
 
   console.log(failed ? `\n${failed} fallo(s)` : '\ntodo bien');

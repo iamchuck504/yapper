@@ -106,7 +106,7 @@ function wer(reference, text) {
 const CONFIGS = (process.env.CONFIGS || 'small,medium,base').split(',').map(spec => {
   const [model, windowSec] = spec.split(':');
   return {
-    label: windowSec ? `${model} ventana ${windowSec}s` : model,
+    label: windowSec ? `${model} window ${windowSec}s` : model,
     model, windowSec: Number(windowSec || 120)
   };
 });
@@ -114,7 +114,7 @@ const RUNS = Number(process.env.RUNS || 1);
 
 app.whenReady().then(async () => {
   const found = samples();
-  if (!found.length) { say('FAIL  no hay grabaciones para medir'); return app.exit(1); }
+  if (!found.length) { say('FAIL  no recordings to measure'); return app.exit(1); }
   say(`grabaciones disponibles: ${found.map(f => f.name).join(', ')}\n`);
 
   const totals = new Map();          // label -> accumulated numbers
@@ -155,7 +155,7 @@ app.whenReady().then(async () => {
         say(`  ${cfg.label.padEnd(20)}${RUNS > 1 ? ` #${run}` : '   '} `
           + `${String(rep.words).padStart(5)} palabras  `
           + `${(rep.words / (seconds / 60)).toFixed(0).padStart(3)} p/min  `
-          + `repetición ${(rep.rate * 100).toFixed(1).padStart(5)}%  ${took.toFixed(0)}s`);
+          + `repetition ${(rep.rate * 100).toFixed(1).padStart(5)}%  ${took.toFixed(0)}s`);
       }
     }
 
@@ -170,15 +170,15 @@ app.whenReady().then(async () => {
   }
 
   // ---- the summary that the decision rests on ----
-  say('=== TOTAL sobre todas las muestras ===');
-  say('config              palabras/min   repetición   velocidad');
+  say('=== TOTAL across all samples ===');
+  say('config              words/min      repetition   speed');
   for (const [label, t] of totals) {
     const wpm = t.words / (t.secs / 60);
     say(`${label.padEnd(20)} ${wpm.toFixed(0).padStart(6)}       `
       + `${(t.repeated / t.words * 100).toFixed(2).padStart(6)}%    `
       + `${(t.secs / t.took).toFixed(0).padStart(4)}x tiempo real`);
   }
-  say('\nmás palabras por minuto = menos habla perdida, siempre que la repetición');
-  say('siga en cero. El desacuerdo no es error: marca dónde mirar.');
+  say('\nmore words per minute = less speech lost, as long as repetition');
+  say('stays at zero. Disagreement is not an error: it marks where to look.');
   app.exit(0);
 }).catch(e => { say('FAIL ' + (e.stack || e.message)); app.exit(1); });

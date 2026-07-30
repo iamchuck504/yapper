@@ -52,7 +52,7 @@ app.whenReady().then(async () => {
   win.webContents.on('console-message', (_e, level, message, line, source) => {
     if (level >= 2) problems.push(`${message}  (${path.basename(source || '')}:${line})`);
   });
-  win.webContents.on('render-process-gone', (_e, d) => problems.push(`el renderer murió: ${d.reason}`));
+  win.webContents.on('render-process-gone', (_e, d) => problems.push(`the renderer died: ${d.reason}`));
   win.webContents.on('preload-error', (_e, p, err) => problems.push(`preload: ${err.message}`));
 
   await new Promise(r => setTimeout(r, 1200));
@@ -65,8 +65,8 @@ app.whenReady().then(async () => {
   };
 
   // ---- it opens on the day, and the detected-meeting card floats above it ----
-  check('abre en Today',
-    !(await $("document.getElementById('view-home').classList.contains('hidden')")), 'no abrió ahí');
+  check('opens on Today',
+    !(await $("document.getElementById('view-home').classList.contains('hidden')")), 'did not open there');
 
   win.webContents.send('meeting-detected', { app: 'Zoom' });
   await new Promise(r => setTimeout(r, 400));
@@ -81,60 +81,60 @@ app.whenReady().then(async () => {
         && r.bottom <= innerHeight && r.right <= innerWidth,
       shown: css.display !== 'none' && css.visibility !== 'hidden' && +css.opacity > 0,
       text: el.textContent }; })()`);
-  check('el aviso de reunión detectada se ve estando en Today',
+  check('the detected-meeting prompt shows while on Today',
     !prompt.hidden && prompt.shown && prompt.onScreen && !prompt.inRecordView, JSON.stringify(prompt));
-  check('y dice qué lo disparó', /Zoom/.test(prompt.text), prompt.text);
+  check('and it says what triggered it', /Zoom/.test(prompt.text), prompt.text);
   await click('#mp-dismiss');
-  check('se puede descartar',
-    await $("document.getElementById('meeting-prompt').classList.contains('hidden')"), 'sigue ahí');
+  check('can be dismissed',
+    await $("document.getElementById('meeting-prompt').classList.contains('hidden')"), 'is still there');
 
   // ---- every view opens ----
   await click('#btn-reminders');
-  check('la vista de recordatorios abre',
-    !(await $("document.getElementById('view-reminders').classList.contains('hidden')")), 'sigue oculta');
+  check('the reminders view opens',
+    !(await $("document.getElementById('view-reminders').classList.contains('hidden')")), 'is still hidden');
   await click('#btn-new');
-  check('vuelve a la vista de grabar',
-    !(await $("document.getElementById('view-record').classList.contains('hidden')")), 'sigue oculta');
+  check('goes back to the record view',
+    !(await $("document.getElementById('view-record').classList.contains('hidden')")), 'is still hidden');
 
   // ---- open the meeting ----
   await $('refreshMeetingList()');
   await new Promise(r => setTimeout(r, 400));
   await click('#meeting-list .m-item');
-  check('la reunión abre',
-    !(await $("document.getElementById('view-meeting').classList.contains('hidden')")), 'sigue oculta');
-  check('pinta las notas por secciones',
+  check('the meeting opens',
+    !(await $("document.getElementById('view-meeting').classList.contains('hidden')")), 'is still hidden');
+  check('renders the notes by section',
     (await $("document.querySelectorAll('#notes .note-sec').length")) >= 3,
     await $("document.querySelectorAll('#notes .note-sec').length"));
-  check('colorea la sección de pendientes',
-    (await $("document.querySelectorAll('#notes .sec-action').length")) >= 1, 'ninguna');
+  check('colours the action items section',
+    (await $("document.querySelectorAll('#notes .sec-action').length")) >= 1, 'none');
 
   // ---- action items become reminders ----
   const addBtn = await $("document.querySelectorAll('#notes .li-add').length");
-  check('los pendientes ofrecen añadirse a recordatorios', addBtn >= 1, `${addBtn} botones`);
+  check('action items offer to be added to reminders', addBtn >= 1, `${addBtn} botones`);
   if (addBtn >= 1) {
     await click('#notes .li-add');
-    check('el botón confirma que se añadió',
+    check('the button confirms it was added',
       (await $("document.querySelector('#notes .li-add').textContent")).includes('added'),
       await $("document.querySelector('#notes .li-add').textContent"));
     await click('#btn-reminders');
     const n = await $("document.querySelectorAll('#reminders-list .reminder').length");
-    check('el recordatorio queda guardado', n >= 1, `${n} en la lista`);
-    check('el contador del menú lo refleja',
-      !(await $("document.getElementById('reminders-count').classList.contains('hidden')")), 'sigue oculto');
+    check('the reminder is saved', n >= 1, `${n} in the list`);
+    check('the menu counter reflects it',
+      !(await $("document.getElementById('reminders-count').classList.contains('hidden')")), 'is still hidden');
     await click('#meeting-list .m-item');
   }
 
   // ---- editing notes by hand ----
   await click('#btn-edit');
-  check('el modo edición se activa',
+  check('edit mode turns on',
     await $("document.getElementById('notes-editor') && !document.getElementById('notes-editor').classList.contains('hidden')"),
-    'no apareció el editor');
+    'the editor never appeared');
   await $(`(() => { const t = document.getElementById('notes-textarea');
     t.value = currentNotesMd + '\\n\\n## Next steps [03:00]\\n- Ship it.'; })()`);
   await click('#btn-save-notes');
   await new Promise(r => setTimeout(r, 400));
-  check('la edición se guarda en disco',
-    fs.readFileSync(path.join(folder, 'notes.md'), 'utf8').includes('Ship it'), 'no se guardó');
+  check('the edit is saved to disk',
+    fs.readFileSync(path.join(folder, 'notes.md'), 'utf8').includes('Ship it'), 'was not saved');
 
   // ---- every export ----
   for (const kind of ['md', 'txt', 'transcript-md', 'both']) {
@@ -147,12 +147,12 @@ app.whenReady().then(async () => {
 
   // ---- copy, speak, and the option toggles ----
   await click('#btn-copy');
-  check('copiar no revienta', true, '');
+  check('copying does not blow up', true, '');
   await click('#btn-speak');
   await new Promise(r => setTimeout(r, 300));
   await click('#btn-speak');            // and stop again
   await click('#btn-theme');
-  check('el tema claro se aplica', await $("document.body.classList.contains('light')"), 'no cambió');
+  check('the light theme applies', await $("document.body.classList.contains('light')"), 'did not change');
   await click('#btn-theme');
 
   await click('#btn-new');
@@ -160,20 +160,20 @@ app.whenReady().then(async () => {
     '#noise-seg .seg-btn:nth-child(3)']) {
     await click(sel);
   }
-  check('las opciones quedan marcadas',
+  check('the options stay checked',
     (await $("document.querySelectorAll('#style-pills .seg-btn.active, #detail-seg .seg-btn.active, #noise-seg .seg-btn.active').length")) === 3,
-    'alguna no se marcó');
+    'one of them was not flagged');
 
   // ---- the search box ----
   await $(`(() => { const s = document.getElementById('search'); s.value = 'launch';
     s.dispatchEvent(new Event('input')); })()`);
   await new Promise(r => setTimeout(r, 200));
-  check('la búsqueda encuentra la reunión',
-    (await $("document.querySelectorAll('#meeting-list .m-item').length")) === 1, 'no la encontró');
+  check('search finds the meeting',
+    (await $("document.querySelectorAll('#meeting-list .m-item').length")) === 1, 'did not find it');
   await $(`(() => { const s = document.getElementById('search'); s.value = 'zzzz';
     s.dispatchEvent(new Event('input')); })()`);
   await new Promise(r => setTimeout(r, 200));
-  check('sin resultados muestra el aviso',
+  check('with no results it shows the notice',
     (await $("!!document.querySelector('#meeting-list .m-empty')")), 'no avisa');
   await $(`(() => { const s = document.getElementById('search'); s.value = '';
     s.dispatchEvent(new Event('input')); })()`);
@@ -181,10 +181,10 @@ app.whenReady().then(async () => {
   // ---- the error path: a meeting whose folder vanished ----
   const gone = path.join(ROOT, 'Meetings', 'no-existe');
   const err = await $(`window.yapper.transcribe(${JSON.stringify(gone)}).then(() => null, e => e.message)`);
-  check('una carpeta inexistente da un error legible',
+  check('a nonexistent folder gives a readable error',
     typeof err === 'string' && err.length > 10 && !/undefined/.test(err), String(err));
 
-  check('nada lanzó errores por el camino', problems.length === 0,
+  check('nothing threw errors along the way', problems.length === 0,
     problems.slice(0, 6).join('\n      '));
 
   console.log(fails ? `\n${fails} fallos` : '\nPASS');

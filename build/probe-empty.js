@@ -40,11 +40,11 @@ app.whenReady().then(async () => {
     say('  ' + (await visibleText(sel)).replace(/\s*\|\s*/g, '\n  '));
   };
 
-  say(`perfil vacío: ${ROOT}`);
-  say(`reuniones en disco: ${fs.readdirSync(path.join(ROOT, 'Meetings')).length}`);
+  say(`empty profile: ${ROOT}`);
+  say(`meetings on disk: ${fs.readdirSync(path.join(ROOT, 'Meetings')).length}`);
 
   await show('Sidebar', '#sidebar');
-  await show('Today (la vista con la que abre)', '#view-home');
+  await show('Today (the view it opens on)', '#view-home');
 
   await $(`document.querySelector('#home-scope .seg-btn[data-scope="week"]').click()`);
   await new Promise(r => setTimeout(r, 2500));
@@ -52,7 +52,7 @@ app.whenReady().then(async () => {
 
   await $(`document.getElementById('btn-search-view').click()`);
   await new Promise(r => setTimeout(r, 400));
-  await show('Search (sin buscar nada)', '#view-search');
+  await show('Search (without searching for anything)', '#view-search');
 
   await $(`(() => { document.getElementById('search-q').value = 'pricing';
     document.getElementById('btn-search').click(); })()`);
@@ -68,9 +68,9 @@ app.whenReady().then(async () => {
   await new Promise(r => setTimeout(r, 400));
   await show('New meeting', '#view-record');
 
-  say('\n### Lo que se ve al arrancar (status/preflight)');
+  say('\n### What you see at startup (status/preflight)');
   say('  ' + await $(`(() => { const el = document.getElementById('status');
-    return el.classList.contains('hidden') ? '(nada)' : el.textContent; })()`));
+    return el.classList.contains('hidden') ? '(none)' : el.textContent; })()`));
 
   app.exit(0);
 }).catch(e => { say('FAIL ' + (e.stack || e.message)); app.exit(1); });

@@ -25,14 +25,14 @@ const transcript = `[00:00:01] Right, let us talk about the new pricing.
 [00:03:30] Anything else? No. Good.`;
 
 const cut = s.transcriptPassages(transcript, { title: 'Pricing Review', date: '2026-07-13', participants: ['Maya'] });
-check('corta la transcripcion en pasajes', cut.length >= 3, `${cut.length} pasajes`);
-check('cada pasaje conserva su marca de tiempo', cut.every(p => /^\d\d:\d\d:\d\d$/.test(p.stamp)),
+check('splits the transcript into passages', cut.length >= 3, `${cut.length} pasajes`);
+check('every passage keeps its timestamp', cut.every(p => /^\d\d:\d\d:\d\d$/.test(p.stamp)),
   JSON.stringify(cut.map(p => p.stamp)));
-eq('el primero empieza donde empieza el audio', cut[0].stamp, '00:00:01');
-check('agrupa varias líneas seguidas', cut[0].text.includes('twenty nine'), cut[0].text);
-check('no mete líneas lejanas en el mismo pasaje', !cut[0].text.includes('Atlas'), cut[0].text);
+eq('the first one starts where the audio starts', cut[0].stamp, '00:00:01');
+check('groups several consecutive lines', cut[0].text.includes('twenty nine'), cut[0].text);
+check('does not put distant lines in the same passage', !cut[0].text.includes('Atlas'), cut[0].text);
 
-eq('las secciones de notas clasificadas',
+eq('the note sections, classified',
   ['Decisions', 'Action items', 'Risks & concerns', 'Open questions', 'Summary'].map(s.sectionKind),
   ['decision', 'action', 'risk', 'question', 'notes']);
 
@@ -75,8 +75,8 @@ const TRANSCRIPTS = {
 };
 
 const index = s.buildIndex(MEETINGS, m => TRANSCRIPTS[m.folder] || '');
-eq('el indice cubre las tres reuniones', index.meetings, 3);
-check('e incluye notas y transcripción',
+eq('the index covers all three meetings', index.meetings, 3);
+check('and includes notes and transcript',
   index.passages.some(p => p.kind === 'decision') && index.passages.some(p => p.kind === 'transcript'),
   JSON.stringify([...new Set(index.passages.map(p => p.kind))]));
 
@@ -86,69 +86,69 @@ const titles = r => r.results.map(x => x.meeting.title);
 // ---------------------------------------------------------------- words
 
 let r = find('pricing');
-eq('encuentra por palabra', titles(r)[0], 'Pricing Review');
-check('y no devuelve la reunión que solo la menciona de paso primero',
+eq('finds by word', titles(r)[0], 'Pricing Review');
+check('and does not return the meeting that only mentions it in passing first',
   titles(r)[0] === 'Pricing Review', JSON.stringify(titles(r)));
 
 r = find('"enterprise tier should stay custom"');
-check('una frase exacta encuentra su pasaje', r.results.length >= 1, `${r.results.length}`);
-check('y solo pasajes que la contienen',
+check('an exact phrase finds its passage', r.results.length >= 1, `${r.results.length}`);
+check('and only passages that contain it',
   r.results.every(x => /enterprise tier should stay custom/i.test(x.text)), JSON.stringify(r.results.map(x => x.text)));
 
-r = find('"esto no lo dijo nadie nunca"');
-eq('una frase que no existe no devuelve nada', r.results.length, 0);
+r = find('"nobody ever said this"');
+eq('a phrase that does not exist returns nothing', r.results.length, 0);
 
 r = find('');
-eq('una busqueda vacia no devuelve nada', find('').results.length, 0);
-eq('y una de solo muletillas tampoco', find('the and of').results.length, 0);
+eq('an empty search returns nothing', find('').results.length, 0);
+eq('and one of pure filler words does not either', find('the and of').results.length, 0);
 
 // ---------------------------------------------------------------- people
 
 r = find('what did Maria say about the launch');
-eq('una pregunta por persona la encuentra', titles(r)[0], 'Launch Retro');
-eq('y la detecta como pregunta', r.query.question, true);
-check('reconociendo el nombre', r.query.people.includes('Maria'), JSON.stringify(r.query.people));
+eq('a question about a person finds it', titles(r)[0], 'Launch Retro');
+eq('and it detects it as a question', r.query.question, true);
+check('recognising the name', r.query.people.includes('Maria'), JSON.stringify(r.query.people));
 
 r = find('show me the pending items assigned to Carlos');
-check('los pendientes de una persona salen de su reunión',
+check('a person action items come from their meeting',
   r.results.some(x => x.meeting.title === 'Atlas Migration'), JSON.stringify(titles(r)));
-check('y prioriza la sección de pendientes',
+check('and it prioritises the action items section',
   r.query.kinds.includes('action'), JSON.stringify(r.query.kinds));
 
 // ---------------------------------------------------------------- topics, decisions
 
 r = find('when did we talk about project Atlas');
-eq('encuentra el proyecto', titles(r)[0], 'Atlas Migration');
+eq('finds the project', titles(r)[0], 'Atlas Migration');
 
 r = find('what did we decide about the new pricing');
-check('una pregunta sobre una decisión la encuentra',
+check('a question about a decision finds it',
   r.results[0].meeting.title === 'Pricing Review', JSON.stringify(titles(r)));
-eq('y prefiere la seccion de decisiones', r.results[0].kind, 'decision');
+eq('and it prefers the decisions section', r.results[0].kind, 'decision');
 
 // ---------------------------------------------------------------- dates
 
-check('una fecha concreta filtra', find('pricing 2026-07-20').results.every(x => x.meeting.date === '2026-07-20'), 'colaron otras');
+check('a specific date filters', find('pricing 2026-07-20').results.every(x => x.meeting.date === '2026-07-20'), 'colaron otras');
 r = find('what happened in June');
-check('un mes filtra', r.results.length && r.results.every(x => x.meeting.date.startsWith('2026-06')),
+check('a month filters', r.results.length && r.results.every(x => x.meeting.date.startsWith('2026-06')),
   JSON.stringify(r.results.map(x => x.meeting.date)));
-eq('lee el rango del mes', [r.query.from, r.query.to], ['2026-06-01', '2026-06-30']);
-eq('"last week" se calcula desde hoy',
+eq('reads the month range', [r.query.from, r.query.to], ['2026-06-01', '2026-06-30']);
+eq('"last week" is computed from today',
   s.parseQuery('last week', { today: '2026-07-30' }).from, '2026-07-16');
 eq('"today" tambien',
   s.parseQuery('meetings today', { today: '2026-07-30' }).from, '2026-07-30');
-eq('sin fechas en la consulta, no filtra por fecha',
+eq('with no dates in the query, it does not filter by date',
   s.parseQuery('pricing').from, '');
 
 // ---------------------------------------------------------------- shape
 
 r = find('Atlas');
-check('cada resultado trae su reunión y su fecha',
+check('every result carries its meeting and its date',
   r.results.every(x => x.meeting.title && x.meeting.date), JSON.stringify(r.results[0]));
-check('los de transcripción traen timestamp',
+check('transcript hits carry a timestamp',
   r.results.filter(x => x.kind === 'transcript').every(x => x.stamp), 'alguno sin marca');
-check('y los participantes de la reunión',
+check('and the meeting participants',
   r.results.every(x => Array.isArray(x.meeting.participants)), 'faltan');
-check('una reunión no puede llenar la página',
+check('one meeting cannot fill the page',
   Math.max(...Object.values(r.results.reduce((acc, x) => {
     acc[x.meeting.folder] = (acc[x.meeting.folder] || 0) + 1; return acc;
   }, {}))) <= 2, JSON.stringify(titles(r)));
@@ -156,26 +156,26 @@ check('una reunión no puede llenar la página',
 // ---------------------------------------------------------------- the prompt
 
 const forModel = s.passagesForPrompt(find('pricing').results.slice(0, 3));
-check('los pasajes se etiquetan para el modelo', /\[Pricing Review/.test(forModel), forModel.slice(0, 80));
-check('con la fecha', /\(2026-07-13\)/.test(forModel), forModel.slice(0, 120));
-check('el prompt prohíbe inventar',
+check('the passages are labelled for the model', /\[Pricing Review/.test(forModel), forModel.slice(0, 80));
+check('with the date', /\(2026-07-13\)/.test(forModel), forModel.slice(0, 120));
+check('the prompt forbids inventing',
   /only what the passages say/i.test(s.ANSWER_PROMPT) && /could not find that/i.test(s.ANSWER_PROMPT),
-  'no lo dice');
-check('y exige citar', /cite the meeting/i.test(s.ANSWER_PROMPT), 'no lo exige');
+  'does not say so');
+check('and it requires citing', /cite the meeting/i.test(s.ANSWER_PROMPT), 'does not require it');
 
-// -- la respuesta se limpia de auto-narración --
-// El fallo visto en vivo: "no encontré nada… espera, sí" y después la respuesta
-// real. Lo de antes de la primera cita se descarta; una negativa sola se respeta.
-check('el monólogo antes de la respuesta citada se recorta',
+// -- the answer is stripped of self-narration --
+// The failure seen live: "found nothing… wait, yes" and then the real answer.
+// Everything before the first citation is dropped; a lone refusal is respected.
+check('the monologue before the cited answer is trimmed',
   s.cleanAnswer('I could not find that in your meetings.\n\nWait—the passages do answer this.\n\nPricing is $29 [Q3 Planning, Decisions].'),
   'Pricing is $29 [Q3 Planning, Decisions].');
-check('una respuesta limpia pasa intacta',
+check('a clean answer passes through intact',
   s.cleanAnswer('Pricing is $29 [Q3 Planning].\n\nEnterprise stays custom [Q3 Planning].'),
   'Pricing is $29 [Q3 Planning].\n\nEnterprise stays custom [Q3 Planning].');
-check('una negativa honesta se queda tal cual',
+check('an honest refusal is left as is',
   s.cleanAnswer('I could not find that in your meetings.'),
   'I could not find that in your meetings.');
-check('dos párrafos donde el primero no es negativa se quedan',
+check('two paragraphs where the first is not a refusal are kept',
   s.cleanAnswer('The rollout moved to August 1 [Standup].\n\nIt had been planned for the second week [Q3 Planning].'),
   'The rollout moved to August 1 [Standup].\n\nIt had been planned for the second week [Q3 Planning].');
 

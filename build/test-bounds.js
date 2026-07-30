@@ -30,7 +30,7 @@ for (const [name, input, want, area = AREA] of cases) {
     && got.width === input.width && got.height === input.height;
   if (!ok) failed++;
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`);
-  if (!ok) console.log(`      esperado x=${want.x} y=${want.y} · obtenido x=${got.x} y=${got.y}`);
+  if (!ok) console.log(`      expected x=${want.x} y=${want.y} · got x=${got.x} y=${got.y}`);
 }
 
 // isOutside should agree with clampToArea

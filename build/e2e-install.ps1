@@ -15,26 +15,26 @@ Write-Host ("instalador: {0}  {1:N1} MB" -f (Split-Path $setup -Leaf), ((Get-Ite
 Start-Process -FilePath $setup -ArgumentList '/S' -Wait
 $appDir = "$env:LOCALAPPDATA\Programs\Yapper"
 $exe = "$appDir\Yapper.exe"
-if (-not (Test-Path $exe)) { Write-Host "FAIL no se instalo en $appDir"; exit 1 }
-Write-Host "ok    instalado en $appDir"
+if (-not (Test-Path $exe)) { Write-Host "FAIL did not install into $appDir"; exit 1 }
+Write-Host "ok    installed into $appDir"
 
 # 2. what did it install?
 $asar = "$appDir\resources\app.asar"
 Write-Host ("ok    app.asar {0:N1} MB" -f ((Get-Item $asar).Length / 1MB))
 $unpackedWav = "$appDir\resources\app.asar.unpacked\build\calibration.wav"
-if (Test-Path $unpackedWav) { Write-Host "ok    calibration.wav quedo fuera del asar (el server puede leerlo)" }
-else { Write-Host "FAIL calibration.wav no esta desempacado"; exit 1 }
+if (Test-Path $unpackedWav) { Write-Host "ok    calibration.wav left unpacked (the server can read it)" }
+else { Write-Host "FAIL calibration.wav is not unpacked"; exit 1 }
 if (Test-Path "$appDir\resources\app-update.yml") {
   $feed = (Get-Content "$appDir\resources\app-update.yml" -Raw)
-  Write-Host "ok    app-update.yml presente (el updater sabe donde mirar)"
+  Write-Host "ok    app-update.yml present (the updater knows where to look)"
   Write-Host ("      " + (($feed -split "`n" | Select-Object -First 3) -join ' | '))
-} else { Write-Host "FAIL sin app-update.yml - el updater no tendria feed"; exit 1 }
+} else { Write-Host "FAIL no app-update.yml - the updater would have no feed"; exit 1 }
 
 # 3. shortcuts
 $sm = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Yapper.lnk"
 $dk = "$env:USERPROFILE\Desktop\Yapper.lnk"
-Write-Host ("{0}    acceso directo en Inicio" -f ($(if (Test-Path $sm) { 'ok  ' } else { 'FAIL' })))
-Write-Host ("{0}    acceso directo en Escritorio" -f ($(if (Test-Path $dk) { 'ok  ' } else { 'FAIL' })))
+Write-Host ("{0}    Start menu shortcut" -f ($(if (Test-Path $sm) { 'ok  ' } else { 'FAIL' })))
+Write-Host ("{0}    Desktop shortcut" -f ($(if (Test-Path $dk) { 'ok  ' } else { 'FAIL' })))
 
 # 4. seed the engine: junctions into the repo copies (instant, no downloads)
 $engineHome = "$env:LOCALAPPDATA\Yapper\engine"
@@ -45,7 +45,7 @@ foreach ($d in @('bin', 'models')) {
     New-Item -ItemType Junction -Path $link -Target (Join-Path $repo $d) | Out-Null
   }
 }
-Write-Host "ok    motor sembrado por junction (sin descargar nada)"
+Write-Host "ok    engine seeded by junction (nothing downloaded)"
 
 # 5. launch the installed app; calibration writes settings when the engine works
 $settings = "$env:APPDATA\Yapper\settings.json"
@@ -61,8 +61,8 @@ while ((Get-Date) -lt $deadline) {
   }
 }
 $proc = Get-Process Yapper -ErrorAction SilentlyContinue
-Write-Host ("{0}    la app instalada esta corriendo ({1} procesos)" -f ($(if ($proc) { 'ok  ' } else { 'FAIL' })), (@($proc).Count))
-if ($tier) { Write-Host "ok    encontro el motor y calibro: tier '$tier'" }
-else { Write-Host "FAIL  nunca escribio settings con tier (motor no encontrado o app rota)" }
+Write-Host ("{0}    the installed app is running ({1} processes)" -f ($(if ($proc) { 'ok  ' } else { 'FAIL' })), (@($proc).Count))
+if ($tier) { Write-Host "ok    found the engine and calibrated: tier '$tier'" }
+else { Write-Host "FAIL  never wrote settings with a tier (engine not found, or the app is broken)" }
 
 if ($proc -and $tier) { Write-Host "`nPASS" } else { Write-Host "`nFALLO"; exit 1 }

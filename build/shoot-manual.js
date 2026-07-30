@@ -220,9 +220,9 @@ app.whenReady().then(async () => {
     await wait(600);
     await shot(bubble, '10-capsule-open.png');
   } else {
-    say('  (sin burbuja — bubbleEnabled apagado?)');
+    say('  (no bubble — bubbleEnabled off?)');
   }
 
-  say('\nlistas en docs/img/');
+  say('\nready in docs/img/');
   app.exit(0);
 }).catch(e => { say('FAIL ' + (e.stack || e.message)); app.exit(1); });

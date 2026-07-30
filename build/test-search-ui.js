@@ -63,8 +63,8 @@ app.whenReady().then(async () => {
   await $('window.yapper.refreshLibrary()');
   await $(`document.getElementById('btn-search-view').click()`);
   await new Promise(r => setTimeout(r, 400));
-  check('la vista de búsqueda abre',
-    !(await $("document.getElementById('view-search').classList.contains('hidden')")), 'sigue oculta');
+  check('the search view opens',
+    !(await $("document.getElementById('view-search').classList.contains('hidden')")), 'is still hidden');
 
   const results = () => $(`[...document.querySelectorAll('#search-results .result')].map(li => ({
     meeting: li.querySelector('.result-meeting').textContent,
@@ -88,71 +88,71 @@ app.whenReady().then(async () => {
   await run('pricing');
   let found = await results();
   say(`  "pricing" -> ${found.map(r => `${r.meeting}/${r.kind}`).join(', ')}`);
-  check('encuentra por palabra', found.length >= 1, `${found.length} resultados`);
-  check('el primero es la reunión correcta', found[0].meeting === 'Pricing Review', found[0].meeting);
-  check('cada resultado trae reunión y fecha', found.every(r => r.meeting && /2026-/.test(r.when)),
+  check('finds by word', found.length >= 1, `${found.length} resultados`);
+  check('the first one is the right meeting', found[0].meeting === 'Pricing Review', found[0].meeting);
+  check('every result carries meeting and date', found.every(r => r.meeting && /2026-/.test(r.when)),
     JSON.stringify(found[0]));
-  check('los de transcripción traen timestamp',
+  check('transcript hits carry a timestamp',
     found.some(r => /\d\d:\d\d:\d\d/.test(r.when)), JSON.stringify(found.map(r => r.when)));
-  check('y los participantes', found.some(r => /Maya/.test(r.who)), JSON.stringify(found.map(r => r.who)));
+  check('and the participants', found.some(r => /Maya/.test(r.who)), JSON.stringify(found.map(r => r.who)));
 
   // ---- nothing found says so ----
   await run('quesadillas');
-  check('sin resultados lo dice claramente',
+  check('with no results it says so clearly',
     /Nothing matched/i.test(await status()), await status());
-  check('y no deja resultados viejos en pantalla', (await results()).length === 0,
+  check('and it leaves no stale results on screen', (await results()).length === 0,
     `${(await results()).length} filas`);
-  check('ni una respuesta colgada', (await answer()) === '', await answer());
+  check('nor a stranded answer', (await answer()) === '', await answer());
 
   // ---- a date narrows, and says it did ----
   await run('2026-07-20');
   found = await results();
-  check('una fecha filtra', found.length && found.every(r => /2026-07-20/.test(r.when)),
+  check('a date filters', found.length && found.every(r => /2026-07-20/.test(r.when)),
     JSON.stringify(found.map(r => r.when)));
-  check('y explica que filtró',
-    (await $("!!document.querySelector('#search-results .result-scope')")), 'no lo dice');
+  check('and it explains that it filtered',
+    (await $("!!document.querySelector('#search-results .result-scope')")), 'does not say so');
 
   // ---- an example chip works ----
   await $(`document.querySelector('#search-examples button[data-q*="Atlas"]').click()`);
   await new Promise(r => setTimeout(r, 1500));
   found = await results();
-  check('los ejemplos funcionan', found.length >= 1 && found[0].meeting === 'Atlas Migration',
+  check('the examples work', found.length >= 1 && found[0].meeting === 'Atlas Migration',
     JSON.stringify(found.map(r => r.meeting)));
 
   // ---- opening the meeting from a result ----
   await $(`document.querySelector('#search-results .result-meeting').click()`);
   await new Promise(r => setTimeout(r, 1200));
-  check('un resultado abre su reunión',
-    !(await $("document.getElementById('view-meeting').classList.contains('hidden')")), 'no abrió');
+  check('a result opens its meeting',
+    !(await $("document.getElementById('view-meeting').classList.contains('hidden')")), 'did not open');
   await $(`document.getElementById('btn-search-view').click()`);
   await new Promise(r => setTimeout(r, 300));
 
   // ---- a question gets an answer written only from the passages ----
-  say('\n  --- pregunta en lenguaje natural ---');
+  say('\n  --- natural language question ---');
   const t0 = Date.now();
   const asked = await within($(`window.yapper.ask('What did we decide about the new pricing?')`),
     'preguntar', 4 * 60 * 1000);
-  say(`  respondió en ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+  say(`  answered in ${((Date.now() - t0) / 1000).toFixed(0)} s`);
   say(`  "${String(asked.answer).slice(0, 240)}"`);
-  check('responde la pregunta', !!asked.answer && asked.answer.length > 20,
+  check('answers the question', !!asked.answer && asked.answer.length > 20,
     JSON.stringify(asked).slice(0, 200));
-  check('con los pasajes que la sostienen', (asked.results || []).length >= 1,
+  check('with the passages that support it', (asked.results || []).length >= 1,
     `${(asked.results || []).length} pasajes`);
-  check('la respuesta contiene el dato real',
+  check('the answer contains the real figure',
     /twenty[\s-]?nine|\b29\b/i.test(asked.answer || ''), asked.answer);
-  check('y cita la reunión',
+  check('and it cites the meeting',
     /\[[^\]]*Pricing Review/i.test(asked.answer || ''), asked.answer);
 
   // ---- and refuses to answer what it cannot support ----
   const unanswerable = await within(
     $(`window.yapper.ask('What did we decide about the Tokyo office lease?')`),
-    'preguntar algo que no está', 4 * 60 * 1000);
-  say(`  sin respaldo -> ${JSON.stringify(unanswerable).slice(0, 220)}`);
+    'asking something that is not there', 4 * 60 * 1000);
+  say(`  unsupported -> ${JSON.stringify(unanswerable).slice(0, 220)}`);
   const refused = unanswerable.reason === 'nothing-found'
     || /could not find/i.test(unanswerable.answer || '');
-  check('no inventa lo que no está en las reuniones', refused,
+  check('does not invent what is not in the meetings', refused,
     JSON.stringify(unanswerable).slice(0, 240));
-  check('y no menciona Tokio como si se hubiera hablado',
+  check('and it does not mention Tokyo as if it had been discussed',
     !/tokyo office lease (was|is) /i.test(unanswerable.answer || ''), unanswerable.answer);
 
   say(fails ? `\n${fails} fallos` : '\nPASS');

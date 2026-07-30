@@ -61,7 +61,7 @@ app.whenReady().then(async () => {
   const clickDelete = async time => {
     const hit = await $(`(() => { const li = ${rowFor(time)};
       if (!li) return false; li.querySelector('.m-del').click(); return true; })()`);
-    check(`encuentra la fila de las ${time}`, hit, 'no está en la lista');
+    check(`finds the row for ${time}`, hit, 'is not in the list');
     await new Promise(r => setTimeout(r, 700));
   };
 
@@ -69,45 +69,45 @@ app.whenReady().then(async () => {
   await new Promise(r => setTimeout(r, 400));
 
   let list = await rows();
-  check('lista las dos reuniones', list.length === 2, JSON.stringify(list));
+  check('lists both meetings', list.length === 2, JSON.stringify(list));
   const emptyRow = list.find(r => r.date.includes('09:00'));
   const fullRow = list.find(r => r.date.includes('10:00'));
-  check('marca la vacía como vacía', emptyRow && emptyRow.empty, JSON.stringify(emptyRow));
-  check('la nombra de forma entendible',
+  check('flags the empty one as empty', emptyRow && emptyRow.empty, JSON.stringify(emptyRow));
+  check('names it understandably',
     emptyRow && emptyRow.title === 'Empty recording', emptyRow && emptyRow.title);
-  check('NO marca como vacía la que sí tiene audio', fullRow && !fullRow.empty, JSON.stringify(fullRow));
-  check('cada fila tiene botón de borrar',
+  check('does NOT flag the one that does have audio', fullRow && !fullRow.empty, JSON.stringify(fullRow));
+  check('every row has a delete button',
     list.every(r => r.hasDelete), JSON.stringify(list));
 
   // --- what the user is told before losing something ---
   answer = 1;
   await clickDelete('10:00');
-  check('cancelar no borra nada', fs.existsSync(FULL), 'la carpeta desapareció');
-  check('preguntó antes de borrar', asked.length === 1, `preguntó ${asked.length} veces`);
-  check('avisa que va a la papelera',
+  check('cancelling deletes nothing', fs.existsSync(FULL), 'the folder is gone');
+  check('asked before deleting', asked.length === 1, `asked ${asked.length} times`);
+  check('warns that it goes to the recycle bin',
     /recycle bin/i.test(asked[0].detail || ''), asked[0].detail);
-  check('enumera lo que se perdería',
+  check('lists what would be lost',
     /30 s of audio/.test(asked[0].detail) && /transcript/.test(asked[0].detail)
     && /notes/.test(asked[0].detail), asked[0].detail);
-  check('el botón vuelve a estar disponible tras cancelar',
-    !(await $(`${rowFor('10:00')}.querySelector('.m-del').disabled`)), 'quedó deshabilitado');
-  check('cancelar tampoco abre la reunión',
+  check('the button is available again after cancelling',
+    !(await $(`${rowFor('10:00')}.querySelector('.m-del').disabled`)), 'stayed disabled');
+  check('cancelling does not open the meeting either',
     await $("document.getElementById('view-meeting').classList.contains('hidden')"),
-    'abrió la reunión que se iba a borrar');
+    'opened the meeting that was about to be deleted');
 
   await clickDelete('09:00');
-  check('de una vacía dice que está vacía',
+  check('says an empty one is empty',
     /empty/i.test(asked[1].detail || ''), asked[1].detail);
 
   // --- confirming deletes, and only the one clicked ---
   answer = 0;
   await clickDelete('09:00');
-  check('confirmar borra la carpeta', !fs.existsSync(EMPTY), 'sigue ahí');
-  check('no toca la otra reunión', fs.existsSync(FULL), 'borró la que no era');
+  check('confirming deletes the folder', !fs.existsSync(EMPTY), 'is still there');
+  check('does not touch the other meeting', fs.existsSync(FULL), 'deleted the wrong one');
 
   list = await rows();
-  check('la lista se actualiza sola', list.length === 1, JSON.stringify(list));
-  check('la que queda es la buena',
+  check('the list updates itself', list.length === 1, JSON.stringify(list));
+  check('the one left is the right one',
     list[0] && list[0].title === 'Real Meeting', JSON.stringify(list[0]));
 
   console.log(fails ? `\n${fails} fallos` : '\nPASS');

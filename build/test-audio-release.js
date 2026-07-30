@@ -37,23 +37,23 @@ app.whenReady().then(async () => {
   const $ = js => win.webContents.executeJavaScript(js);
 
   // ---- 1. a successful transcription releases the audio ----
-  say('--- 1. transcripción exitosa ---');
+  say('--- 1. successful transcription ---');
   const a = seed('2026-07-29_2000');
   const before = fs.statSync(path.join(a, 'recording.wav')).size;
   const len = await within(
     $(`window.yapper.transcribe(${JSON.stringify(a)}).then(t => t.length, e => 'err:' + e.message)`),
     'transcribir', 120000);
   check('transcribe', typeof len === 'number' && len > 50, String(len));
-  check('el transcript queda en disco', has(a, 'transcript.txt'), 'no está');
-  check(`libera el audio (${(before / 1024 / 1024).toFixed(1)} MB)`, !has(a, 'recording.wav'),
-    'el WAV sigue ahí');
-  check('el transcript tiene contenido de verdad',
-    fs.readFileSync(path.join(a, 'transcript.txt'), 'utf8').trim().length > 50, 'está casi vacío');
+  check('the transcript is left on disk', has(a, 'transcript.txt'), 'is missing');
+  check(`releases the audio (${(before / 1024 / 1024).toFixed(1)} MB)`, !has(a, 'recording.wav'),
+    'the WAV is still there');
+  check('the transcript genuinely has content',
+    fs.readFileSync(path.join(a, 'transcript.txt'), 'utf8').trim().length > 50, 'is nearly empty');
 
   // and the meeting still reads correctly with no audio
   const loaded = await $(`window.yapper.loadMeeting(${JSON.stringify(a)})`);
-  check('la reunión se abre igual sin audio', loaded.transcript.length > 50, 'sin transcript');
-  check('y sabe que ya no hay grabación', loaded.hasRecording === false, String(loaded.hasRecording));
+  check('the meeting still opens without audio', loaded.transcript.length > 50, 'sin transcript');
+  check('and knows the recording is gone', loaded.hasRecording === false, String(loaded.hasRecording));
   await $('refreshMeetingList()');
   await new Promise(r => setTimeout(r, 400));
   const row = await $(`(() => {
@@ -61,10 +61,10 @@ app.whenReady().then(async () => {
       .find(x => x.querySelector('.m-date').textContent.includes('20:00'));
     return li ? { empty: li.classList.contains('m-void'), title: li.querySelector('.m-title').textContent } : null;
   })()`);
-  check('NO la marca como grabación vacía', row && !row.empty, JSON.stringify(row));
+  check('does NOT flag it as an empty recording', row && !row.empty, JSON.stringify(row));
 
   // ---- 2. a failed transcription keeps the audio ----
-  say('\n--- 2. transcripción fallida ---');
+  say('\n--- 2. failed transcription ---');
   const b = seed('2026-07-29_2001');
   const model = engine.modelPath('small');
   const hidden = model + '.hidden';
@@ -75,19 +75,19 @@ app.whenReady().then(async () => {
     'transcribir sin modelo', 60000);
   fs.renameSync(hidden, model);
   say(`  ${String(err).slice(0, 90)}`);
-  check('falla como debe', String(err).startsWith('err:'), String(err));
-  check('conserva el audio cuando falla', has(b, 'recording.wav'), 'lo borró igual');
-  check('y no deja un transcript a medias', !has(b, 'transcript.txt'), 'escribió uno');
+  check('fails as it should', String(err).startsWith('err:'), String(err));
+  check('keeps the audio when it fails', has(b, 'recording.wav'), 'deleted it anyway');
+  check('and leaves no half-written transcript', !has(b, 'transcript.txt'), 'wrote one');
 
   // it can be retried afterwards, which is the whole point of keeping it
   const retry = await within(
     $(`window.yapper.transcribe(${JSON.stringify(b)}).then(t => t.length, e => 'err:' + e.message)`),
     'reintentar', 120000);
-  check('se puede reintentar y entonces sí libera',
+  check('can be retried, and then it does release',
     typeof retry === 'number' && !has(b, 'recording.wav'), String(retry));
 
   // ---- 3. an empty transcript keeps the audio ----
-  say('\n--- 3. audio sin habla ---');
+  say('\n--- 3. audio with no speech ---');
   const c = path.join(ROOT, 'Meetings', '2026-07-29_2002');
   fs.mkdirSync(c, { recursive: true });
   fs.writeFileSync(path.join(c, 'recording.wav'),
@@ -101,41 +101,41 @@ app.whenReady().then(async () => {
   // Either it produced a real transcript and released, or it produced nothing
   // worth keeping and held on. What must never happen is losing the audio to a
   // transcript too thin to be the record.
-  check('nunca cambia el audio por un transcript de dos palabras',
+  check('never trades the audio for a two-word transcript',
     has(c, 'recording.wav') ? true : tSize >= 40,
-    `transcript de ${tSize} bytes y el audio ya no está`);
+    `${tSize}-byte transcript and the audio is gone`);
 
   // ---- 4. "Keep this meeting's audio": one meeting, then off again ----
   say("\n--- 4. \"Keep this meeting's audio\" ---");
-  check('arranca apagado', (await $('window.yapper.getKeepAudio()')) === false, 'venía encendido');
-  check('y el interruptor de la pantalla también',
-    (await $("document.getElementById('opt-keep-audio').checked")) === false, 'venía marcado');
+  check('starts switched off', (await $('window.yapper.getKeepAudio()')) === false, 'came in switched on');
+  check('and so does the on-screen toggle',
+    (await $("document.getElementById('opt-keep-audio').checked")) === false, 'came in checked');
 
   await $(`(() => { const t = document.getElementById('opt-keep-audio');
     t.checked = true; t.dispatchEvent(new Event('change')); })()`);
   await new Promise(r => setTimeout(r, 300));
 
   const d = seed('2026-07-29_2003');
-  await within($(`window.yapper.transcribe(${JSON.stringify(d)})`), 'transcribir con keepAudio', 120000);
-  check('encendido, conserva el audio de ESA reunión', has(d, 'recording.wav'), 'lo borró igual');
-  check('y aun así deja el transcript', has(d, 'transcript.txt'), 'no lo dejó');
+  await within($(`window.yapper.transcribe(${JSON.stringify(d)})`), 'transcribing with keepAudio', 120000);
+  check('when on, keeps the audio for THAT meeting', has(d, 'recording.wav'), 'deleted it anyway');
+  check('and still leaves the transcript', has(d, 'transcript.txt'), 'did not leave it');
 
   // and it must have turned itself off again
   await new Promise(r => setTimeout(r, 300));
-  check('se apaga solo después de honrarlo',
-    (await $('window.yapper.getKeepAudio()')) === false, 'sigue encendido');
-  check('el interruptor de la pantalla se desmarca solo',
-    (await $("document.getElementById('opt-keep-audio').checked")) === false, 'sigue marcado');
+  check('switches itself off once it has been honoured',
+    (await $('window.yapper.getKeepAudio()')) === false, 'is still on');
+  check('the on-screen toggle unchecks itself',
+    (await $("document.getElementById('opt-keep-audio').checked")) === false, 'is still checked');
 
   // so the very next meeting releases again, without touching anything
   const d2 = seed('2026-07-29_2006');
-  await within($(`window.yapper.transcribe(${JSON.stringify(d2)})`), 'la siguiente reunión', 120000);
-  check('la siguiente reunión ya libera el audio', !has(d2, 'recording.wav'), 'lo conservó');
-  check('y la anterior sigue conservando el suyo', has(d, 'recording.wav'), 'se lo llevó después');
+  await within($(`window.yapper.transcribe(${JSON.stringify(d2)})`), 'the next meeting', 120000);
+  check('the next meeting releases its audio again', !has(d2, 'recording.wav'), 'kept it');
+  check('and the previous one still keeps its own', has(d, 'recording.wav'), 'took it away afterwards');
 
   // nothing about it may be written to settings, or it would survive a restart
   const settings = JSON.parse(fs.readFileSync(path.join(ROOT, 'user', 'settings.json'), 'utf8'));
-  check('no queda guardado en los ajustes', settings.keepAudio === undefined,
+  check('is not left saved in settings', settings.keepAudio === undefined,
     JSON.stringify(settings));
 
   // ---- 4b. an old compressed recording ----
@@ -143,41 +143,41 @@ app.whenReady().then(async () => {
   // so the folder briefly holds both files. Both are that meeting's audio, and
   // the policy is the same for both — but the .webm is the user's only copy, so
   // it is worth being explicit that this is intended and not a slip.
-  say('\n--- 4b. una grabación vieja comprimida ---');
+  say('\n--- 4b. an old compressed recording ---');
   const legacyFolder = path.join(ROOT, 'Meetings', '2026-07-29_2007');
   fs.mkdirSync(legacyFolder, { recursive: true });
   fs.writeFileSync(path.join(legacyFolder, 'recording.webm'), Buffer.alloc(300 * 1024, 7));
   fs.writeFileSync(path.join(legacyFolder, 'recording.wav'),
     fs.readFileSync(path.join(seed('2026-07-29_2008', 20), 'recording.wav')));
   await within($(`window.yapper.transcribe(${JSON.stringify(legacyFolder)})`),
-    'transcribir la vieja', 120000);
-  check('libera el WAV convertido', !has(legacyFolder, 'recording.wav'), 'sigue ahí');
-  check('y también el original comprimido', !has(legacyFolder, 'recording.webm'),
-    'el .webm sobrevivió — la política dice que también se va');
-  check('conservando el transcript', has(legacyFolder, 'transcript.txt'), 'no está');
+    'transcribing the old one', 120000);
+  check('releases the converted WAV', !has(legacyFolder, 'recording.wav'), 'is still there');
+  check('and so is the compressed original', !has(legacyFolder, 'recording.webm'),
+    'the .webm survived — the policy says it goes too');
+  check('keeping the transcript', has(legacyFolder, 'transcript.txt'), 'is missing');
 
   // ---- 5. reclaiming what older meetings still hold ----
-  say('\n--- 5. liberar lo que ya estaba guardado ---');
+  say('\n--- 5. releasing what was already stored ---');
   const e1 = seed('2026-07-29_2004', 30);
   fs.writeFileSync(path.join(e1, 'transcript.txt'), '[00:00:01] Already transcribed long ago.', 'utf8');
   const e2 = seed('2026-07-29_2005', 30);          // no transcript: must be left alone
   const held = await $('window.yapper.heldAudio()');
-  say(`  retenido: ${(held.bytes / 1024 / 1024).toFixed(1)} MB en ${held.count} archivos`);
-  check('cuenta solo las reuniones ya transcritas', held.count >= 1, JSON.stringify(held));
+  say(`  held: ${(held.bytes / 1024 / 1024).toFixed(1)} MB across ${held.count} files`);
+  check('counts only the already-transcribed meetings', held.count >= 1, JSON.stringify(held));
 
   confirm = 1;                                     // cancel
   const cancelled = await $('window.yapper.releaseHeldAudio()');
-  check('cancelar no borra nada',
+  check('cancelling deletes nothing',
     cancelled.released === 0 && has(e1, 'recording.wav'), JSON.stringify(cancelled));
 
   confirm = 0;                                     // confirm
   const freed = await $('window.yapper.releaseHeldAudio()');
-  say(`  liberado: ${(freed.bytes / 1024 / 1024).toFixed(1)} MB de ${freed.released} archivos`);
-  check('confirmar libera la transcrita', !has(e1, 'recording.wav'), 'sigue ahí');
-  check('y NO toca la que no tiene transcript', has(e2, 'recording.wav'), 'borró la no transcrita');
-  check('conserva el transcript de la liberada', has(e1, 'transcript.txt'), 'se llevó el transcript');
+  say(`  freed: ${(freed.bytes / 1024 / 1024).toFixed(1)} MB from ${freed.released} files`);
+  check('confirming frees the transcribed one', !has(e1, 'recording.wav'), 'is still there');
+  check('and does NOT touch the one with no transcript', has(e2, 'recording.wav'), 'deleted the untranscribed one');
+  check('keeps the transcript of the freed one', has(e1, 'transcript.txt'), 'took the transcript with it');
   const after = await $('window.yapper.heldAudio()');
-  check('ya no queda nada retenido', after.count === 0, JSON.stringify(after));
+  check('nothing is held any more', after.count === 0, JSON.stringify(after));
 
   say(fails ? `\n${fails} fallos` : '\nPASS');
   app.exit(fails ? 1 : 0);

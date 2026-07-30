@@ -142,7 +142,7 @@ app.whenReady().then(() => {
 
   console.log(`origen        : ${path.basename(SRC)}  ${w}×${h}`);
   console.log(`color cuerpo  : rgb(${body.r}, ${body.g}, ${body.b})`);
-  console.log(`recortado     : ${cleared} px (${(cleared / (w * h) * 100).toFixed(1)}% del lienzo)`);
+  console.log(`trimmed       : ${cleared} px (${(cleared / (w * h) * 100).toFixed(1)}% of the canvas)`);
   console.log(`borde suavizado: ${feathered} px`);
   console.log(`\n${path.basename(OUT_PNG)}  ${(fs.statSync(OUT_PNG).size / 1024).toFixed(0)} KB`);
   console.log(`${path.basename(OUT_ICO)}  ${(fs.statSync(OUT_ICO).size / 1024).toFixed(0)} KB  (${ICO_SIZES.join(', ')})`);

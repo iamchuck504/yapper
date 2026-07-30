@@ -29,34 +29,34 @@ function meeting(name, extra = {}) {
 
 // ---------------------------------------------------------------- cache key
 
-console.log('\n-- la llave del caché --');
+console.log('\n-- the cache key --');
 const m1 = meeting('2026-07-27_0900');
 const m2 = meeting('2026-07-28_1000');
-check('la misma semana da la misma llave',
+check('the same week yields the same key',
   digest.digestKey([m1, m2]) === digest.digestKey([m1, m2]), true);
-check('el orden no la cambia',
+check('the order does not change it',
   digest.digestKey([m1, m2]) === digest.digestKey([m2, m1]), true);
-check('una nota editada sí la cambia',
+check('an edited note does change it',
   digest.digestKey([m1, m2]) === digest.digestKey([m1, { ...m2, stamp: 'a:2:9;' }]), false);
-check('una reunión nueva también',
+check('a new meeting does too',
   digest.digestKey([m1, m2]) === digest.digestKey([m1, m2, meeting('2026-07-29_1100')]), false);
 
 // ---------------------------------------------------------------- due dates
 
-console.log('\n-- una fecha solo si está escrita --');
+console.log('\n-- a date only if it is written down --');
 check('ISO', digest.dueOn('2026-08-03', '2026-07-29'), '2026-08-03');
-check('mes y día', digest.dueOn('July 30', '2026-07-29'), '2026-07-30');
-check('día y mes', digest.dueOn('3 August', '2026-07-29'), '2026-08-03');
-check('con año explícito', digest.dueOn('August 3, 2027', '2026-07-29'), '2027-08-03');
+check('month and day', digest.dueOn('July 30', '2026-07-29'), '2026-07-30');
+check('day and month', digest.dueOn('3 August', '2026-07-29'), '2026-08-03');
+check('with an explicit year', digest.dueOn('August 3, 2027', '2026-07-29'), '2027-08-03');
 check('barras', digest.dueOn('8/3', '2026-07-29'), '2026-08-03');
-check('barras con año corto', digest.dueOn('8/3/27', '2026-07-29'), '2027-08-03');
+check('slashes with a short year', digest.dueOn('8/3/27', '2026-07-29'), '2027-08-03');
 for (const vague of ['Friday', 'end of week', 'next week', 'tomorrow', 'soon', 'Q3', '']) {
-  check(`"${vague}" no se convierte en fecha`, digest.dueOn(vague, '2026-07-29'), '');
+  check(`"${vague}" does not become a date`, digest.dueOn(vague, '2026-07-29'), '');
 }
 
 // ---------------------------------------------------------------- daily
 
-console.log('\n-- el resumen del día --');
+console.log('\n-- the daily digest --');
 const TODAY = '2026-07-29';
 
 const standup = meeting('2026-07-29_0900', {
@@ -91,98 +91,98 @@ const ITEMS = [
 
 const day = digest.dailyDigest({ meetings: MEETINGS, items: ITEMS, day: TODAY });
 
-check('solo las reuniones de hoy', day.meetings.map(m => m.title), ['Standup', 'Design Review', 'Sync']);
-check('en el orden en que ocurrieron', day.meetings.map(m => m.time), ['09:00', '14:00', '16:00']);
-check('cada una trae su carpeta para poder abrirla',
+check('only today meetings', day.meetings.map(m => m.title), ['Standup', 'Design Review', 'Sync']);
+check('in the order they happened', day.meetings.map(m => m.time), ['09:00', '14:00', '16:00']);
+check('each carries its folder so it can be opened',
   day.meetings.every(m => m.folder.startsWith('C:/M/')), true);
-check('las decisiones salen de la sección de decisiones',
+check('decisions come from the decisions section',
   day.decisions.map(d => d.text),
   ['Ship the rollout on Thursday.', 'Keep the old endpoint for a week.']);
-check('cada decisión sabe de qué reunión vino',
+check('every decision knows which meeting it came from',
   day.decisions.map(d => d.meeting.title), ['Standup', 'Standup']);
-check('"None" no cuenta como decisión', day.counts.decisions, 2);
-ok('el resumen no se cuela como decisión',
+check('"None" does not count as a decision', day.counts.decisions, 2);
+ok('the summary does not sneak in as a decision',
   !day.decisions.some(d => /short standup/i.test(d.text)), JSON.stringify(day.decisions));
-ok('ni la decisión de la semana pasada',
+ok('nor the decision from last week',
   !day.decisions.some(d => /twenty nine/i.test(d.text)), JSON.stringify(day.decisions));
 
-check('las tareas de hoy son las de las reuniones de hoy',
+check('today tasks are the ones from today meetings',
   day.created.map(i => i.text).sort(), ['fix the login bug', 'update the changelog']);
-ok('una tarea completada no aparece nunca',
-  !JSON.stringify(day).includes('archive the old repo'), 'apareció');
+ok('a completed task never shows up',
+  !JSON.stringify(day).includes('archive the old repo'), 'showed up');
 
 const kinds = day.attention.map(a => a.kind);
-ok('avisa de la reunión transcrita sin notas', kinds.includes('no-notes'), JSON.stringify(day.attention));
-check('la señala por nombre',
+ok('flags the transcribed meeting with no notes', kinds.includes('no-notes'), JSON.stringify(day.attention));
+check('names it',
   day.attention.filter(a => a.kind === 'no-notes').map(a => a.meeting.title), ['Sync']);
-check('lo vencido es lo que tiene fecha pasada y sigue abierto',
+check('overdue means a past date and still open',
   day.attention.filter(a => a.kind === 'overdue').map(a => a.text), ['send the vendor contract']);
-ok('una fecha futura no está vencida',
+ok('a future date is not overdue',
   !day.attention.some(a => /book the venue/.test(a.text)), JSON.stringify(day.attention));
-check('lo urgente de hoy también sube',
+check('urgent items for today surface too',
   day.attention.filter(a => a.kind === 'urgent').map(a => a.text), ['fix the login bug']);
-check('los contadores cuadran',
+check('the counters add up',
   day.counts, { meetings: 3, decisions: 2, created: 2, openTotal: 4 });
 
 const quiet = digest.dailyDigest({ meetings: MEETINGS, items: [], day: '2026-07-25' });
-check('un día sin nada se declara vacío', quiet.empty, true);
-check('y no inventa reuniones', quiet.meetings.length, 0);
+check('a day with nothing declares itself empty', quiet.empty, true);
+check('and it invents no meetings', quiet.meetings.length, 0);
 
-check('un día vacío sabe si la biblioteca entera está vacía', quiet.library, 4);
-check('y con biblioteca vacía lo dice como tal',
+check('an empty day knows whether the whole library is empty', quiet.library, 4);
+check('and with an empty library it says so',
   digest.dailyDigest({ meetings: [], items: [], day: TODAY }).library, 0);
 
 const quietButOwing = digest.dailyDigest({ meetings: MEETINGS, items: ITEMS, day: '2026-07-25' });
-ok('un día sin reuniones pero con algo vencido no está vacío',
+ok('a day with no meetings but something overdue is not empty',
   quietButOwing.empty === false && quietButOwing.attention.length > 0,
   JSON.stringify(quietButOwing.counts));
 
 // ---------------------------------------------------------------- weekly facts
 
-console.log('\n-- los hechos de la semana --');
+console.log('\n-- the facts of the week --');
 const facts = digest.weeklyFacts({
   meetings: MEETINGS, items: ITEMS, from: '2026-07-27', to: '2026-08-02', today: TODAY
 });
-check('solo la semana pedida', facts.meetings.map(m => m.title), ['Standup', 'Design Review', 'Sync']);
-check('la semana pasada queda fuera',
+check('only the requested week', facts.meetings.map(m => m.title), ['Standup', 'Design Review', 'Sync']);
+check('last week is left out',
   facts.meetings.some(m => m.title === 'Planning'), false);
-check('cuenta las decisiones de la semana', facts.decisionCount, 2);
-check('la gente, por cuántas veces apareció',
+check('counts the decisions of the week', facts.decisionCount, 2);
+check('people, by how often they came up',
   facts.people.map(p => `${p.name}:${p.count}`), ['Chuck:2', 'Carlos:1', 'Maya:1']);
-check('los días con reunión', facts.days, [{ date: '2026-07-29', count: 3 }]);
-check('las reuniones sin notas quedan señaladas',
+check('the days with a meeting', facts.days, [{ date: '2026-07-29', count: 3 }]);
+check('meetings without notes are flagged',
   facts.missingNotes.map(m => m.title), ['Sync']);
-check('lo vencido se cuenta una vez', facts.overdue, 1);
-check('las tareas abiertas nacidas en la semana', facts.openFromWeek, 2);
-check('dos reuniones con notas ya no es una semana delgada', facts.thin, false);
-check('una sola sí — no hay hilos que cruzar',
+check('overdue items are counted once', facts.overdue, 1);
+check('open tasks born during the week', facts.openFromWeek, 2);
+check('two meetings with notes is no longer a thin week', facts.thin, false);
+check('a single one, yes — no threads to cross',
   digest.weeklyFacts({ meetings: [standup, untouched], from: '2026-07-27', to: '2026-08-02' }).thin, true);
-check('una semana sin reuniones se declara vacía',
+check('a week with no meetings declares itself empty',
   digest.weeklyFacts({ meetings: MEETINGS, from: '2026-06-01', to: '2026-06-07' }).empty, true);
 
 // ---------------------------------------------------------------- weekly input
 
-console.log('\n-- lo que se le manda al modelo --');
+console.log('\n-- what is sent to the model --');
 const input = digest.weeklyInput([standup, review, untouched, lastWeek]);
-ok('lleva los títulos y las fechas',
+ok('carries the titles and the dates',
   /=== Standup \| 2026-07-29 \| Chuck, Maya ===/.test(input.text), input.text.slice(0, 200));
-ok('lleva las decisiones', /Ship the rollout on Thursday/.test(input.text), 'faltan');
-ok('NO lleva la sección de tareas — así no puede repetirlas',
+ok('carries the decisions', /Ship the rollout on Thursday/.test(input.text), 'faltan');
+ok('does NOT carry the tasks section — so it cannot repeat them',
   !/changelog/i.test(input.text), input.text);
-ok('una reunión sin notas no se manda', !/=== Sync/.test(input.text), input.text);
-check('cuenta cuántas mandó', input.meetings, 3);
+ok('a meeting with no notes is not sent', !/=== Sync/.test(input.text), input.text);
+check('reports how many it sent', input.meetings, 3);
 
 const long = meeting('2026-07-30_0900', {
   title: 'Marathon',
   sections: [{ heading: 'Summary', body: 'x'.repeat(digest.MAX_MEETING_CHARS + 500) }]
 });
 const cut = digest.weeklyInput([long]);
-ok('una nota enorme se recorta', cut.text.length < digest.MAX_MEETING_CHARS + 300, `${cut.text.length}`);
-check('y el recorte se reporta, no se esconde', cut.truncated, 1);
+ok('a huge note is truncated', cut.text.length < digest.MAX_MEETING_CHARS + 300, `${cut.text.length}`);
+check('and the truncation is reported, not hidden', cut.truncated, 1);
 
 // ---------------------------------------------------------------- weekly parse
 
-console.log('\n-- lo que se acepta de vuelta --');
+console.log('\n-- what is accepted back --');
 const week = [standup, review, lastWeek];
 const good = digest.parseWeekly(`## Threads
 - The rollout moved from a plan to a date. [Standup, Planning]
@@ -195,15 +195,15 @@ const good = digest.parseWeekly(`## Threads
 - Nobody owns the migration script. [Design Review]
 `, week);
 
-check('las tres secciones, en orden', good.sections.map(s => s.title), ['Threads', 'Shifts', 'Unresolved']);
-check('los hilos se conservan', good.sections[0].items.length, 2);
-check('la cita se resuelve a reuniones reales',
+check('all three sections, in order', good.sections.map(s => s.title), ['Threads', 'Shifts', 'Unresolved']);
+check('the threads are preserved', good.sections[0].items.length, 2);
+check('the citation resolves to real meetings',
   good.sections[0].items[0].cites.map(c => c.title), ['Standup', 'Planning']);
-check('con su carpeta, para poder abrirlas',
+check('with their folder, so they can be opened',
   good.sections[0].items[0].cites.every(c => c.folder.startsWith('C:/M/')), true);
-check('el corchete se saca del texto',
+check('the bracket is stripped from the text',
   good.sections[0].items[0].text, 'The rollout moved from a plan to a date.');
-check('nada se descartó', good.dropped.length, 0);
+check('nothing was discarded', good.dropped.length, 0);
 
 const bad = digest.parseWeekly(`## Threads
 - The Tokyo office lease was signed on Tuesday. [Tokyo Kickoff]
@@ -216,22 +216,22 @@ None
 ## Unresolved
 None
 `, week);
-check('una cita a una reunión que no existe se descarta',
+check('a citation to a meeting that does not exist is discarded',
   bad.sections[0].items.map(i => i.text), ['The rollout moved to Thursday.']);
-check('y una afirmación sin fuente también', bad.dropped.length, 2);
-ok('se dice por qué se descartó cada una',
+check('and so is a claim with no source', bad.dropped.length, 2);
+ok('it says why each one was discarded',
   bad.dropped.every(d => d.why), JSON.stringify(bad.dropped));
-ok('lo inventado no sobrevive en ninguna parte',
+ok('anything invented survives nowhere',
   !JSON.stringify(bad.sections).includes('Tokyo'), JSON.stringify(bad.sections));
-check('"None" se entiende como vacío a propósito',
+check('"None" is deliberately read as empty',
   bad.sections.slice(1).map(s => s.none), [true, true]);
 
 const missing = digest.parseWeekly('## Threads\n- Something happened. [Standup, Planning]\n', week);
-check('una sección que el modelo no escribió sigue existiendo',
+check('a section the model did not write still exists',
   missing.sections.map(s => `${s.title}:${s.items.length}`), ['Threads:1', 'Shifts:0', 'Unresolved:0']);
-check('una respuesta vacía se declara vacía',
+check('an empty answer declares itself empty',
   digest.parseWeekly('', week).empty, true);
-check('y una respuesta entera sin citas también',
+check('and so does a whole answer with no citations',
   digest.parseWeekly('## Threads\n- We talked about many things.\n', week).empty, true);
 
 console.log(fails ? `\n${fails} fallos` : '\nPASS');

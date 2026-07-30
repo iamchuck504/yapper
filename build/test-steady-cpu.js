@@ -19,7 +19,7 @@ const CHUNK_MS = 200;
 (async () => {
   const cfg = engine.tierConfig('steady');
   console.log('binarios :', path.basename(engine.binDir()));
-  console.log(`tier     : steady — ${cfg.liveModel} cada ${cfg.cadenceMs} ms, ventana ${cfg.windowSec} s, espera ${cfg.maxHoldSec} s\n`);
+  console.log(`tier     : steady — ${cfg.liveModel} every ${cfg.cadenceMs} ms, window ${cfg.windowSec} s, hold ${cfg.maxHoldSec} s\n`);
 
   const fd = fs.openSync(WAV, 'r');
   const totalBytes = Math.min(fs.statSync(WAV).size - engine.WAV_HEADER, PLAY_SEC * engine.BYTES_PER_SEC);
@@ -59,12 +59,12 @@ const CHUNK_MS = 200;
   const words = confirmed.split(/\s+/).filter(Boolean).length;
 
   console.log(`pasadas  : ${passes}`);
-  console.log(`retraso  : ${median.toFixed(1)} s de mediana, ${worst.toFixed(1)} s el peor`);
-  console.log(`palabras : ${words} confirmadas en ${PLAY_SEC} s`);
+  console.log(`lag      : ${median.toFixed(1)} s median, ${worst.toFixed(1)} s worst`);
+  console.log(`words    : ${words} confirmed in ${PLAY_SEC} s`);
   console.log(`\n${confirmed.slice(0, 400)}\n`);
 
-  if (!words) { console.log('FAIL  el tier steady no confirmó nada en CPU'); process.exit(1); }
+  if (!words) { console.log('FAIL  the steady tier confirmed nothing on CPU'); process.exit(1); }
   // the point of the tier is that it does not drift further behind as it runs
-  if (worst > 12) { console.log(`FAIL  se atrasó ${worst.toFixed(1)} s — steady no se sostiene en esta CPU`); process.exit(1); }
+  if (worst > 12) { console.log(`FAIL  fell ${worst.toFixed(1)} s behind — steady does not hold up on this CPU`); process.exit(1); }
   console.log('PASS');
 })().catch(e => { console.log('FAIL', e.message); process.exit(1); });

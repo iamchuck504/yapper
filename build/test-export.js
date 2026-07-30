@@ -42,7 +42,7 @@ app.whenReady().then(async () => {
 
   // the menu has to offer it in the first place
   const kinds = await $(`[...document.querySelectorAll('#export-menu button')].map(b => b.dataset.export)`);
-  check('el menú ofrece transcript en Markdown', kinds.includes('transcript-md'), kinds.join(', '));
+  check('the menu offers the transcript as Markdown', kinds.includes('transcript-md'), kinds.join(', '));
 
   await $(`(async () => {
     currentFolder = ${JSON.stringify(folder)};
@@ -54,28 +54,28 @@ app.whenReady().then(async () => {
   await $(`runExport('transcript-md')`);
   await new Promise(r => setTimeout(r, 400));
 
-  check('escribió el archivo', fs.existsSync(saved), 'no está');
+  check('wrote the file', fs.existsSync(saved), 'is missing');
   if (!fs.existsSync(saved)) { console.log('\n1 fallos'); return app.exit(1); }
   const md = fs.readFileSync(saved, 'utf8');
   console.log('\n' + md + '---\n');
 
-  check('lleva el título de la reunión', md.startsWith('# Launch Sync'), md.slice(0, 40));
-  check('tiene encabezado de transcripción', /^## Full transcript$/m.test(md), 'falta');
-  check('las marcas de tiempo van en negrita', /\*\*\[00:01\]\*\*/.test(md), 'no las encontré');
-  check('bajo una hora omite el campo de horas', /\*\*\[02:30\]\*\*/.test(md), 'no lo omitió');
-  check('pasada la hora sí lo incluye', /\*\*\[01:05:00\]\*\*/.test(md), 'no lo incluyó');
+  check('carries the meeting title', md.startsWith('# Launch Sync'), md.slice(0, 40));
+  check('has a transcript heading', /^## Full transcript$/m.test(md), 'falta');
+  check('the timestamps are bold', /\*\*\[00:01\]\*\*/.test(md), 'could not find them');
+  check('under an hour it omits the hours field', /\*\*\[02:30\]\*\*/.test(md), 'did not omit it');
+  check('past the hour mark it is included', /\*\*\[01:05:00\]\*\*/.test(md), 'did not include it');
 
   // the verbatim part: markdown must not eat the words
-  check('escapa los asteriscos', md.includes('\\*beta\\*'), 'se comió el énfasis');
-  check('escapa los guiones bajos', md.includes('report\\_final\\_v2'), 'se comió el guion bajo');
-  check('escapa los corchetes', md.includes('\\[brackets\\]'), 'se comió los corchetes');
+  check('escapes the asterisks', md.includes('\\*beta\\*'), 'swallowed the emphasis');
+  check('escapes the underscores', md.includes('report\\_final\\_v2'), 'swallowed the underscore');
+  check('escapes the brackets', md.includes('\\[brackets\\]'), 'swallowed the brackets');
 
   // a long silence should read as a new paragraph, a short one as a new line
   const body = md.split('## Full transcript')[1];
-  check('un silencio largo abre párrafo',
+  check('a long silence starts a paragraph',
     /\n\n\*\*\[02:30\]\*\*/.test(body) && /\n\n\*\*\[01:05:00\]\*\*/.test(body), body);
-  check('líneas seguidas quedan en el mismo párrafo',
-    /\*\*\[00:01\]\*\*.*  \n\*\*\[00:07\]\*\*/.test(body), 'las separó de más');
+  check('consecutive lines stay in the same paragraph',
+    /\*\*\[00:01\]\*\*.*  \n\*\*\[00:07\]\*\*/.test(body), 'split them too eagerly');
 
   console.log(fails ? `\n${fails} fallos` : '\nPASS');
   app.exit(fails ? 1 : 0);

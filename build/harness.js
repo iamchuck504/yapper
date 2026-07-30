@@ -32,7 +32,7 @@ function sandbox(name) {
 /** Print to stdout and to a file, because Electron holds stdout until it exits. */
 function logger(root) {
   const file = path.join(root, 'progress.log');
-  console.log(`progreso en vivo: ${file}`);
+  console.log(`live progress: ${file}`);
   return line => {
     console.log(line);
     try { fs.appendFileSync(file, line + '\n'); } catch { /* nothing to do */ }
@@ -49,7 +49,7 @@ async function mainWindow({ timeoutMs = 60000, settleMs = 1000 } = {}) {
       if (w) { clearInterval(tick); resolve(w); }
       else if (Date.now() - started > timeoutMs) {
         clearInterval(tick);
-        reject(new Error('la ventana principal nunca apareció'));
+        reject(new Error('the main window never appeared'));
       }
     }, 150);
   });
@@ -58,7 +58,7 @@ async function mainWindow({ timeoutMs = 60000, settleMs = 1000 } = {}) {
   // again, so only wait when there is actually something to wait for.
   if (win.webContents.isLoading()) {
     await new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error('la ventana nunca terminó de cargar')), timeoutMs);
+      const t = setTimeout(() => reject(new Error('the window never finished loading')), timeoutMs);
       win.webContents.once('did-finish-load', () => { clearTimeout(t); resolve(); });
     });
   }
@@ -69,7 +69,7 @@ async function mainWindow({ timeoutMs = 60000, settleMs = 1000 } = {}) {
 /** Fail loudly instead of hanging silently. */
 function watchdog(say, ms = 180000) {
   return setTimeout(() => {
-    say(`FAIL  la prueba se colgó: nada terminó en ${ms / 1000} s`);
+    say(`FAIL  the test hung: nothing finished in ${ms / 1000} s`);
     app.exit(1);
   }, ms);
 }
@@ -79,7 +79,7 @@ function within(promise, label, ms = 30000) {
   return Promise.race([
     promise,
     new Promise((_, rej) =>
-      setTimeout(() => rej(new Error(`"${label}" no respondió en ${ms / 1000} s`)), ms))
+      setTimeout(() => rej(new Error(`"${label}" did not respond in ${ms / 1000} s`)), ms))
   ]);
 }
 

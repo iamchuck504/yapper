@@ -26,7 +26,7 @@ function pickTranscript() {
 }
 
 const src = pickTranscript();
-if (!src) { console.log('FAIL  no hay ninguna transcripción real para probar'); app.exit(1); }
+if (!src) { console.log('FAIL  there is no real transcript to test with'); app.exit(1); }
 const folder = path.join(ROOT, 'Meetings', '2026-07-29_1200');
 fs.mkdirSync(folder);
 fs.copyFileSync(src.p, path.join(folder, 'transcript.txt'));
@@ -42,31 +42,31 @@ require('../main.js');
 app.whenReady().then(async () => {
   const win = await mainWindow();
 
-  console.log(`transcripción: ${src.p} (${(src.size / 1024).toFixed(0)} KB)\ngenerando…\n`);
+  console.log(`transcript: ${src.p} (${(src.size / 1024).toFixed(0)} KB)\ngenerating…\n`);
   const t0 = Date.now();
   const md = await win.webContents.executeJavaScript(
     `window.yapper.regenerate(${JSON.stringify(folder)}, `
     + `{ style: 'memo', detail: 'concise', custom: '', participants: '' })`);
-  console.log(`tardó ${((Date.now() - t0) / 1000).toFixed(0)} s\n`);
+  console.log(`took ${((Date.now() - t0) / 1000).toFixed(0)} s\n`);
   console.log(md.slice(0, 1400));
   console.log('\n---\n');
 
   const heads = [...md.matchAll(/^##\s+(.+)$/gm)].map(m => m[1].replace(/\s*\[[\d:]+\]\s*$/, '').trim());
-  check('devolvió markdown con secciones', heads.length >= 3, heads.join(' | '));
-  check('empieza por Overview', /overview/i.test(heads[0] || ''), heads.join(' | '));
-  check('trae Decisions', heads.some(h => /decision/i.test(h)), heads.join(' | '));
-  check('trae Next steps', heads.some(h => /next step/i.test(h)), heads.join(' | '));
-  check('no usa las secciones del estilo General',
+  check('returned markdown with sections', heads.length >= 3, heads.join(' | '));
+  check('starts with Overview', /overview/i.test(heads[0] || ''), heads.join(' | '));
+  check('carries Decisions', heads.some(h => /decision/i.test(h)), heads.join(' | '));
+  check('carries Next steps', heads.some(h => /next step/i.test(h)), heads.join(' | '));
+  check('does not use the General style sections',
     !heads.some(h => /key point/i.test(h)), heads.join(' | '));
 
   // a memo is prose: the Discussion section must not be a bullet list
   const disc = (md.split(/^##\s+/m).find(s => /^discussion/i.test(s)) || '');
   const bullets = (disc.match(/^\s*[-*]\s+/gm) || []).length;
-  check('la sección Discussion es prosa, no viñetas', bullets === 0, `${bullets} viñetas`);
-  check('la sección Discussion tiene contenido', disc.trim().length > 200, `${disc.trim().length} caracteres`);
+  check('the Discussion section is prose, not bullets', bullets === 0, `${bullets} bullets`);
+  check('the Discussion section has content', disc.trim().length > 200, `${disc.trim().length} caracteres`);
 
-  check('las secciones llevan marca de tiempo',
-    /^##\s+.+\[\d+:\d+\]\s*$/m.test(md), 'ninguna la trae');
+  check('the sections carry a timestamp',
+    /^##\s+.+\[\d+:\d+\]\s*$/m.test(md), 'none of them carries one');
 
   console.log(fails ? `\n${fails} fallos` : '\nPASS');
   app.exit(fails ? 1 : 0);

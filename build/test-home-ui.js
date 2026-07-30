@@ -104,57 +104,57 @@ app.whenReady().then(async () => {
   const text = id => $(`document.getElementById('${id}').textContent`);
 
   // ---------------- the day ----------------
-  say('\n  --- hoy ---');
-  check('la vista abre en el día', await visible('view-home') && await visible('home-day'), 'no abrió');
-  check('el título dice Today', (await text('home-title')).trim() === 'Today', await text('home-title'));
+  say('\n  --- today ---');
+  check('the view opens on the day', await visible('view-home') && await visible('home-day'), 'did not open');
+  check('the title says Today', (await text('home-title')).trim() === 'Today', await text('home-title'));
 
   const meetings = await rows('day-meetings');
-  say(`  reuniones: ${meetings.map(m => m.text.trim()).join(' | ')}`);
-  check('solo las de hoy, en orden',
+  say(`  meetings: ${meetings.map(m => m.text.trim()).join(' | ')}`);
+  check('only today ones, in order',
     meetings.length === 2 && /09:00/.test(meetings[0].text) && /Standup/.test(meetings[0].text)
       && /16:00/.test(meetings[1].text) && /Vendor Sync/.test(meetings[1].text),
     JSON.stringify(meetings.map(m => m.text)));
-  check('la de enero no aparece',
+  check('the January one does not show up',
     !meetings.some(m => /Kickoff/.test(m.text)), JSON.stringify(meetings.map(m => m.text)));
 
   const decisions = await rows('day-decisions');
   say(`  decisiones: ${decisions.map(d => d.text.trim()).join(' | ')}`);
-  check('las decisiones de hoy, y solo las de hoy',
+  check('today decisions, and only today ones',
     decisions.length === 2 && decisions.every(d => /Standup/.test(d.sources.join())),
     JSON.stringify(decisions));
-  check('el resumen no se cuela como decisión',
+  check('the summary does not sneak in as a decision',
     !decisions.some(d => /short standup/i.test(d.text)), JSON.stringify(decisions.map(d => d.text)));
-  check('la decisión del lunes no está en el día',
+  check('the Monday decision is not in the day view',
     !decisions.some(d => /targets Tuesday/i.test(d.text)), JSON.stringify(decisions.map(d => d.text)));
-  check('cada decisión ofrece abrir su reunión',
+  check('every decision offers to open its meeting',
     decisions.every(d => d.live === 1), JSON.stringify(decisions));
 
   const created = await rows('day-actions');
-  check('las tareas nuevas traen dueño y origen',
+  check('new tasks carry owner and origin',
     created.length === 1 && /changelog/.test(created[0].text) && /Maya/.test(created[0].text)
       && created[0].live === 1,
     JSON.stringify(created));
 
   const attention = await rows('day-attention');
-  say(`  atención: ${attention.map(a => a.text.trim()).join(' | ')}`);
-  check('la reunión sin notas se avisa, con su nombre',
+  say(`  attention: ${attention.map(a => a.text.trim()).join(' | ')}`);
+  check('the meeting with no notes is flagged, by name',
     attention.some(a => /no notes/i.test(a.text) && /Vendor Sync/.test(a.sources.join())),
     JSON.stringify(attention));
-  check('la tarea vencida se avisa como vencida',
+  check('the overdue task is flagged as overdue',
     attention.some(a => /overdue/i.test(a.text) && /vendor contract/i.test(a.text)),
     JSON.stringify(attention));
-  check('el contador del sidebar coincide',
+  check('the sidebar counter agrees',
     (await text('home-count')) === String(attention.length),
     `${await text('home-count')} vs ${attention.length}`);
 
   await $(`document.querySelector('#day-decisions .digest-source').click()`);
   await new Promise(r => setTimeout(r, 1000));
-  check('la fuente abre la reunión, y es la correcta',
+  check('the source opens the meeting, and it is the right one',
     await visible('view-meeting') && /Standup/.test(await text('result-title')),
     `visible=${await visible('view-meeting')} title="${await text('result-title')}"`);
 
   // ---------------- an empty day ----------------
-  say('\n  --- un día sin nada ---');
+  say('\n  --- a day with nothing ---');
   await $(`document.getElementById('btn-home').click()`);
   await new Promise(r => setTimeout(r, 700));
   const emptyDay = await $(`(async () => {
@@ -162,13 +162,13 @@ app.whenReady().then(async () => {
     return { empty: d.empty, previous: d.previous, meetings: d.meetings.length };
   })()`);
   say(`  ${JSON.stringify(emptyDay)}`);
-  check('un día vacío se declara vacío y no inventa nada',
+  check('an empty day declares itself empty and invents nothing',
     emptyDay.empty === true && emptyDay.meetings === 0, JSON.stringify(emptyDay));
-  check('y ofrece el día anterior que sí tuvo algo',
+  check('and offers the previous day that did have something',
     emptyDay.previous === '2026-01-05', emptyDay.previous);
 
   // ---------------- the week ----------------
-  say('\n  --- la semana ---');
+  say('\n  --- the week ---');
   await $(`document.querySelector('#home-scope .seg-btn[data-scope="week"]').click()`);
   const t0 = Date.now();
   await within($(`(async () => {
@@ -183,10 +183,10 @@ app.whenReady().then(async () => {
 
   const stats = await $(`[...document.querySelectorAll('.week-stat')].map(s => s.textContent)`);
   say(`  hechos: ${stats.join(' | ')}`);
-  check('los hechos de la semana se muestran',
+  check('the facts of the week are shown',
     stats.some(s => /^3meetings|^3 ?meetings/.test(s.replace(/\s+/g, ''))) || stats.length === 6,
     JSON.stringify(stats));
-  check('el aviso de reuniones sin notas nombra la reunión',
+  check('the no-notes warning names the meeting',
     /Vendor Sync/.test(await text('week-facts')), await text('week-facts'));
 
   const sections = await $(`[...document.querySelectorAll('#week-sections .week-section')].map(s => ({
@@ -199,21 +199,21 @@ app.whenReady().then(async () => {
   }))`);
   say('  ' + JSON.stringify(sections, null, 1).replace(/\n\s*/g, ' ').slice(0, 700));
 
-  check('las tres secciones están',
+  check('all three sections are present',
     JSON.stringify(sections.map(s => s.title)) === '["Threads","Shifts","Unresolved"]',
     JSON.stringify(sections.map(s => s.title)));
   const items = sections.flatMap(s => s.items);
-  check('todo lo que se muestra cita una reunión real',
+  check('everything shown cites a real meeting',
     items.length > 0 && items.every(i => i.sources.length >= 1), JSON.stringify(items));
-  check('las citas son de esta semana, no de enero',
+  check('the citations are from this week, not from January',
     !items.some(i => i.sources.join().includes('Kickoff')), JSON.stringify(items.map(i => i.sources)));
 
   const weekText = await text('week-sections');
-  check('la semana NO repite la lista de tareas',
+  check('the week does NOT repeat the task list',
     !/changelog/i.test(weekText), weekText.slice(0, 400));
-  check('ni se convierte en una lista de reuniones',
+  check('nor does it turn into a list of meetings',
     !/^\s*(Standup|Rollout Planning)\s*$/m.test(weekText), weekText.slice(0, 400));
-  check('el pie dice de cuántas reuniones salió',
+  check('the footer says how many meetings it came from',
     /\d meeting/.test(await text('week-note')), await text('week-note'));
 
   const cites = await $(`(() => { const b = document.querySelector('#week-sections .digest-source');
@@ -221,29 +221,29 @@ app.whenReady().then(async () => {
   if (cites) {
     await $(`document.querySelector('#week-sections .digest-source').click()`);
     await new Promise(r => setTimeout(r, 1000));
-    check('una cita de la semana abre su reunión', await visible('view-meeting'), 'no abrió');
+    check('a citation from the week opens its meeting', await visible('view-meeting'), 'did not open');
     await $(`document.getElementById('btn-home').click()`);
     await new Promise(r => setTimeout(r, 600));
   }
 
   // ---------------- cached, and a week that cannot be written ----------------
   const second = await within($(`window.yapper.weeklySummary({})`), 'segunda lectura', 60 * 1000);
-  check('la segunda vez se reusa lo ya escrito', second.cached === true,
+  check('the second time, what was already written is reused', second.cached === true,
     JSON.stringify({ cached: second.cached, reason: second.reason }));
 
-  const thin = await within($(`window.yapper.weeklySummary({ week: '2026-01-07' })`), 'semana delgada', 60 * 1000);
-  say(`  semana de enero -> ${JSON.stringify({ reason: thin.reason, sections: !!thin.sections })}`);
-  check('una semana con una sola nota no se escribe: se explica',
+  const thin = await within($(`window.yapper.weeklySummary({ week: '2026-01-07' })`), 'thin week', 60 * 1000);
+  say(`  January week -> ${JSON.stringify({ reason: thin.reason, sections: !!thin.sections })}`);
+  check('a week with a single note is not written: it is explained',
     thin.reason === 'thin' && !thin.sections, JSON.stringify(thin).slice(0, 200));
-  check('y aun así trae los hechos',
+  check('and it still carries the facts',
     thin.facts && thin.facts.meetings.length === 1, JSON.stringify(thin.facts || {}).slice(0, 200));
 
-  const nothing = await within($(`window.yapper.weeklySummary({ week: '2025-02-05' })`), 'semana vacía', 60 * 1000);
-  check('una semana sin reuniones tampoco se escribe',
+  const nothing = await within($(`window.yapper.weeklySummary({ week: '2025-02-05' })`), 'empty week', 60 * 1000);
+  check('a week with no meetings is not written either',
     nothing.reason === 'no-meetings' && !nothing.sections, JSON.stringify(nothing).slice(0, 160));
-  check('y no ofrece retroceder a la nada', nothing.previous === '', String(nothing.previous));
+  check('and it does not offer to go back to nothing', nothing.previous === '', String(nothing.previous));
 
-  // Una semana vacía en pantalla: ni muro de ceros, ni botones que no hacen nada.
+  // An empty week on screen: no wall of zeroes, no buttons that do nothing.
   await $(`(() => { homeWeekOf = '2025-02-05'; loadWeek(); })()`);
   await new Promise(r => setTimeout(r, 1800));
   const bare = await $(`({
@@ -253,16 +253,16 @@ app.whenReady().then(async () => {
     back: !!document.querySelector('#week-sections .btn-ghost'),
     status: document.getElementById('week-status').textContent
   })`);
-  say(`  semana vacía en pantalla -> ${JSON.stringify(bare)}`);
-  check('una semana vacía no muestra el muro de ceros',
+  say(`  empty week on screen -> ${JSON.stringify(bare)}`);
+  check('an empty week does not show the wall of zeroes',
     !bare.facts && bare.zeros === 0, JSON.stringify(bare));
-  check('ni ofrece reescribir lo que nunca se escribió', !bare.refresh, JSON.stringify(bare));
-  check('ni retroceder cuando no hay nada atrás', !bare.back, JSON.stringify(bare));
-  check('lo que sí hace es decirlo', /No meetings this week/i.test(bare.status), bare.status);
+  check('nor offers to rewrite what was never written', !bare.refresh, JSON.stringify(bare));
+  check('nor to go back when there is nothing behind', !bare.back, JSON.stringify(bare));
+  check('what it does do is say so', /No meetings this week/i.test(bare.status), bare.status);
 
-  // Con reuniones antes, sí hay salida — y va a una semana que tuvo algo.
-  const janWeek = await within($(`window.yapper.weeklySummary({ week: '2026-02-04' })`), 'febrero', 60 * 1000);
-  check('desde una semana vacía posterior, la salida apunta a algo real',
+  // With meetings before it, there is a way out — and it leads to a week that had something.
+  const janWeek = await within($(`window.yapper.weeklySummary({ week: '2026-02-04' })`), 'february', 60 * 1000);
+  check('from a later empty week, the way out points at something real',
     janWeek.previous === '2026-01-05', String(janWeek.previous));
 
   say(fails ? `\n${fails} fallos` : '\nPASS');

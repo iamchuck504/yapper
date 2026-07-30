@@ -28,14 +28,14 @@ Get-Process Yapper -ErrorAction SilentlyContinue | ForEach-Object { $_.CloseMain
 Start-Sleep -Seconds 3
 Get-Process Yapper -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
-Write-Host "--- lo que dijo el updater ---"
+Write-Host "--- what the updater said ---"
 ($log -split "`n") | Where-Object { $_ -match 'update|Checking|available' } | Select-Object -First 5
 if ($log -match 'Update for version 0\.1\.0 is not available' -or $log -match 'not available') {
-    Write-Host "`nok    el feed publico responde y la app se sabe al dia"
+    Write-Host "`nok    the public feed responds and the app knows it is up to date"
 } elseif ($log -match '\[update\] check failed') {
-    Write-Host "`nFAIL  el check contra el feed real fallo"
+    Write-Host "`nFAIL  the check against the real feed failed"
 } else {
-    Write-Host "`n??    revisar el log completo en $out"
+    Write-Host "`n??    check the full log at $out"
 }
 
 powershell -NoProfile -ExecutionPolicy Bypass -File build\e2e-uninstall.ps1

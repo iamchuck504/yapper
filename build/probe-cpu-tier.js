@@ -18,5 +18,5 @@ const engine = require('../engine');
   console.log('binarios :', path.basename(engine.binDir()));
   console.log('CPU      :', os.cpus()[0].model.trim(), `(${os.cpus().length} hilos)`);
   const res = await engine.calibrate({ passes: 3 });
-  console.log('\nmedido   :', res.msPerPass, 'ms por pasada  ->', res.tier);
+  console.log('\nmedido   :', res.msPerPass, 'ms per pass  ->', res.tier);
 })().catch(e => { console.log('FAIL', e.message); process.exit(1); });

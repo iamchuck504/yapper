@@ -74,26 +74,26 @@ app.whenReady().then(async () => {
   say(`  items: ${list.map(r => `${r.owner || '—'}/${r.text}`).join(' | ')}\n`);
 
   // ---- extraction ----
-  check('saca los action items de las notas', list.length === 5, `${list.length}: ver arriba`);
+  check('pulls the action items out of the notes', list.length === 5, `${list.length}: ver arriba`);
   check('ignora "No action items recorded."',
-    !list.some(r => /no action items/i.test(r.text)), 'metió el marcador');
-  check('lee los responsables que sí se dijeron',
+    !list.some(r => /no action items/i.test(r.text)), 'inserted the marker');
+  check('reads the owners that were actually named',
     list.filter(r => r.owner).map(r => r.owner).sort().join(',') === 'Chuck,Maya',
     list.map(r => r.owner).join(','));
-  check('deja vacío el responsable que nadie dijo',
-    list.some(r => /contract/i.test(r.text) && !r.owner), 'inventó uno');
-  check('lee las fechas escritas', list.some(r => r.due === 'Friday'), 'no encontró ninguna');
-  check('marca lo urgente', list.some(r => r.priority === 'high' && /login/i.test(r.text)),
-    'no marcó el bug');
+  check('leaves the owner empty when nobody was named',
+    list.some(r => /contract/i.test(r.text) && !r.owner), 'made one up');
+  check('reads the dates as written', list.some(r => r.due === 'Friday'), 'found none');
+  check('flags what is urgent', list.some(r => r.priority === 'high' && /login/i.test(r.text)),
+    'did not flag the bug');
 
   // ---- duplicates ----
   const rollout = list.filter(r => /rollout/i.test(r.text));
-  check('el pendiente repetido en dos reuniones es UNA fila', rollout.length === 1,
+  check('an action item repeated across two meetings is ONE row', rollout.length === 1,
     `${rollout.length} filas`);
-  check('y recuerda las dos reuniones', (rollout[0].mentions || []).length === 2,
+  check('and remembers both meetings', (rollout[0].mentions || []).length === 2,
     JSON.stringify(rollout[0].sources));
-  check('conservando el responsable original', rollout[0].owner === 'Maya', rollout[0].owner);
-  check('lo nuevo del standup sí se añade', list.some(r => /venue/i.test(r.text)), 'falta');
+  check('keeping the original owner', rollout[0].owner === 'Maya', rollout[0].owner);
+  check('what is new in the standup does get added', list.some(r => /venue/i.test(r.text)), 'falta');
 
   // ---- the summary on the main screen ----
   const summary = await $(`(() => {
@@ -101,8 +101,8 @@ app.whenReady().then(async () => {
     return { text: el.textContent, hidden: el.classList.contains('hidden') };
   })()`);
   say(`  resumen: "${summary.text}"`);
-  check('la pantalla principal resume los pendientes', !summary.hidden, 'está oculto');
-  check('con el número y los urgentes',
+  check('the home screen summarises the action items', !summary.hidden, 'is hidden');
+  check('with the count and the urgent ones',
     /5 action items pending/.test(summary.text) && /1 high priority/.test(summary.text),
     summary.text);
 
@@ -119,24 +119,24 @@ app.whenReady().then(async () => {
   }))`);
 
   let shown = await rows();
-  check('la vista lista los pendientes', shown.length === 5, `${shown.length} filas`);
-  check('lo urgente va primero', shown[0].urgent, JSON.stringify(shown[0]));
-  check('muestra el responsable', shown.some(r => r.owner === 'Maya'), JSON.stringify(shown));
-  check('muestra la fecha', shown.some(r => r.due === 'Friday'), JSON.stringify(shown));
-  check('muestra de qué reunión salió',
+  check('the view lists the action items', shown.length === 5, `${shown.length} filas`);
+  check('urgent items come first', shown[0].urgent, JSON.stringify(shown[0]));
+  check('shows the owner', shown.some(r => r.owner === 'Maya'), JSON.stringify(shown));
+  check('shows the date', shown.some(r => r.due === 'Friday'), JSON.stringify(shown));
+  check('shows which meeting it came from',
     shown.some(r => r.meeting === 'Launch Planning'), JSON.stringify(shown.map(r => r.meeting)));
-  check('avisa cuando se repitió en otra reunión',
+  check('warns when it recurred in another meeting',
     shown.some(r => /also in 1 other meeting/.test(r.again)), JSON.stringify(shown.map(r => r.again)));
 
   // ---- filters ----
   await click('#action-filter .seg-btn[data-filter="high"]');
   shown = await rows();
-  check('el filtro de urgentes deja solo uno', shown.length === 1, `${shown.length}`);
+  check('the urgent filter leaves only one', shown.length === 1, `${shown.length}`);
   await click('#action-filter .seg-btn[data-filter="mine"]');
   shown = await rows();
-  check('el filtro de "con responsable" deja dos', shown.length === 2, `${shown.length}`);
+  check('the "has owner" filter leaves two', shown.length === 2, `${shown.length}`);
   await click('#action-filter .seg-btn[data-filter="done"]');
-  check('sin nada hecho, el filtro lo dice',
+  check('with nothing done, the filter says so',
     (await $("!!document.querySelector('#reminders-list .reminders-empty')")), 'no avisa');
   await click('#action-filter .seg-btn[data-filter="open"]');
 
@@ -144,20 +144,20 @@ app.whenReady().then(async () => {
   await click('#reminders-list .reminder .r-check');
   await new Promise(r => setTimeout(r, 300));
   let after = await $('window.yapper.listActions()');
-  check('marcar como hecho se guarda', after.filter(r => r.done).length === 1,
+  check('marking as done is saved', after.filter(r => r.done).length === 1,
     `${after.filter(r => r.done).length} hechos`);
-  check('y desaparece de "Open"', (await rows()).length === 4, `${(await rows()).length}`);
+  check('and it disappears from "Open"', (await rows()).length === 4, `${(await rows()).length}`);
 
   await $(`(() => { const i = document.querySelector('#reminders-list .reminder .r-text');
     i.value = 'edited by hand'; i.dispatchEvent(new Event('change')); })()`);
   await new Promise(r => setTimeout(r, 400));
   after = await $('window.yapper.listActions()');
-  check('editar a mano se guarda', after.some(r => r.text === 'edited by hand'),
-    'no se guardó');
+  check('editing by hand is saved', after.some(r => r.text === 'edited by hand'),
+    'was not saved');
 
   const before = (await rows()).length;
   await click('#reminders-list .reminder .r-del');
-  check('borrar quita la fila', (await rows()).length === before - 1,
+  check('deleting removes the row', (await rows()).length === before - 1,
     `${(await rows()).length} de ${before}`);
 
   // ---- opening the meeting it came from ----
@@ -172,7 +172,7 @@ app.whenReady().then(async () => {
     btn.click();
     return true;
   })()`);
-  check('hay un botón para abrir la reunión', found, 'no lo encontré');
+  check('there is a button to open the meeting', found, 'could not find it');
   const state = () => $(`({
     meeting: !document.getElementById('view-meeting').classList.contains('hidden'),
     reminders: !document.getElementById('view-reminders').classList.contains('hidden'),
@@ -183,17 +183,17 @@ app.whenReady().then(async () => {
   // few hundred milliseconds later, so the meeting opened and then vanished.
   await new Promise(r => setTimeout(r, 6500));
   const opened = await state();
-  check('abre la reunión de origen',
+  check('opens the source meeting',
     opened.meeting && opened.title === 'Launch Planning', JSON.stringify(opened));
-  check('y nada la cierra por detrás', !opened.record, JSON.stringify(opened));
+  check('and nothing closes it behind your back', !opened.record, JSON.stringify(opened));
 
   // ---- nothing is invented on a re-index ----
   await $('window.yapper.refreshLibrary()');
   const again = await $('window.yapper.listActions()');
-  check('re-indexar no duplica nada', again.length === after.length - 1,
+  check('re-indexing duplicates nothing', again.length === after.length - 1,
     `${again.length} ahora, ${after.length - 1} esperados`);
 
-  if (errs.length) say('  errores del renderer: ' + errs.slice(0, 4).join(' | '));
+  if (errs.length) say('  renderer errors: ' + errs.slice(0, 4).join(' | '));
   say(fails ? `\n${fails} fallos` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { say('FAIL ' + (e.stack || e.message)); app.exit(1); });

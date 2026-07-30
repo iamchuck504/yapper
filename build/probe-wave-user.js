@@ -28,7 +28,7 @@ app.whenReady().then(async () => {
       .find(w => w.webContents.getURL().endsWith('index.html'));
     if (!win) await new Promise(r => setTimeout(r, 200));
   }
-  if (!win) { say('FAIL  no apareció la ventana'); return app.exit(1); }
+  if (!win) { say('FAIL  the window never appeared'); return app.exit(1); }
   await new Promise(r => setTimeout(r, 2500));
   const $ = js => win.webContents.executeJavaScript(js, true);
 
@@ -37,7 +37,7 @@ app.whenReady().then(async () => {
     if (level >= 2) errors.push(message);
   });
 
-  say('ajustes reales:');
+  say('real settings:');
   say(await $(`JSON.stringify({
     mic: localStorage.getItem('yapper-mic'),
     gainSys: localStorage.getItem('yapper-gain-sys'),
@@ -47,7 +47,7 @@ app.whenReady().then(async () => {
     autodetect: localStorage.getItem('yapper-autodetect')
   }, null, 2)`));
 
-  say('micrófonos visibles ahora:');
+  say('microphones visible right now:');
   say(await $(`(async () => {
     const devs = await navigator.mediaDevices.enumerateDevices();
     return devs.filter(d => d.kind === 'audioinput')
@@ -89,9 +89,9 @@ app.whenReady().then(async () => {
   const sys = await wave('viz-sys');
   const mic = await wave('viz-mic');
   const moving = a => new Set(a).size > 1;
-  say(`sys píxeles por frame: ${sys.join(', ')}  -> se mueve: ${moving(sys)}`);
-  say(`mic píxeles por frame: ${mic.join(', ')}  -> se mueve: ${moving(mic)}`);
-  say(`errores (${errors.length}):`);
+  say(`sys pixels per frame: ${sys.join(', ')}  -> moving: ${moving(sys)}`);
+  say(`mic pixels per frame: ${mic.join(', ')}  -> moving: ${moving(mic)}`);
+  say(`errors (${errors.length}):`);
   for (const e of errors.slice(0, 6)) say(`  ${e}`);
 
   app.exit(0);
