@@ -108,6 +108,40 @@ const ok = (req, res) => {
     { provider: 'compatible', apiKey: 'k', baseUrl: srv.url, model: 'm' }, 'Rate limited');
   await srv.close();
 
+  // Gemini's OpenAI-compatible endpoint wraps its errors in an array and returns
+  // 400 for a bad key. Before this was handled the user saw the raw JSON.
+  srv = await fakeServer((req, res) => {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify([{ error: { code: 400, message: 'Please pass a valid API key', status: 'INVALID_ARGUMENT' } }]));
+  });
+  await expectError('un error envuelto en array se lee igual',
+    { provider: 'gemini', apiKey: 'bad', baseUrl: srv.url, model: 'm' }, 'Please pass a valid API key');
+  await expectError('y un 400 por la key se explica como key rechazada',
+    { provider: 'gemini', apiKey: 'bad', baseUrl: srv.url, model: 'm' }, 'key was rejected');
+  await srv.close();
+
+  srv = await fakeServer((req, res) => {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify([{ error: { message: 'Please pass a valid API key' } }]));
+  });
+  try {
+    await llm.generate({ provider: 'gemini', apiKey: 'bad', baseUrl: srv.url, model: 'm' },
+      { system: 's', input: 'i' });
+    check('el error no muestra JSON crudo', false, 'no lanzó');
+  } catch (e) {
+    check('el error no muestra JSON crudo',
+      !e.message.includes('{') && !e.message.includes('"'), `dijo "${e.message}"`);
+  }
+  await srv.close();
+
+  srv = await fakeServer((req, res) => {
+    res.writeHead(500, { 'Content-Type': 'text/plain' });
+    res.end('upstream exploded');
+  });
+  await expectError('un cuerpo que no es JSON no revienta',
+    { provider: 'compatible', apiKey: 'k', baseUrl: srv.url, model: 'm' }, 'upstream exploded');
+  await srv.close();
+
   srv = await fakeServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ choices: [{ message: { content: '   ' } }] }));
