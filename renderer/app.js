@@ -884,6 +884,17 @@ function drawWave(m) {
   ctx.stroke();
 }
 
+/** Peak deviation in a viz's current buffer, 0..1 — what the bubble's bars show. */
+function levelOf(m) {
+  if (!m) return 0;
+  let peak = 0;
+  for (let i = 0; i < m.buf.length; i++) {
+    const d = Math.abs(m.buf[i] - 128);
+    if (d > peak) peak = d;
+  }
+  return peak / 128;
+}
+
 // ---------- pause, markers, end-of-meeting ----------
 
 let paused = false;
@@ -919,6 +930,7 @@ function setPaused(on) {
   btnPause.classList.toggle('on', on);
   btnPause.querySelector('.pause-label').textContent = on ? 'Resume' : 'Pause';
   window.yapper.bubbleState({ paused: on });
+  if (on) window.yapper.bubbleState({ level: 0 });   // the capsule goes quiet too
 }
 
 function addMarker() {
@@ -1028,9 +1040,21 @@ async function startRecording() {
 
     await applyMicSelection();
 
+    let levelSentAt = 0;
     const updateLevels = () => {
       for (const m of [analysers.sys, analysers.mic]) {
         if (m) drawWave(m);
+      }
+      // The bubble's capsule shows this same signal. Throttled: the bars only
+      // have ~100 ms of resolution anyway, and paused means silent on purpose.
+      if (bubbleEnabled && !paused) {
+        const now = performance.now();
+        if (now - levelSentAt > 110) {
+          levelSentAt = now;
+          window.yapper.bubbleState({
+            level: Math.max(levelOf(analysers.sys), levelOf(analysers.mic))
+          });
+        }
       }
       levelRaf = requestAnimationFrame(updateLevels);
     };
