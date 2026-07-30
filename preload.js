@@ -91,5 +91,9 @@ contextBridge.exposeInMainWorld('yapper', {
   // meeting auto-detection
   setAutoDetect: enabled => ipcRenderer.send('autodetect-set', enabled),
   setRecordingState: recording => ipcRenderer.send('recording-state', recording),
-  onMeetingDetected: cb => ipcRenderer.on('meeting-detected', (_e, info) => cb(info))
+  onMeetingDetected: cb => ipcRenderer.on('meeting-detected', (_e, info) => cb(info)),
+
+  // macOS only: system audio is captured natively, so whether it worked is
+  // something only the main process knows.
+  onSystemAudioStatus: cb => ipcRenderer.on('system-audio-status', (_e, info) => cb(info))
 });

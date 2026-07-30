@@ -14,6 +14,7 @@ const actions = require('./actions');
 const search = require('./search');
 const digest = require('./digest');
 const provision = require('./provision');
+const sysaudio = require('./sysaudio');
 const { pathToFileURL } = require('url');
 
 const MEETINGS_DIR = path.join(app.getPath('documents'), 'Meetings');
@@ -636,7 +637,31 @@ let recFd = null;
 let recFolder = null;
 let recBytes = 0;
 
+// macOS records both sides of a call the only way it can: a native helper
+// captures system audio and its samples are added to the microphone's here.
+// On Windows the renderer has already done this in its audio graph, so this
+// stays dormant and the chunks arrive mixed.
+const sysAudio = sysaudio.create({
+  probePath: helperPath('system-audio'),
+  onStatus: info => {
+    if (info.ok) return console.log('[audio] capturing system audio');
+    console.log(`[audio] system audio unavailable (${info.reason})`,
+      info.detail ? `— ${info.detail}` : '');
+    // The renderer says "recording the microphone only" if this never turns on.
+    broadcast('system-audio-status', info);
+  }
+});
+
+// The native mac helpers, wherever this copy is running from. They have to sit
+// outside the asar for the same reason calibration.wav does: this process can
+// read in there, but nothing can be executed from inside one.
+function helperPath(name) {
+  const p = path.join(__dirname, 'build', name);
+  return app.isPackaged ? p.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`) : p;
+}
+
 function closeRecFile() {
+  sysAudio.stop();          // whether or not a file is open, stop capturing
   if (recFd === null) return;
   try { engine.finishWav(recFd, recBytes); } catch { /* disk gone */ }
   recFd = null;
@@ -648,11 +673,19 @@ ipcMain.handle('recording-start', async (_e, participants) => {
   recBytes = 0;
   writeParticipants(recFolder, participants);
   recFd = engine.openWav(path.join(recFolder, 'recording.wav'));
+  // Awaited: the helper takes a moment to come up, and starting to write the
+  // microphone before it does would leave the first second of the meeting
+  // one-sided. If it cannot start, recording carries on without it.
+  if (process.platform === 'darwin') await sysAudio.start();
   return recFolder;
 });
 
 ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
-  const buf = Buffer.from(arrayBuffer);
+  let buf = Buffer.from(arrayBuffer);
+  // The microphone sets the pace: take exactly as much system audio as the
+  // renderer just sent, so the mix stays aligned with the file's own clock.
+  const sys = sysAudio.take(buf.length);
+  if (sys) buf = sysaudio.mixPcm(buf, sys);
   if (recFd !== null) {
     try {
       fs.writeSync(recFd, buf, 0, buf.length, engine.WAV_HEADER + recBytes);
@@ -1772,8 +1805,7 @@ function micUsersWindows() {
 // in mac/mic-probe.swift. It has to live outside the asar: this process could
 // read it in there, but it cannot be executed from inside one.
 function probePath() {
-  const p = path.join(__dirname, 'build', 'mic-probe');
-  return app.isPackaged ? p.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`) : p;
+  return helperPath('mic-probe');
 }
 
 /**

@@ -106,7 +106,7 @@ that ship are the files that run.
 | `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
-| `preload.js` | 91 | The only bridge between renderer and main |
+| `preload.js` | 100 | The only bridge between renderer and main |
 
 `keystore.js` and `bounds.js` are separate files for one reason: they are pure
 functions, so they can be tested without booting Electron, and `keystore.js`
@@ -233,7 +233,7 @@ bullet whose citation does not resolve to a meeting in that week.
 
 ## 5. IPC surface
 
-68 channels, all declared in `preload.js` — that file is the complete list of
+69 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
@@ -254,10 +254,10 @@ the library (`refresh-library`, `list-actions`), retrieval
 **Fire-and-forget (10)** — `recording-chunk` (the audio itself), `set-theme`,
 `recording-state`, `autodetect-set`, `mark-shortcut`, and five bubble messages.
 
-**Main → renderer (12)** — `transcribe-progress`, `live-transcript`,
+**Main → renderer (13)** — `transcribe-progress`, `live-transcript`,
 `meeting-detected`, `meeting-ended`, `start-recording`, `mark-moment`,
 `remote-stop`, `remote-pause`, `bubble-state`, `keep-audio-changed`,
-`engine-setup-progress`, `update-ready`.
+`engine-setup-progress`, `update-ready`, `system-audio-status`.
 
 ---
 

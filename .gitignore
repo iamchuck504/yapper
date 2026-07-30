@@ -33,5 +33,6 @@ build/whisper/
 bin/
 models/
 
-# compiled from mac/mic-probe.swift by mac/build-app.sh, per machine
+# compiled from mac/*.swift by mac/build-app.sh, per machine
 build/mic-probe
+build/system-audio

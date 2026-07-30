@@ -64,18 +64,21 @@ and then dropped as not worth the dependency; see the history of
 
 ## Honest limitations, in order of pain
 
-1. **Microphone only.** Electron's system-audio loopback is Windows-only
-   (their docs: *"currently only supported on Windows"*). On speakers the mic
-   hears both sides of a call; on headphones it hears only this side. The app
-   says so on screen when recording starts. Closing this needs a native
-   ScreenCaptureKit capture path — real work, not configuration. Virtual audio
-   drivers (BlackHole et al.) would also work but install system audio devices,
-   and this project does not do that to people's machines by default.
+1. **Screen Recording has to be granted, once.** Both sides of a call are
+   recorded here now, but not through Electron: its loopback is Windows-only,
+   so `mac/system-audio.swift` captures system audio with ScreenCaptureKit and
+   `sysaudio.js` adds those samples to the microphone's in `main.js`. No screen
+   content is ever read — the video side is configured down to 2×2 pixels once
+   a second and discarded — but the permission macOS asks for is still Screen
+   Recording, and there is no audio-only door that avoids it.
 
-   macOS does not even get asked for it: requesting `getDisplayMedia` there
-   costs a Screen Recording permission and returns no system audio, and a
-   refusal used to reject and take the whole recording down with it — the app
-   could not record at all unless you granted a permission it had no use for.
+   Without it the app records the microphone alone and says so, pointing at
+   System Settings. That is a degraded recording, not a failed one.
+
+   Verified rather than assumed: `build/probe-system-audio.js` mutes the output,
+   plays a clip, records, and checks the file still has signal in it. A muted
+   Mac gives the microphone nothing to hear, so anything left came from the
+   capture path.
 2. **Unsigned: Gatekeeper blocks the first open.** No Apple Developer account
    ($99/year). The user right-clicks the app → Open → Open, once. Distribution
    without that friction needs the account plus notarization.

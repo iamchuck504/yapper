@@ -344,6 +344,18 @@ $('btn-llm-test').addEventListener('click', async () => {
 
 const meetingPrompt = $('meeting-prompt');
 
+// On macOS the other side of the call is captured natively, outside this
+// process, so its failures have to be reported from there. The one worth acting
+// on is the permission: without Screen Recording the recording is half a
+// conversation, and the user is the only one who can fix that.
+window.yapper.onSystemAudioStatus(info => {
+  if (info.ok) return;
+  setStatus(statusEl, info.reason === 'permission' || info.reason === 'helper'
+    ? 'Only your microphone is being recorded. To capture the other side of the call, allow Yapper under System Settings › Privacy & Security › Screen Recording, then record again.'
+    : 'Only your microphone is being recorded: system audio could not be started.',
+    true);
+});
+
 window.yapper.onMeetingDetected(info => {
   if (recording) return;
   $('mp-app').textContent = `${info.app} is using your microphone.`;
@@ -1108,11 +1120,13 @@ async function startRecording() {
     if (micNodes.size === 0 && !sysAudio) {
       setStatus(statusEl, 'Warning: no audio source could be captured.');
     } else if (!sysAudio) {
-      // On macOS this is the normal state, not a failure: there is no system
-      // audio to capture, so say what is happening rather than what went wrong.
-      setStatus(statusEl, window.yapper.platform === 'darwin'
-        ? 'Recording the microphone. macOS cannot capture the other side of a call — on speakers the mic picks it up, on headphones it does not.'
-        : 'Warning: system audio could not be captured; only the mic is being recorded.');
+      // On macOS system audio does not come through the renderer at all: the
+      // native helper captures it and main.js mixes it in. So silence here is
+      // the normal case, and the only thing worth saying is when that helper
+      // could not start — which arrives separately, on 'system-audio-status'.
+      if (window.yapper.platform !== 'darwin') {
+        setStatus(statusEl, 'Warning: system audio could not be captured; only the mic is being recorded.');
+      }
     } else if (micNodes.size === 0) {
       setStatus(statusEl, 'Warning: no microphone could be captured; only system audio is being recorded.');
     }
