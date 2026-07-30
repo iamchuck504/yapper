@@ -1657,7 +1657,11 @@ function notifyMeeting(label) {
   n.on('click', start);
   n.on('action', start);
   n.show();
+  return n;      // returned so a probe can watch whether the OS actually shows it
 }
+
+// Only for probes and tests: the app itself never calls this from outside.
+module.exports = { notifyMeeting };
 
 function startMeetingWatch() {
   if (meetingTimer || process.platform !== 'win32') return;
