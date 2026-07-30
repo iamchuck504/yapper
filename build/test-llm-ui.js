@@ -79,6 +79,19 @@ app.whenReady().then(async () => {
     await $("document.getElementById('llm-key-link').dataset.url"));
   check('sugiere un modelo por defecto',
     !!(await $("document.getElementById('llm-model').placeholder")), 'sin sugerencia');
+
+  // Picking a provider is not being set up. Saying nothing here means finding
+  // out at the end of the first meeting, after the recording.
+  const nokey = await $(`(() => {
+    const el = document.getElementById('llm-status');
+    const r = el.getBoundingClientRect();
+    return { text: el.textContent, kind: el.dataset.kind, bad: el.classList.contains('bad'),
+      visible: r.width > 0 && r.height > 0 };
+  })()`);
+  check('avisa en el momento que falta la key',
+    nokey.visible && nokey.kind === 'needs-key' && /Paste a key/.test(nokey.text),
+    JSON.stringify(nokey));
+  check('y lo marca como pendiente, no como informativo', nokey.bad, JSON.stringify(nokey));
   check('el proceso principal rechaza URLs que no ofrece la app',
     (await $("window.yapper.openExternal('https://example.com/evil')")) === false,
     'la abrió');
@@ -112,6 +125,10 @@ app.whenReady().then(async () => {
     !JSON.stringify(after).includes(KEY), JSON.stringify(after).slice(0, 120));
   check('el campo de key se vacía tras guardar',
     (await $("document.getElementById('llm-key').value")) === '', 'quedó texto en pantalla');
+
+  check('el aviso de "falta la key" desaparece al guardarla',
+    (await $("document.getElementById('llm-status').dataset.kind")) !== 'needs-key',
+    await $("document.getElementById('llm-status').textContent"));
 
   const raw = fs.readFileSync(path.join(USER_DATA, 'settings.json'), 'utf8');
   check('la key NO está legible en settings.json', !raw.includes(KEY), raw.slice(0, 200));
