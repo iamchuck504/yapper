@@ -15,8 +15,13 @@ const os = require('os');
 const http = require('http');
 const { spawn, spawnSync } = require('child_process');
 
-const ROOT = __dirname;
-const BIN_ROOT = path.join(ROOT, 'bin');
+// Where bin/ and models/ live. In development that is the repo itself; an
+// installed copy cannot write next to its own code (the app ships inside a
+// read-only asar), so main.js points this at a per-machine folder instead and
+// the first run downloads the engine there.
+let ROOT = __dirname;
+function setHome(dir) { ROOT = dir; }
+const binRoot = () => path.join(ROOT, 'bin');
 
 // ---------------------------------------------------------------- platform
 
@@ -37,8 +42,8 @@ function exeName(base) {
  */
 function binDir() {
   const key = platformKey();
-  const gpu = path.join(BIN_ROOT, `${key}-gpu`);
-  const cpu = path.join(BIN_ROOT, key);
+  const gpu = path.join(binRoot(), `${key}-gpu`);
+  const cpu = path.join(binRoot(), key);
   if (fs.existsSync(path.join(gpu, exeName('whisper-server')))) return gpu;
   return cpu;
 }
@@ -53,10 +58,8 @@ function isInstalled() {
 
 // ---------------------------------------------------------------- models
 
-const MODELS_DIR = path.join(ROOT, 'models');
-
 function modelPath(name) {
-  return path.join(MODELS_DIR, `ggml-${name}.bin`);
+  return path.join(ROOT, 'models', `ggml-${name}.bin`);
 }
 
 function hasModel(name) {
@@ -163,7 +166,12 @@ function tierConfig(name) {
 // whisper.cpp. It has to be real speech: most of a pass is the decoder emitting
 // tokens, so a synthetic tone measures 25 ms where actual talking measures 185,
 // and a laptop calibrated on a tone would be promised a tier it cannot hold.
-const CALIBRATION_WAV = path.join(ROOT, 'build', 'calibration.wav');
+//
+// It ships with the app code, not with the downloaded engine — but an installed
+// app's copy sits inside the asar, where this process can read it and the
+// whisper server cannot, so main.js repoints it at the unpacked copy.
+let CALIBRATION_WAV = path.join(__dirname, 'build', 'calibration.wav');
+function setCalibrationWav(p) { CALIBRATION_WAV = p; }
 
 /**
  * Measure this machine instead of guessing at it: run the sample a few times
@@ -629,8 +637,8 @@ function deduplicate(lines) {
 }
 
 module.exports = {
-  platformKey, binDir, serverPath, isInstalled,
-  modelPath, hasModel, MODELS_DIR,
+  platformKey, binDir, serverPath, isInstalled, setHome, setCalibrationWav,
+  modelPath, hasModel,
   TIERS, tierConfig, guessTier, tierFromBenchmark, hasNvidiaGpu, isAppleSilicon,
   CALIBRATION_MODEL, calibrate,
   start, stop, busy, loaded, transcribeWav, transcribeFile,

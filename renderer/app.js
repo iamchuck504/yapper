@@ -2551,9 +2551,13 @@ refreshReminders();
 
 (async () => {
   try {
-    const env = await window.yapper.checkEnvironment();
+    let env = await window.yapper.checkEnvironment();
+    // A fresh install has nothing to transcribe with yet; download it now,
+    // with the progress on screen, instead of telling the user to run a script.
+    if (!env.whisper) env = (await provisionEngine()) || env;
+
     const issues = [];
-    if (!env.whisper) issues.push('• The transcription engine is missing — transcription will not work. Run setup.ps1 from the app folder.');
+    if (!env.whisper) issues.push('• The transcription engine could not be set up — check the connection and restart Yapper to retry.');
     if (env.notes && !env.notes.ok) issues.push(`• ${env.notes.reason} Recording and transcription still work.`);
     if (issues.length) {
       setStatus(statusEl, 'Setup needed:\n' + issues.join('\n'), true);
@@ -2564,3 +2568,43 @@ refreshReminders();
     }
   } catch { /* never block the app on the preflight check */ }
 })();
+
+/**
+ * The one-time engine download, narrated in the status area. Recording stays
+ * disabled while it runs — there is nothing to record into yet — and the
+ * environment is re-checked afterwards, which is when calibration happens.
+ */
+async function provisionEngine() {
+  btnRecord.disabled = true;
+  btnImport.disabled = true;
+  window.yapper.onEngineSetup(p => {
+    if (!p || p.error) return;         // the invoke result carries the failure
+    const pct = p.pct != null ? ` — ${Math.round(p.pct)}%` : '';
+    setStatus(statusEl, `Setting up transcription (one-time download, step ${p.step} of ${p.steps}):\n${p.label}${pct}`);
+  });
+  setStatus(statusEl, 'Setting up transcription — a one-time download…');
+  let ok = false;
+  try { ok = await window.yapper.engineSetup(); } catch { ok = false; }
+  btnRecord.disabled = false;
+  btnImport.disabled = false;
+  if (!ok) return null;
+  statusEl.classList.add('hidden');
+  return window.yapper.checkEnvironment();
+}
+
+// ---------- updates ----------
+// Installed copies download updates in the background; this pill is the offer
+// to apply one now. Ignoring it is fine — it applies on next quit anyway.
+
+window.yapper.onUpdateReady(info => {
+  const b = $('btn-update');
+  b.textContent = `Update ${info && info.version ? 'v' + info.version : ''} ready — restart`.replace('  ', ' ');
+  b.classList.remove('hidden');
+});
+$('btn-update').addEventListener('click', () => {
+  if (recording) {
+    setStatus(statusEl, 'Recording — the update will install when Yapper closes.');
+    return;
+  }
+  window.yapper.updateRestart();
+});

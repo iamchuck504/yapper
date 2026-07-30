@@ -95,17 +95,18 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1813 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
-| `engine.js` | 640 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
+| `main.js` | 1918 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `engine.js` | 648 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
 | `llm.js` | 322 | Note providers (§6) behind one `generate()` call |
 | `live.js` | 304 | Live transcription: rolling window, LocalAgreement-2 confirmation |
 | `actions.js` | 253 | Reading action items out of the notes, and folding duplicates together |
+| `provision.js` | 181 | First-run engine download for installed copies: the whisper.cpp builds and models, with progress |
 | `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
-| `preload.js` | 87 | The only bridge between renderer and main |
+| `preload.js` | 91 | The only bridge between renderer and main |
 
 `keystore.js` and `bounds.js` are separate files for one reason: they are pure
 functions, so they can be tested without booting Electron, and `keystore.js`
@@ -116,9 +117,9 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 2567 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
-| `renderer/style.css` | 1494 | Everything visual, light and dark |
-| `renderer/index.html` | 423 | Main window markup |
+| `renderer/app.js` | 2611 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
+| `renderer/style.css` | 1510 | Everything visual, light and dark |
+| `renderer/index.html` | 425 | Main window markup |
 | `renderer/bubble.html` | 184 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
 | `renderer/bubble.js` | 174 | Its behaviour, including sizing itself to its own contents |
 | `renderer/splash.html` | 104 | Boot screen, including the first-run calibration status |
@@ -232,18 +233,19 @@ bullet whose citation does not resolve to a meeting in that week.
 
 ## 5. IPC surface
 
-64 channels, all declared in `preload.js` — that file is the complete list of
+68 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
 
-**Request/response (44)** — recording lifecycle (`recording-start`,
+**Request/response (46)** — recording lifecycle (`recording-start`,
 `recording-finish`), import (`import-audio`, `import-read`, `import-open`,
 `import-close`, `legacy-audio`), processing (`transcribe`, `summarize`,
 `regenerate`, `generate-title`, `save-notes`), meetings (`list-meetings`,
 `load-meeting`, `delete-meeting`, `open-folder`), reminders (4), settings
 (`get/set-open-at-login`, `get/set-llm-settings`, `test-llm`, `style-sections`,
-`check-environment`), the library (`refresh-library`, `list-actions`), retrieval
+`check-environment`), first-run and updates (`engine-setup`, `update-restart`),
+the library (`refresh-library`, `list-actions`), retrieval
 (`search`, `ask`), the roll-ups (`daily-digest`, `weekly-summary`), exports
 (`save-text-file`, `export-pdf`), live
 (`live-start`, `live-stop`), bubble (`bubble-show`, `bubble-hide`),
@@ -252,9 +254,10 @@ a typo here fails at runtime inside a click.
 **Fire-and-forget (10)** — `recording-chunk` (the audio itself), `set-theme`,
 `recording-state`, `autodetect-set`, `mark-shortcut`, and five bubble messages.
 
-**Main → renderer (10)** — `transcribe-progress`, `live-transcript`,
+**Main → renderer (12)** — `transcribe-progress`, `live-transcript`,
 `meeting-detected`, `meeting-ended`, `start-recording`, `mark-moment`,
-`remote-stop`, `remote-pause`, `bubble-state`, `keep-audio-changed`.
+`remote-stop`, `remote-pause`, `bubble-state`, `keep-audio-changed`,
+`engine-setup-progress`, `update-ready`.
 
 ---
 
@@ -563,11 +566,14 @@ audio so it can be retried, which is the whole reason to have it.
 
 ## 10. Dependencies and supply chain
 
-**npm: one devDependency.** `electron@^33`, whose own dependencies are
-`@electron/get`, `@types/node` and `extract-zip`; 64 packages in `node_modules`
-altogether, every one of them from that tree. **No runtime dependencies at all**
-— nothing npm-installed ships with the app. No bundler, no transpiler, no test
-framework.
+**npm: two devDependencies, one runtime dependency.** To develop: `electron@^33`
+and `electron-builder@^25` (the installer). Shipping inside the app: exactly one
+package, `electron-updater` — updates from the release feed cannot be done from
+plain Node without reimplementing signature checks and differential downloads,
+and that is the one job worth buying a dependency for. Everything else is still
+plain Electron and Node: no bundler, no transpiler, no test framework. This
+footprint is asserted by `test-docs.js` — a new dependency has to change this
+paragraph to get in.
 
 **Downloaded by `setup.ps1`, never committed:**
 
@@ -592,27 +598,49 @@ is source plus those 3 MB.
 
 ---
 
-## 11. Build and distribution status
+## 11. Build and distribution
 
-There is no packaging step yet. Today the app is provisioned rather than built:
+Two ways to run it, and they deliberately share every path in the code:
 
-```
-powershell -ExecutionPolicy Bypass -File setup.ps1
-```
+**Development** is provisioned, not built: `setup.ps1` downloads the engine and
+models next to the code, `npm start` runs it. The engine home is the repo.
 
-which downloads the engine and models, installs Electron, and creates a desktop
-shortcut. `npm start` runs it.
+**Users get an installer.** `npm run dist` produces
+`dist\Yapper-Setup-<version>.exe` (~83 MB, NSIS, per-user, no admin) plus the
+`latest.yml` + blockmap feed files; `npm run release` builds and publishes them
+to the GitHub release feed in one step. What shipping changed in the code, and
+why:
 
-Because nothing is compiled or bundled, packaging is a matter of choosing a
-packager rather than untangling a build. The open questions for that step:
+- **The engine moved out of the app.** An installed copy runs from a read-only
+  asar; `engine.setHome()` points bin/ and models/ at
+  `%LOCALAPPDATA%\Yapper\engine`, and `provision.js` fills it on first run —
+  the CPU build always (8 MB), the CUDA build when `nvidia-smi` answers
+  (646 MB), the two models (608 MB) — with progress in the status area and
+  recording disabled until it lands. Every download goes to a `.part` first, so
+  a killed download never looks installed. Bundling the engine instead would
+  make the installer 1.4 GB for everyone.
+- **`calibration.wav` is asar-unpacked.** This process can read inside the
+  asar; the whisper server is a separate process and cannot.
+- **The PDF export writes to temp** with a `<base>` back into `renderer/` —
+  it used to write next to its own code, which an installed app cannot.
+- **Single-instance lock.** Two instances would fight over the whisper server's
+  port; the second launch focuses the first and exits.
+- **Auto-update is electron-updater** (§10), wired only when packaged: checked
+  at launch and every four hours, downloaded in the background, installed on
+  quit — or immediately from the sidebar pill. The full loop is proven by
+  `build/e2e-update.ps1`: install 0.1.0 against a local feed, serve 0.1.1,
+  quit, and the exe on disk is 0.1.1. `build/e2e-install.ps1` checks the
+  install itself (shortcuts, unpacked wav, feed config, engine found,
+  calibration ran); `build/e2e-uninstall.ps1` removes every trace.
+- **Not code-signed.** No certificate, so SmartScreen warns on first install.
+  Known cost, documented in the manual; signing is the remaining distribution
+  gap. electron-builder needs its `winCodeSign` cache even unsigned — on a
+  machine without symlink privileges that extraction fails on electron-builder
+  25 and works on 26, which is why the pin is `^26`.
 
-- **Windows** — an installer can ship the app plus the 8 MB CPU engine and fetch
-  the CUDA build and models on first run, which is what `setup.ps1` already
-  does. Nothing blocks this.
-- **macOS** — no prebuilt whisper.cpp binary exists for arm64; it has to be
-  compiled once on an Apple Silicon machine and bundled. Notarisation needs a
-  paid Apple Developer account. System-audio capture and meeting auto-detection
-  are Windows-only today and need rewriting against ScreenCaptureKit.
+**macOS** remains unpackaged — no prebuilt whisper.cpp for arm64 (compile once
+on Apple hardware), notarisation needs a paid Apple Developer account, and
+capture plus meeting detection are Windows APIs today.
 
 ---
 
@@ -621,7 +649,7 @@ packager rather than untangling a build. The open questions for that step:
 | Surface | Position |
 |---|---|
 | Renderer privileges | `contextIsolation: true`, `nodeIntegration: false` on all three windows. No Node in any page. |
-| Renderer → main | Only the 53 channels in `preload.js`. No `ipcRenderer` exposure. |
+| Renderer → main | Only the channels in `preload.js` (§5). No `ipcRenderer` exposure. |
 | CSP | `default-src 'self'` on every page; `index.html` additionally `style-src 'self'` (no inline styles) and `media-src blob:` |
 | API key at rest | Sealed with `safeStorage` (DPAPI on Windows, Keychain on macOS), never in plaintext `settings.json`. Where a platform has no keystore, the UI says the key is stored unencrypted rather than implying protection it does not have. |
 | One key per provider | Keys are stored under the provider they were issued for. A single shared slot meant switching from Gemini to OpenRouter would have sent Google's key to OpenRouter's servers, and the UI would have called that provider configured. |
@@ -707,7 +735,7 @@ the doc cannot quietly drift away from the code.
 
 ## 14. Known gaps
 
-- No packaging or installers (§11).
+- The installer is not code-signed — SmartScreen warns on first install (§11).
 - macOS: no engine binary, and system audio plus auto-detection are
   Windows-only.
 - No speaker diarisation. Attendees are typed by hand; they bias name spelling
