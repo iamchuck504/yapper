@@ -3,6 +3,7 @@
 // happens if someone hits "Transcribe now" on an old meeting while a live
 // recording is running? Both want the same single server, with different models.
 const path = require('path');
+const os = require("os");
 const fs = require('fs');
 const { app } = require('electron');
 const { sandbox, logger, mainWindow, within } = require('./harness');
@@ -24,7 +25,7 @@ app.whenReady().then(async () => {
   const win = await mainWindow({ settleMs: 1200 });
   const $ = js => win.webContents.executeJavaScript(js);
 
-  const src = process.env.WAV || path.join(process.env.TEMP, 'yapper-60s.wav');
+  const src = process.env.WAV || path.join(os.tmpdir(), 'yapper-60s.wav');
   const minute = fs.readFileSync(src).subarray(engine.WAV_HEADER);
 
   // an old meeting sitting there, ready to be re-transcribed

@@ -79,6 +79,16 @@ and then dropped as not worth the dependency; see the history of
    plays a clip, records, and checks the file still has signal in it. A muted
    Mac gives the microphone nothing to hear, so anything left came from the
    capture path.
+
+   **A sleeping display costs you that audio.** ScreenCaptureKit lists no
+   displays while the screen is asleep, and a capture filter needs one even
+   when only the audio is wanted — the helper reports `no displays` and there
+   is nothing to record from. A meeting you mostly listen to is exactly the
+   meeting where the screen dims, so `main.js` holds the display awake with a
+   `powerSaveBlocker` for as long as a recording lasts, and releases it the
+   moment it ends. The helper also waits up to ten seconds for a display to
+   appear rather than giving up, which covers the gap before the blocker takes
+   effect. This was found by the suite failing at 4 a.m. with the lid shut.
 2. **Unsigned: Gatekeeper blocks the first open.** No Apple Developer account
    ($99/year). The user right-clicks the app → Open → Open, once. Distribution
    without that friction needs the account plus notarization.

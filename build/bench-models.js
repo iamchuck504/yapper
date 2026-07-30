@@ -2,9 +2,10 @@
 // The tier table should promise only what the numbers support.
 const fs = require('fs');
 const path = require('path');
+const os = require("os");
 const engine = require('../engine');
 
-const WAV = path.join(process.env.TEMP, 'yapper-10s.wav');
+const WAV = path.join(os.tmpdir(), 'yapper-10s.wav');
 
 (async () => {
   const wav = fs.readFileSync(WAV);

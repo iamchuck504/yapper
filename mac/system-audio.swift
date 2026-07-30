@@ -32,15 +32,29 @@ final class SystemAudio: NSObject, SCStreamOutput, SCStreamDelegate {
   private let out = FileHandle.standardOutput
 
   func start() async {
-    let content: SCShareableContent
-    do {
-      content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-    } catch {
-      // This is what a missing Screen Recording permission looks like: the
-      // content query itself is refused, before any capture is attempted.
-      fail("screen recording permission missing: \(error.localizedDescription)", code: 2)
+    // A sleeping display means ScreenCaptureKit lists no displays at all, and
+    // a filter needs one even when only audio is wanted. That is a state the
+    // machine leaves on its own — the screen wakes, the list repopulates — so
+    // it is worth waiting out rather than reporting as a dead end. The parent
+    // also holds the display awake while recording; this covers the gap before
+    // that takes effect, and any later blip.
+    var display: SCDisplay?
+    for attempt in 0..<10 {
+      let content: SCShareableContent
+      do {
+        content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+      } catch {
+        // This is what a missing Screen Recording permission looks like: the
+        // content query itself is refused, before any capture is attempted.
+        fail("screen recording permission missing: \(error.localizedDescription)", code: 2)
+      }
+      if let first = content.displays.first { display = first; break }
+      if attempt == 0 {
+        FileHandle.standardError.write(Data("waiting for a display\n".utf8))
+      }
+      try? await Task.sleep(nanoseconds: 1_000_000_000)
     }
-    guard let display = content.displays.first else { fail("no displays", code: 3) }
+    guard let display else { fail("no displays after waiting", code: 3) }
 
     let config = SCStreamConfiguration()
     config.capturesAudio = true

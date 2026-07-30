@@ -2,6 +2,7 @@
 // sidebar with hundreds of entries. All of it is real — a two-hour meeting is a
 // Tuesday, and names have accents in them.
 const path = require('path');
+const os = require("os");
 const fs = require('fs');
 const { app, dialog } = require('electron');
 const { sandbox, logger, mainWindow, within } = require('./harness');
@@ -60,7 +61,7 @@ app.whenReady().then(async () => {
 
   // ---- 2. a long meeting, transcribed for real ----
   say('\n--- 2. una reunión larga de verdad ---');
-  const src = process.env.WAV || path.join(process.env.TEMP, 'yapper-60s.wav');
+  const src = process.env.WAV || path.join(os.tmpdir(), 'yapper-60s.wav');
   const minute = fs.readFileSync(src).subarray(engine.WAV_HEADER);
   const LONG_MIN = Number(process.env.MINUTES || 75);
   const long = meeting('2026-07-29_1900', {});

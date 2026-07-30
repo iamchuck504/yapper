@@ -5,6 +5,7 @@
 // from under a job. Those are the failures that happen on someone else's PC and
 // not on the one it was written on.
 const path = require('path');
+const os = require("os");
 const fs = require('fs');
 const { execSync } = require('child_process');
 const { app, dialog } = require('electron');
@@ -29,7 +30,7 @@ function servers() {
 
 /** A meeting folder holding real speech, ready to transcribe. */
 function seed(name, seconds = 20) {
-  const src = process.env.WAV || path.join(process.env.TEMP, 'yapper-60s.wav');
+  const src = process.env.WAV || path.join(os.tmpdir(), 'yapper-60s.wav');
   const folder = path.join(ROOT, 'Meetings', name);
   fs.mkdirSync(folder, { recursive: true });
   const pcm = fs.readFileSync(src).subarray(engine.WAV_HEADER,

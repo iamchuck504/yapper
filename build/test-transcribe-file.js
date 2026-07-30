@@ -2,9 +2,10 @@
 // lines, report progress, and leave the server clean behind it.
 const fs = require('fs');
 const path = require('path');
+const os = require("os");
 const engine = require('../engine');
 
-const MEETINGS = path.join(process.env.USERPROFILE, 'Documents', 'Meetings');
+const MEETINGS = path.join(os.homedir(), 'Documents', 'Meetings');
 
 function pick() {
   if (process.env.WAV) return process.env.WAV;
@@ -45,4 +46,7 @@ function pick() {
   if (!/^\[\d\d:\d\d:\d\d\] ./.test(lines[0])) { console.log('\nFAIL  formato de marca de tiempo inesperado'); process.exit(1); }
   if (seen[seen.length - 1] !== 100) { console.log('\nFAIL  el progreso no llegó a 100%'); process.exit(1); }
   console.log('\nPASS');
+  // Same reason as test-engine: under Electron a passing run has nothing left
+  // to do and nothing to end it, so it would hang looking like a failure.
+  process.exit(0);
 })().catch(e => { console.log('FAIL', e.message); process.exit(1); });

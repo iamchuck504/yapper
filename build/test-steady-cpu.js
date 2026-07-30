@@ -2,6 +2,7 @@
 // replay on the CPU binaries, so the tier table is a measurement and not a hope.
 const fs = require('fs');
 const path = require('path');
+const os = require("os");
 
 const GPU = path.join(__dirname, '..', 'bin', 'win-x64-gpu');
 const HIDDEN = GPU + '-off';
@@ -12,7 +13,7 @@ process.on('exit', () => { if (hid) { try { fs.renameSync(HIDDEN, GPU); } catch 
 const engine = require('../engine');
 const live = require('../live');
 
-const WAV = process.env.WAV || path.join(process.env.TEMP, 'yapper-60s.wav');
+const WAV = process.env.WAV || path.join(os.tmpdir(), 'yapper-60s.wav');
 const PLAY_SEC = Number(process.env.SECS || 45);
 const CHUNK_MS = 200;
 

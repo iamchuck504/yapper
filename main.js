@@ -1,5 +1,5 @@
 ﻿const { app, BrowserWindow, ipcMain, session, desktopCapturer, shell, dialog, screen,
-  Notification, globalShortcut, safeStorage } = require('electron');
+  Notification, globalShortcut, safeStorage, powerSaveBlocker } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -660,7 +660,29 @@ function helperPath(name) {
   return app.isPackaged ? p.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`) : p;
 }
 
+// A sleeping display costs macOS its system audio: ScreenCaptureKit lists no
+// displays while the screen is asleep, and a capture filter needs one even when
+// only the audio is wanted. A meeting where you mostly listen is exactly the
+// meeting where the screen dims — so the display is held awake for as long as
+// the recording lasts, and released the moment it ends.
+let displayAwake = null;
+
+function holdDisplayAwake(on) {
+  if (process.platform !== 'darwin') return;
+  try {
+    if (on) {
+      if (displayAwake === null) displayAwake = powerSaveBlocker.start('prevent-display-sleep');
+    } else if (displayAwake !== null) {
+      powerSaveBlocker.stop(displayAwake);
+      displayAwake = null;
+    }
+  } catch (err) {
+    console.log('[audio] could not hold the display awake:', err.message);
+  }
+}
+
 function closeRecFile() {
+  holdDisplayAwake(false);
   sysAudio.stop();          // whether or not a file is open, stop capturing
   if (recFd === null) return;
   try { engine.finishWav(recFd, recBytes); } catch { /* disk gone */ }
@@ -673,10 +695,16 @@ ipcMain.handle('recording-start', async (_e, participants) => {
   recBytes = 0;
   writeParticipants(recFolder, participants);
   recFd = engine.openWav(path.join(recFolder, 'recording.wav'));
-  // Awaited: the helper takes a moment to come up, and starting to write the
-  // microphone before it does would leave the first second of the meeting
-  // one-sided. If it cannot start, recording carries on without it.
-  if (process.platform === 'darwin') await sysAudio.start();
+  // Deliberately not awaited. The helper is usually live in a few hundred
+  // milliseconds, but a machine that is refusing the permission takes seconds
+  // to say so, and blocking on that would mean pressing Record and watching
+  // nothing happen. Recording starts now; system audio joins the mix as soon
+  // as it arrives, so the cost of being wrong is a fraction of a second of
+  // one-sided audio rather than a delayed start.
+  if (process.platform === 'darwin') {
+    holdDisplayAwake(true);
+    sysAudio.start();
+  }
   return recFolder;
 });
 
@@ -811,6 +839,13 @@ function humanTranscribeError(err) {
 ipcMain.handle('transcribe', async (_e, folder) => {
   const wav = path.join(folder, 'recording.wav');
   if (!fs.existsSync(wav)) {
+    // Two transcriptions of the same meeting can be in flight at once — the
+    // button double-clicked, or a retry racing the first attempt. The winner
+    // writes the transcript and releases the audio, so the loser arrives to a
+    // folder with no wav and used to fail loudly at something that had in fact
+    // just succeeded. If the transcript is there, that is the answer.
+    const done = path.join(folder, 'transcript.txt');
+    if (fs.existsSync(done)) return fs.readFileSync(done, 'utf8');
     // the renderer converts old recordings before calling this, so reaching
     // here means the conversion did not happen or the folder is genuinely empty
     throw new Error('No recording found in this meeting folder.');

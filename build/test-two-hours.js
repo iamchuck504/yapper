@@ -8,6 +8,7 @@
 //   node_modules\electron\dist\electron.exe build\test-two-hours.js
 //   MINUTES=60 ... build\test-two-hours.js      # the shorter end of his range
 const path = require('path');
+const os = require("os");
 const fs = require('fs');
 const { app, dialog } = require('electron');
 const { sandbox, logger, mainWindow, watchdog, within } = require('./harness');
@@ -42,7 +43,7 @@ async function settledRss() {
  * model puts its timestamps.
  */
 function realisticTranscript(minutes) {
-  const dir = path.join(process.env.USERPROFILE, 'Documents', 'Meetings');
+  const dir = path.join(os.homedir(), 'Documents', 'Meetings');
   const sources = [];
   for (const d of fs.readdirSync(dir)) {
     const p = path.join(dir, d, 'transcript.txt');
@@ -94,7 +95,7 @@ app.whenReady().then(async () => {
   const win = await mainWindow({ settleMs: 1500 });
   const $ = js => win.webContents.executeJavaScript(js);
 
-  const src = process.env.WAV || path.join(process.env.TEMP, 'yapper-60s.wav');
+  const src = process.env.WAV || path.join(os.tmpdir(), 'yapper-60s.wav');
   const minute = fs.readFileSync(src).subarray(engine.WAV_HEADER);
   say(`reunión simulada de ${MINUTES} min (${(MINUTES / 60).toFixed(1)} h)\n`);
   const startRss = rss();
