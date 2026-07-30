@@ -61,11 +61,15 @@ app.whenReady().then(async () => {
     recordBtnDisabled: document.getElementById('btn-record').disabled,
     liveShown: !document.getElementById('live-wrap').classList.contains('hidden'),
     error: document.getElementById('status').classList.contains('error')
-      && document.getElementById('status').textContent
+      && document.getElementById('status').textContent,
+    onHome: !document.getElementById('view-home').classList.contains('hidden'),
+    onRecord: !document.getElementById('view-record').classList.contains('hidden')
   })`);
 
   const before = await state();
   check('arranca sin grabar', before.recording === false, JSON.stringify(before));
+  check('arranca en Today, no en la vista de grabar',
+    before.onHome && !before.onRecord, JSON.stringify(before));
 
   // --- 1. the early failure: capture is refused before anything is set up ---
   await $(`(() => {
@@ -77,6 +81,10 @@ app.whenReady().then(async () => {
 
   let s = await state();
   check('un permiso denegado no deja la app grabando', s.recording === false, JSON.stringify(s));
+  // Grabar puede empezar desde tres lados; la vista tiene que ser la de grabar
+  // sin depender de quién llamó, o el error se muestra en una pantalla que no se ve.
+  check('arrancar una grabación se lleva la vista consigo',
+    s.onRecord && !s.onHome, JSON.stringify(s));
   check('lo explica en pantalla', /Permission denied/.test(s.error || ''), String(s.error));
   check('el botón de grabar sigue disponible',
     !s.recordBtnHidden && !s.recordBtnDisabled, JSON.stringify(s));

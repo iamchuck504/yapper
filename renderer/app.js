@@ -980,6 +980,10 @@ async function abortRecording(err) {
 
 async function startRecording() {
   if (recording) return;
+  // Recording can be started from the sidebar, from the detected-meeting card or
+  // from the system notification, and any of those can happen while another view
+  // is open. The timer and the stop button have to be the thing on screen.
+  showView('record');
   try {
     // main.js answers this with Windows system-audio loopback (video must be requested even if unused)
     const sys = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
@@ -2465,7 +2469,11 @@ newReminderInput.addEventListener('keydown', e => { if (e.key === 'Enter') submi
 // ---------- init ----------
 
 syncOptionControls();
-showView('record');
+// The app opens on the day rather than on the record view: the first question on
+// launch is usually "what happened / what do I owe", not "record something".
+// Every path that starts a recording switches to the record view itself.
+showView('home');
+loadHome();
 refreshMeetingList();
 refreshReminders();
 
