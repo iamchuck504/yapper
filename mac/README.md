@@ -22,6 +22,35 @@ bash mac/build-app.sh      # every release: dmg + zip, uploaded to the
 all** — the engine on the feed is ours. `provision.js` downloads it on every
 Mac's first run, exactly like the Windows first run.
 
+## The icon, and why this build wants Xcode
+
+macOS 26 stopped drawing legacy `.icns` files as authored: on a Mac set to dark
+icons the system darkens the tile and keeps the artwork. Yapper's mark is
+near-black on amber, so that pass eats it and the icon arrives in the dock as a
+black slab — verified on the MacBook, not theorised.
+
+The system leaves an icon alone only when the app ships the appearance itself,
+which means a compiled asset catalog: `CFBundleIconName` → `AppIcon` inside
+`Assets.car`, dark images tagged as dark. `build/after-pack.js` builds that
+during packaging, from two sources:
+
+- `build/yapper-icon.png` — the light variant, the icon as it always was
+- `build/yapper-icon-dark.png` — amber on ink, written by `build/icon-dark.js`
+  (run it with the bundled Electron; it re-mixes every seam pixel rather than
+  swapping two colours, so the anti-aliasing survives)
+
+Compiling the catalog needs `actool`, which comes with **full Xcode** — the
+Command Line Tools ship a shim that only errors. Without it the build still
+succeeds and still installs, and says so:
+
+```
+[icon] actool unavailable (needs full Xcode, not Command Line Tools).
+```
+
+That is deliberate. A Windows release must not depend on a 10 GB Xcode install,
+so the missing catalog is a warning, never a failure. After installing Xcode,
+run `sudo xcode-select -s /Applications/Xcode.app` once, then build normally.
+
 ## What a Mac user gets
 
 - Recording with live transcript, notes, Today/This week, action items,
