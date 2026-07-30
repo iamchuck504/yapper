@@ -156,11 +156,28 @@ or the **Yapper** shortcut on the desktop (Windows) / in Applications (macOS).
 2. On the new PC: install Node (`winget install OpenJS.NodeJS.LTS`) if it is not there.
 3. Run `powershell -ExecutionPolicy Bypass -File setup.ps1` — downloads the whisper.cpp engine (and the CUDA build if there is an NVIDIA GPU), the models, installs Electron and creates the shortcut.
 
-**macOS**
+**macOS** — the build is not notarised, so this is the honest walkthrough:
 
 1. Hand over the `.dmg` from [yapper-releases](https://github.com/iamchuck504/yapper-releases/releases/latest), or build one with `bash mac/build-app.sh`.
-2. First open needs right-click → Open (the build is not notarised).
-3. Grant Screen Recording when the first recording asks for it, otherwise only the microphone is captured.
+2. Drag Yapper to Applications. **The first open will be blocked** — the app is
+   signed ad-hoc, so Gatekeeper rejects it (`spctl` says `rejected`, by design).
+   Since macOS 15 the old right-click → Open shortcut no longer works for
+   unsigned apps. Two ways through:
+   - **Settings**: try to open it, then go to System Settings › Privacy &
+     Security, where an *"Open Anyway"* button appears for about an hour.
+   - **Terminal**, if you would rather not explain the above:
+     `xattr -dr com.apple.quarantine /Applications/Yapper.app`
+3. First launch downloads the engine and models (~600 MB) with progress on
+   screen. Nothing else to install.
+4. The first recording asks for the **microphone** and for **Screen Recording**.
+   The second one has to be granted in System Settings and the app reopened;
+   without it only the microphone is captured, and the app says so.
+
+**Requirements for that Mac:** Apple Silicon, macOS 13 or newer. Meeting
+auto-detection needs macOS 14.4 (the CoreAudio process list it reads did not
+exist before), and without it the app simply never offers to record on its own.
+Both helpers are pinned to those versions at build time — building on a beta
+otherwise produces binaries that only run on that beta.
 
 Either way, each person picks their own note provider in the app: their own Claude Code session, or their own key. Recording and transcription work without any of that.
 
