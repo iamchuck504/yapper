@@ -95,10 +95,10 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1538 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
-| `engine.js` | 620 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
+| `main.js` | 1540 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
+| `engine.js` | 640 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `llm.js` | 322 | Note providers (§6) behind one `generate()` call |
-| `live.js` | 287 | Live transcription: rolling window, LocalAgreement-2 confirmation |
+| `live.js` | 304 | Live transcription: rolling window, LocalAgreement-2 confirmation |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
 | `preload.js` | 81 | The only bridge between renderer and main |
@@ -112,7 +112,7 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 1875 | Main window: capture graph, views, notes rendering, exports, reminders, settings |
+| `renderer/app.js` | 1882 | Main window: capture graph, views, notes rendering, exports, reminders, settings |
 | `renderer/style.css` | 1218 | Everything visual, light and dark |
 | `renderer/index.html` | 319 | Main window markup |
 | `renderer/bubble.html` | 188 | The always-on-top live transcript overlay |
@@ -335,6 +335,14 @@ to fight over it, because the second one's `start()` killed the first one's
 server mid-request and the user was shown "read ECONNRESET". Queueing costs a
 wait, colliding costs a transcript.
 
+**The live loop steps aside for a full transcription rather than sharing.** It
+does not go through that queue — it runs on a cadence — so it checks
+`engine.busy()` and skips a pass while a full-file job holds the server, then
+takes its own model back when the job is done. Hitting "Transcribe now" on an
+older meeting mid-recording used to kill the live transcript outright: twelve
+consecutive "whisper-server is not running", and it never recovered. Now the
+transcription completes and the live text carries on with no errors at all.
+
 **The live window is capped before decoding, not trimmed after.** The buffer used
 to be trimmed only once a pass had finished, which is fine while audio arrives in
 real time. Given a backlog — a slow pass, a machine coming back from sleep — one
@@ -515,6 +523,7 @@ run can never touch a real meeting):
 | `test-extremes.js` | Boundary values and scale: the clock past an hour, a 75-minute recording transcribed for real, accents and emoji and HTML-looking text, an empty WAV, notes with no headings, 300 meetings in the sidebar, and the live loop given 20 minutes of audio at once |
 | `test-two-hours.js` | The expected real length, every stage, measured — see §7b. `MINUTES=60` for the shorter end of the range |
 | `test-audio-release.js` | The audio is released only after a real transcript, never on a failure, never when the user asked to keep it, and reclaiming older meetings' audio touches only the transcribed ones |
+| `test-live-vs-final.js` | A full transcription requested mid-recording: it completes, and the live transcript survives it without errors |
 | `test-smoke.js` | Every view, control and export, while listening for renderer errors |
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
 | `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |

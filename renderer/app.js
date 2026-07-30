@@ -1508,8 +1508,15 @@ btnRegen.addEventListener('click', async () => {
 
 btnCopy.addEventListener('click', async () => {
   if (!currentNotesMd) return;
-  await navigator.clipboard.writeText(currentNotesMd);
-  btnCopy.textContent = 'Copied';
+  try {
+    await navigator.clipboard.writeText(currentNotesMd);
+    btnCopy.textContent = 'Copied';
+  } catch {
+    // The clipboard can refuse — another app holding it, or the window not
+    // focused at the moment of the click. Unhandled, that left the button
+    // looking like it simply did nothing.
+    btnCopy.textContent = 'Copy failed';
+  }
   setTimeout(() => { btnCopy.textContent = 'Copy'; }, 1500);
 });
 
