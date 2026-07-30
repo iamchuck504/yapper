@@ -116,7 +116,7 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 2545 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
+| `renderer/app.js` | 2567 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
 | `renderer/style.css` | 1494 | Everything visual, light and dark |
 | `renderer/index.html` | 423 | Main window markup |
 | `renderer/bubble.html` | 184 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
@@ -430,6 +430,16 @@ are passages, they are the entire context and the prompt requires a bracketed
 citation per claim. `test-search-ui.js` asks about a topic that appears in no
 meeting and asserts no answer comes back.
 
+**A dead capture device is announced, not drawn.** The app already warned when a
+source was *missing* (no system track, no microphone). What that missed is a
+device that exists and delivers exact digital zeros — a wireless headset asleep,
+a hardware mute — where the graph runs, the waveform draws a flat line, and two
+hours later the meeting is silence. A live microphone always carries at least
+its own noise floor, so a peak of exactly zero held for six seconds means a dead
+device: the recording keeps going, a warning names the likely cause, and it
+clears itself the moment signal arrives. System audio gets no such watchdog on
+purpose — a silent desktop loopback *is* legitimately all zeros.
+
 **The bubble rests as a capsule, and its hover is watched from the main
 process.** While recording, the overlay is a capsule the size of its own clock —
 the audio level and the time, no buttons. Hovering it opens the live transcript
@@ -664,12 +674,14 @@ run can never touch a real meeting):
 | `test-search-ui.js` | The search view against a real model: results carry their meeting, date, timestamp and participants, a result opens its meeting, nothing-found says so, and a question about something never discussed returns no answer rather than an invented one |
 | `test-home-ui.js` | The day and the week against a real model: only today's meetings and decisions appear, every line opens its source, an empty day offers the last one that had something, the weekly review cites real meetings and does not repeat the task list, and a week with one set of notes is explained rather than written |
 | `test-actions-ui.js` | The action list: filters, the meeting each item came from, and completing one |
+| `test-silence-warning.js` | A microphone delivering exact zeros — the asleep wireless headset — is announced on screen within seconds, the recording keeps going, and the warning clears itself when the device wakes |
 | `test-smoke.js` | Every view, control and export, while listening for renderer errors |
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
 | `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |
 | `test-bubble-fit.js`, `test-splash-mark.js`, `icon-verify.js` | The overlay in all three states — capsule, hover-open, pinned — fits its contents, opens and closes on the hover messages, keeps the pin across a reload, migrates the old expanded preference, and its bars track the level they are sent; the splash mark loads under CSP; the icon's corners, halo and every `.ico` size |
 | `probe-empty.js` | Not an assertion — it boots against an empty profile and prints what every view says, so a first run can be read instead of guessed at. It is how the weekly panel's wall of zeros and its dead "write it again" button were found |
 | `probe-notify.js` | Shows one real meeting-detected toast and reports what the OS did with it. `WITH_SHORTCUT=1` adds a Start Menu shortcut first, to test whether the AppUserModelID needs one — on Windows 11 it does not; the toast displays either way |
+| `probe-wave.js`, `probe-wave-real.js`, `probe-wave-user.js` | Three rungs for diagnosing dead waveforms: the real `startRecording()` with synthetic streams, with the real loopback and default microphone, and with the user's actual saved profile. Each reports context state, track counts, which analysers exist, and whether the drawn pixels move |
 
 **Spending model calls** (minutes, run deliberately): `test-styles.js` runs every
 note style against one transcript and compares the sections returned with the

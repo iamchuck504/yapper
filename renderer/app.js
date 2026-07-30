@@ -1041,9 +1041,31 @@ async function startRecording() {
     await applyMicSelection();
 
     let levelSentAt = 0;
+    // A device can exist and still deliver pure digital zeros — a wireless
+    // headset that fell asleep, a hardware mute. The graph runs, the waveform
+    // draws a flat line, and two hours later the recording is silence. A live
+    // microphone always carries at least its own noise floor, so an exact zero
+    // held for seconds is a dead device, and it is said out loud rather than
+    // drawn quietly.
+    let micPeak = 0;
+    let silenceWarned = false;
+    const captureStartedAt = performance.now();
     const updateLevels = () => {
       for (const m of [analysers.sys, analysers.mic]) {
         if (m) drawWave(m);
+      }
+      const micNow = levelOf(analysers.mic);
+      if (micNow > micPeak) micPeak = micNow;
+      if (!silenceWarned && micPeak === 0 && performance.now() - captureStartedAt > 6000) {
+        silenceWarned = true;
+        setStatus(statusEl, analysers.sys
+          ? 'The microphone has captured only silence so far. If it is a wireless headset, check that it is on.'
+          : 'Nothing but silence has been captured so far — check that the headset or microphone is on.',
+          !analysers.sys);
+      }
+      if (silenceWarned && micPeak > 0) {
+        silenceWarned = false;
+        statusEl.classList.add('hidden');    // the device woke up; all is well
       }
       // The bubble's capsule shows this same signal. Throttled: the bars only
       // have ~100 ms of resolution anyway, and paused means silent on purpose.
