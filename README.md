@@ -70,7 +70,12 @@ Medido de punta a punta con una reunión de 2 h en el tier `fast` (`build/test-t
 | Abrir la reunión | 512 ms |
 | Exportar | .md 8 KB · .txt 159 KB · PDF 133 KB en 497 ms |
 
-**Lo que sí hay que tener en cuenta es el espacio.** El audio se guarda como WAV 16 kHz mono —**110 MB por hora**— porque es exactamente lo que lee el transcriptor, sin decodificar nada. Una reunión de dos horas al día son unos **4.8 GB al mes**. Hoy nada borra ni comprime ese audio: se conserva para poder re-transcribir cuando quieras.
+**El audio se borra al transcribir.** La transcripción es el registro: de ahí salen las notas, es lo que se lee, se busca y se exporta, y es lo que se guarda. El audio existe para producirla y para sobrevivir a un apagón por el camino; una vez que hay transcripción en disco, la grabación se va. Son 110 MB por hora que, si no, serían 4.8 GB al mes por una reunión diaria — y una grabación de tus compañeros es más delicada que su transcripción. Granola hace lo mismo: nunca guarda audio.
+
+- Primero se escribe la transcripción, después se libera el audio. Un fallo entre ambos no cuesta nada.
+- Si la transcripción **falla**, el audio se conserva para reintentar. Es justo para eso que existe.
+- El interruptor **Keep audio after transcribing** lo desactiva para quien quiera conservarlo.
+- Las reuniones anteriores a este cambio siguen con su audio. La app te dice cuánto ocupan y ofrece liberarlo (a la papelera) cuando tú lo pidas — no borra tus grabaciones por su cuenta.
 
 ## Cómo funciona
 

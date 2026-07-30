@@ -1,4 +1,4 @@
-// The whole recording cycle, which nothing had ever exercised end to end: the
+﻿// The whole recording cycle, which nothing had ever exercised end to end: the
 // audio graph was rewritten (MediaRecorder out, a PCM tap straight to disk in)
 // and only its pieces were covered.
 //
@@ -112,11 +112,27 @@ app.whenReady().then(async () => {
   check('mientras graba la cabecera aún no está cerrada', head.readUInt32LE(0) === 0,
     `declara ${head.readUInt32LE(0)} bytes`);
 
-  // --- stop, and run the pipeline the Stop button runs ---
+  // --- stop, and check the file the moment it is closed ---
+  // The audio is released once there is a transcript, so its header has to be
+  // inspected here, in the window where a crash would leave the user with only
+  // this file.
+  const closed = await $(`(async () => {
+    recording = false;
+    return window.yapper.recordingFinish('', markers);
+  })()`);
+  check('la grabación se guardó', closed && closed.bytes === sent,
+    `${closed && closed.bytes} bytes de ${sent}`);
+  const buf = fs.readFileSync(wav);
+  check('la cabecera quedó cerrada con el tamaño real',
+    buf.readUInt32LE(40) === buf.length - engine.WAV_HEADER,
+    `declara ${buf.readUInt32LE(40)}, hay ${buf.length - engine.WAV_HEADER}`);
+  check('el WAV es reproducible en ese momento',
+    buf.toString('ascii', 0, 4) === 'RIFF' && buf.readUInt32LE(24) === 16000, 'cabecera inesperada');
+
+  // --- and then the rest of the pipeline the Stop button runs ---
   const t0 = Date.now();
   const result = await $(`(async () => {
-    recording = false;
-    const saved = await window.yapper.recordingFinish('', markers);
+    const saved = { folder: ${JSON.stringify(folder)}, bytes: ${sent} };
     const transcript = await window.yapper.transcribe(saved.folder);
     const summary = await window.yapper.summarize(saved.folder, transcript,
       { ...options, participants: 'Ninfa, Chuck', markers });
@@ -126,19 +142,13 @@ app.whenReady().then(async () => {
   })()`);
   say(`\nel ciclo completo tardó ${((Date.now() - t0) / 1000).toFixed(0)} s`);
 
-  check('la grabación se guardó', result.saved && result.saved.bytes === sent,
-    `${result.saved && result.saved.bytes} bytes de ${sent}`);
   check('quedó una marca del momento señalado',
     result.markers.length === 1 && fs.existsSync(path.join(folder, 'markers.txt')),
     JSON.stringify(result.markers));
 
-  // the header must be closed now, or the file will not play anywhere
-  const buf = fs.readFileSync(wav);
-  check('la cabecera quedó cerrada con el tamaño real',
-    buf.readUInt32LE(40) === buf.length - engine.WAV_HEADER,
-    `declara ${buf.readUInt32LE(40)}, hay ${buf.length - engine.WAV_HEADER}`);
-  check('el WAV es reproducible',
-    buf.toString('ascii', 0, 4) === 'RIFF' && buf.readUInt32LE(24) === 16000, 'cabecera inesperada');
+  // the transcript is the record now, so the audio should be gone
+  check('el audio se liberó al haber transcripción', !fs.existsSync(wav),
+    `sigue ocupando ${fs.existsSync(wav) ? (fs.statSync(wav).size / 1024 / 1024).toFixed(0) + ' MB' : ''}`);
 
   check('dejó transcripción', result.tLen > 100, `${result.tLen} caracteres`);
   check('dejó notas', result.sLen > 200, `${result.sLen} caracteres`);
@@ -156,7 +166,7 @@ app.whenReady().then(async () => {
       !fs.existsSync(path.join(folder, 'title.txt')), 'lo creó igual');
   }
 
-  for (const f of ['recording.wav', 'transcript.txt', 'notes.md', 'participants.txt', 'markers.txt']) {
+  for (const f of ['transcript.txt', 'notes.md', 'participants.txt', 'markers.txt']) {
     check(`quedó ${f}`, fs.existsSync(path.join(folder, f)), 'falta');
   }
 
@@ -180,7 +190,8 @@ app.whenReady().then(async () => {
   check('al reabrirla trae las notas', back.summary.length > 200, `${back.summary.length} caracteres`);
   check('al reabrirla trae la transcripción', back.transcript.length > 100, `${back.transcript.length} caracteres`);
   check('al reabrirla trae los participantes', back.participants.includes('Ninfa'), back.participants);
-  check('sabe que tiene grabación', back.hasRecording === true, String(back.hasRecording));
+  // no audio any more, and that is correct: the transcript is what it has
+  check('sabe que ya no hay grabación', back.hasRecording === false, String(back.hasRecording));
 
   say(fails ? `\n${fails} fallos` : '\nPASS');
   app.exit(fails ? 1 : 0);
