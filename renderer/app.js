@@ -201,6 +201,22 @@ function syncLlmControls() {
   // Say what a free tier costs instead, before a confidential meeting is sent.
   llmPrivacy.textContent = p.privacy || '';
   $('llm-privacy-row').classList.toggle('hidden', !p.privacy);
+
+  // Picking a provider is not the same as being set up. Without this, choosing
+  // one that needs a key and never pasting one fails at the end of the first
+  // meeting — after the recording, which is the worst moment to find out.
+  if (p.needsKey && !llmHasKey) {
+    setLlmStatus('Paste a key to finish — notes will not work until you do.', 'needs-key');
+  } else if (llmStatus.dataset.kind === 'needs-key') {
+    setLlmStatus('');
+  }
+}
+
+/** `kind` marks a message so a later one knows whether it may clear it. */
+function setLlmStatus(text, kind = '') {
+  llmStatus.textContent = text;
+  llmStatus.dataset.kind = kind;
+  llmStatus.classList.toggle('bad', kind === 'needs-key' || kind === 'error');
 }
 
 async function saveLlm() {
@@ -233,7 +249,7 @@ async function saveLlm() {
   llmHasKey = s.hasKey;
   syncLlmControls();
   if (s.hasKey && !s.keyEncrypted) {
-    llmStatus.textContent = 'This system has no keystore, so the key is stored unencrypted.';
+    setLlmStatus('This system has no keystore, so the key is stored unencrypted.', 'error');
   }
 })();
 
@@ -241,8 +257,7 @@ llmProviderSel.addEventListener('change', () => {
   // a new provider's own defaults, not the last one's model or endpoint
   llmModelInput.value = '';
   llmBaseInput.value = '';
-  llmStatus.textContent = '';
-  llmStatus.classList.remove('bad');
+  setLlmStatus('');
   syncLlmControls();
   saveLlm();
 });
@@ -259,15 +274,15 @@ for (const el of [llmKeyInput, llmModelInput, llmBaseInput]) {
 $('btn-llm-test').addEventListener('click', async () => {
   const btn = $('btn-llm-test');
   btn.disabled = true;
-  llmStatus.textContent = 'Testing…';
+  setLlmStatus('Testing…');
   await saveLlm();
   const res = await window.yapper.testLlm({
     provider: llmProviderSel.value,
     model: llmModelInput.value.trim(),
     baseUrl: llmBaseInput.value.trim()
   });
-  llmStatus.textContent = res.ok ? `Working — replied in ${res.ms} ms.` : res.error;
-  llmStatus.classList.toggle('bad', !res.ok);
+  if (res.ok) setLlmStatus(`Working — replied in ${res.ms} ms.`, 'ok');
+  else setLlmStatus(res.error, 'error');
   btn.disabled = false;
 });
 
