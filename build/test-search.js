@@ -163,5 +163,21 @@ check('el prompt prohíbe inventar',
   'no lo dice');
 check('y exige citar', /cite the meeting/i.test(s.ANSWER_PROMPT), 'no lo exige');
 
+// -- la respuesta se limpia de auto-narración --
+// El fallo visto en vivo: "no encontré nada… espera, sí" y después la respuesta
+// real. Lo de antes de la primera cita se descarta; una negativa sola se respeta.
+check('el monólogo antes de la respuesta citada se recorta',
+  s.cleanAnswer('I could not find that in your meetings.\n\nWait—the passages do answer this.\n\nPricing is $29 [Q3 Planning, Decisions].'),
+  'Pricing is $29 [Q3 Planning, Decisions].');
+check('una respuesta limpia pasa intacta',
+  s.cleanAnswer('Pricing is $29 [Q3 Planning].\n\nEnterprise stays custom [Q3 Planning].'),
+  'Pricing is $29 [Q3 Planning].\n\nEnterprise stays custom [Q3 Planning].');
+check('una negativa honesta se queda tal cual',
+  s.cleanAnswer('I could not find that in your meetings.'),
+  'I could not find that in your meetings.');
+check('dos párrafos donde el primero no es negativa se quedan',
+  s.cleanAnswer('The rollout moved to August 1 [Standup].\n\nIt had been planned for the second week [Q3 Planning].'),
+  'The rollout moved to August 1 [Standup].\n\nIt had been planned for the second week [Q3 Planning].');
+
 console.log(fails ? `\n${fails} fallos` : '\nPASS');
 process.exit(fails ? 1 : 0);

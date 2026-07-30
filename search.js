@@ -319,11 +319,32 @@ function withoutTerms(p) {
 const ANSWER_PROMPT = `You answer questions about meetings, using only the passages provided.
 
 Rules:
-1. Use only what the passages say. If they do not answer the question, say exactly: I could not find that in your meetings.
+1. Use only what the passages say. If they do not answer the question, reply with exactly this and nothing else: I could not find that in your meetings.
 2. Never guess a name, a date, a number or a decision that is not written in a passage.
 3. Cite the meeting for every claim, in square brackets, exactly as the passage labels it — for example [Launch Planning, 24:05].
-4. Two or three sentences. No preamble, no heading, no restating the question.
+4. Two or three sentences. Write only the answer itself: no preamble, no heading, no restating the question, and never any commentary about the passages or your own process.
 5. If the passages disagree or are unclear, say so rather than picking one.`;
+
+/**
+ * The model's answer, cleaned of self-narration. The observed failure: a first
+ * paragraph declaring nothing was found, a "wait—" reversal, then the real
+ * cited answer. The prompt forbids it; this makes it certain. When an early
+ * paragraph refuses but a later one carries citations, the paragraphs before
+ * the first cited one are the model talking to itself, and they are dropped.
+ * A refusal with no cited answer after it is kept as-is — that is the honest
+ * "nothing found" reply.
+ */
+function cleanAnswer(text) {
+  const parts = String(text || '').trim().split(/\n\s*\n/);
+  if (parts.length < 2) return String(text || '').trim();
+  const firstCited = parts.findIndex(p => /\[[^\]]+\]/.test(p));
+  if (firstCited < 1) return parts.join('\n\n');
+  const preamble = parts.slice(0, firstCited).join(' ');
+  if (/could not find|cannot find|no relevant|wait\b|actually\b/i.test(preamble)) {
+    return parts.slice(firstCited).join('\n\n');
+  }
+  return parts.join('\n\n');
+}
 
 /** The retrieved passages, laid out for the model with their labels. */
 function passagesForPrompt(results) {
@@ -337,5 +358,5 @@ module.exports = {
   tokens, terms, transcriptPassages, notePassages, sectionKind, buildIndex,
   parseQuery, parseDates, score, search,
   ANSWER_PROMPT, passagesForPrompt,
-  stampToSeconds, secondsToStamp, PASSAGE_SECONDS
+  stampToSeconds, secondsToStamp, cleanAnswer, PASSAGE_SECONDS
 };
