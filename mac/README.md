@@ -22,34 +22,35 @@ bash mac/build-app.sh      # every release: dmg + zip, uploaded to the
 all** — the engine on the feed is ours. `provision.js` downloads it on every
 Mac's first run, exactly like the Windows first run.
 
-## The icon, and why this build wants Xcode
+## The icon is inverted on macOS, on purpose
 
-macOS 26 stopped drawing legacy `.icns` files as authored: on a Mac set to dark
-icons the system darkens the tile and keeps the artwork. Yapper's mark is
-near-black on amber, so that pass eats it and the icon arrives in the dock as a
-black slab — verified on the MacBook, not theorised.
+Windows gets the amber tile with a near-black mark. macOS gets the negative of
+it — ink tile, amber mark — from `build/yapper-icon-dark.png`.
 
-The system leaves an icon alone only when the app ships the appearance itself,
-which means a compiled asset catalog: `CFBundleIconName` → `AppIcon` inside
-`Assets.car`, dark images tagged as dark. `build/after-pack.js` builds that
-during packaging, from two sources:
+That is not a style preference. macOS 26 runs legacy `.icns` files through an
+appearance pass: on a Mac set to dark icons it darkens the tile and keeps the
+artwork. A near-black mark on a darkened tile is a black slab, which is exactly
+how the icon arrived in the dock on the first build — verified by rendering
+what `NSWorkspace` hands the Finder, and by comparing against another meeting-notes app and
+Claude, whose tiles get darkened too but whose marks carry their own colour and
+survive. An amber mark survives the same way, in either appearance.
 
-- `build/yapper-icon.png` — the light variant, the icon as it always was
-- `build/yapper-icon-dark.png` — amber on ink, written by `build/icon-dark.js`
-  (run it with the bundled Electron; it re-mixes every seam pixel rather than
-  swapping two colours, so the anti-aliasing survives)
+`build/icon-dark.js` writes that file from `yapper-icon.png`, with the bundled
+Electron:
 
-Compiling the catalog needs `actool`, which comes with **full Xcode** — the
-Command Line Tools ship a shim that only errors. Without it the build still
-succeeds and still installs, and says so:
-
-```
-[icon] actool unavailable (needs full Xcode, not Command Line Tools).
+```bash
+node_modules/electron/dist/Electron.app/Contents/MacOS/Electron build/icon-dark.js
 ```
 
-That is deliberate. A Windows release must not depend on a 10 GB Xcode install,
-so the missing catalog is a warning, never a failure. After installing Xcode,
-run `sudo xcode-select -s /Applications/Xcode.app` once, then build normally.
+It re-mixes rather than swapping two colours: every seam pixel is measured
+along the amber→ink ramp and rebuilt in the new order, so the anti-aliasing and
+the cut-out corners survive intact.
+
+Shipping both appearances instead — amber tile in light mode, inverted in dark
+— is possible, but it needs a compiled asset catalog (`CFBundleIconName` →
+`Assets.car`), and compiling one needs `actool` from full Xcode. That was built
+and then dropped as not worth the dependency; see the history of
+`build/after-pack.js` if it ever becomes worth it again.
 
 ## What a Mac user gets
 
