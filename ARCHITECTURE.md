@@ -1,4 +1,4 @@
-# Yapper — architecture and build structure
+﻿# Yapper — architecture and build structure
 
 A desktop meeting-notes app: it records a call, transcribes it **on the machine**
 and turns the transcript into notes with a language model. Audio never leaves the
@@ -95,9 +95,9 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1204 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
+| `main.js` | 1221 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
 | `engine.js` | 414 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
-| `llm.js` | 282 | Note providers (§6) behind one `generate()` call |
+| `llm.js` | 296 | Note providers (§6) behind one `generate()` call |
 | `live.js` | 240 | Live transcription: rolling window, LocalAgreement-2 confirmation |
 | `keystore.js` | 35 | Sealing the API key with the OS keystore |
 | `bounds.js` | 29 | Pure geometry: keeping the floating bubble on screen |
@@ -384,6 +384,8 @@ packager rather than untangling a build. The open questions for that step:
 | CSP | `default-src 'self'` on every page; `index.html` additionally `style-src 'self'` (no inline styles) and `media-src blob:` |
 | API key at rest | Sealed with `safeStorage` (DPAPI on Windows, Keychain on macOS), never in plaintext `settings.json`. Where a platform has no keystore, the UI says the key is stored unencrypted rather than implying protection it does not have. |
 | One key per provider | Keys are stored under the provider they were issued for. A single shared slot meant switching from Gemini to OpenRouter would have sent Google's key to OpenRouter's servers, and the UI would have called that provider configured. |
+| Key resolution | The provider named in a request decides which key is used. `test-llm` used to merge a caller-supplied provider with the stored key, which turned "test this endpoint" into a way to send one service's key to another. |
+| Keys in error text | Provider rejection messages are shown to the user, and some providers quote the Authorization header back. The key is redacted out of any message before it is displayed. |
 | API key in the renderer | Never sent. The renderer learns only whether one is set. |
 | Opening URLs | `shell.openExternal` accepts only the provider sign-up pages the app itself offers — an allowlist, not an arbitrary URL from the renderer. |
 | Deleting files | The delete handler refuses any path that is not a child of the meetings folder; tested against eight ways of trying to escape it. |
@@ -403,6 +405,8 @@ three groups.
 |---|---|
 | `test-llm.js` | Provider routing, payload shape, every error path, against a fake HTTP server |
 | `test-keystore.js` | The key never appears in what is stored; runs under both a stand-in and the real OS keystore |
+| `test-key-leaks.js` | Adversarial: treats the renderer as hostile and tries to make a stored key reach a server it was not issued for, come back through the bridge, or appear in an error message |
+| `test-provider-keys.js` | Each provider keeps its own key, model and endpoint; switching neither inherits nor loses one; a legacy single-slot profile migrates |
 | `test-live-logic.js` | The confirmation rules — prefix agreement, repeat stripping, degenerate-output detection |
 | `test-bounds.js` | The bubble stays on screen, including multi-monitor negative origins |
 | `test-meetings.js` | The delete path guard |
