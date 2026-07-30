@@ -74,7 +74,7 @@ Medido de punta a punta con una reunión de 2 h en el tier `fast` (`build/test-t
 
 - Primero se escribe la transcripción, después se libera el audio. Un fallo entre ambos no cuesta nada.
 - Si la transcripción **falla**, el audio se conserva para reintentar. Es justo para eso que existe.
-- El interruptor **Keep audio after transcribing** lo desactiva para quien quiera conservarlo.
+- **Keep this meeting's audio** conserva el audio de **esa reunión y solo esa**. Arranca apagado siempre, y se apaga solo —y se desmarca en pantalla— en cuanto lo ha cumplido. No es una preferencia guardada: enciéndelo antes de una reunión delicada y no tienes que acordarte de apagarlo.
 - Las reuniones anteriores a este cambio siguen con su audio. La app te dice cuánto ocupan y ofrece liberarlo (a la papelera) cuando tú lo pidas — no borra tus grabaciones por su cuenta.
 
 ## Cómo funciona

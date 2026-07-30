@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('yapper', {
   getOpenAtLogin: () => invoke('get-open-at-login'),
   getKeepAudio: () => invoke('get-keep-audio'),
   setKeepAudio: keep => invoke('set-keep-audio', keep),
+  onKeepAudioChanged: cb => ipcRenderer.on('keep-audio-changed', (_e, keep) => cb(keep)),
   heldAudio: () => invoke('held-audio'),
   releaseHeldAudio: () => invoke('release-held-audio'),
   setOpenAtLogin: enabled => invoke('set-open-at-login', enabled),
