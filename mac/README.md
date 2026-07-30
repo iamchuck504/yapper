@@ -1,0 +1,66 @@
+# Yapper on macOS — build runbook and honest status
+
+Everything platform-neutral already runs on macOS: the engine paths, the
+first-run download, notes, search, digests, the UI. What follows is the part
+that can only happen on a Mac, and the limitations that remain after it.
+
+## Building (two commands, on an Apple Silicon Mac)
+
+One-time setup: Xcode Command Line Tools (`xcode-select --install`),
+`brew install cmake node gh`, `gh auth login` as `iamchuck504`.
+
+```bash
+git clone https://github.com/iamchuck504/yapper && cd yapper
+
+bash mac/build-engine.sh   # once per engine version: compiles whisper.cpp
+                           # (Metal, static) and publishes it to the feed
+bash mac/build-app.sh      # every release: dmg + zip, uploaded to the
+                           # current version's release
+```
+
+`build-engine.sh` exists because ggml-org publishes **no macOS binary at
+all** — the engine on the feed is ours. `provision.js` downloads it on every
+Mac's first run, exactly like the Windows first run.
+
+## What a Mac user gets
+
+- Recording with live transcript, notes, Today/This week, action items,
+  search — the full app.
+- First launch downloads the engine (Metal build + the two models) with
+  progress on screen, same as Windows.
+- Native notifications **with a real button** (better than Windows there).
+- The Claude CLI is found even though GUI apps get a bare PATH
+  (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin` are checked).
+
+## Honest limitations, in order of pain
+
+1. **Microphone only.** Electron's system-audio loopback is Windows-only
+   (their docs: *"currently only supported on Windows"*). On speakers the mic
+   hears both sides of a call; on headphones it hears only this side. The
+   existing warning ("only the mic is being recorded") states it in-app.
+   Closing this needs a native ScreenCaptureKit capture path — real work, not
+   configuration. Virtual audio drivers (BlackHole et al.) would also work but
+   install system audio devices, and this project does not do that to people's
+   machines by default.
+2. **Unsigned: Gatekeeper blocks the first open.** No Apple Developer account
+   ($99/year). The user right-clicks the app → Open → Open, once. Distribution
+   without that friction needs the account plus notarization.
+3. **Updates notify, they do not self-install.** Squirrel.Mac refuses unsigned
+   updates, so the app checks the same feed, and the sidebar pill becomes
+   "New version — download", opening the releases page. Auto-install arrives
+   with signing.
+4. **No meeting auto-detection.** The Windows implementation reads a Windows
+   registry surface. A macOS equivalent (mic-in-use via CoreAudio) is
+   possible but does not exist yet — the card and toast simply never fire.
+5. **Intel Macs are not built.** arm64 only; an x64/universal build would need
+   a second engine compile and doubles the artifact size for a shrinking
+   audience.
+
+## What was verified from Windows, and what was not
+
+The platform branches that could be tested off-Mac are tested:
+`test-provision.js` covers the mac engine layout (bin/mac-arm64, no -gpu
+variant, our feed URL) and the version comparison behind the update notice.
+The engine compile, the dmg build, Gatekeeper behavior, microphone permission
+prompts and real capture on macOS **have not run yet** — they need the
+MacBook. Treat the first `build-app.sh` run as a shakedown, not a formality.

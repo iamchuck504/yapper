@@ -54,6 +54,27 @@
       ],
       "icon": "build/yapper-icon.ico"
     },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "build/yapper-icon.png",
+      "category": "public.app-category.productivity",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Yapper records meetings with your microphone and transcribes them on this Mac."
+      }
+    },
     "nsis": {
       "oneClick": true,
       "perMachine": false,

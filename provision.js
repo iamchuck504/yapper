@@ -24,6 +24,10 @@ const DEFAULTS = {
   modelBase: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main',
   cpuZip: 'whisper-bin-x64.zip',
   gpuZip: 'whisper-cublas-12.4.0-bin-x64.zip',
+  // ggml-org publishes no macOS binary at all, so the mac engine is our own:
+  // compiled once on Apple hardware by mac/build-engine.sh (Metal, static) and
+  // hosted on the public release feed next to the installers.
+  macZip: `https://github.com/iamchuck504/yapper-releases/releases/download/engine-${WHISPER_TAG}/whisper-mac-arm64.zip`,
   // `medium` is deliberately absent: measured against `small` on real meeting
   // audio it loops (see ARCHITECTURE §8), so it would be 1.5 GB of worse output.
   models: ['base', 'small']
@@ -84,14 +88,14 @@ function extractZip(zip, outDir) {
 }
 
 /** The release zips nest the binaries (Release\...); find them wherever they are. */
-function findServerDir(root) {
+function findServerDir(root, exe) {
   const stack = [root];
   while (stack.length) {
     const dir = stack.pop();
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) stack.push(full);
-      else if (entry.name.toLowerCase() === 'whisper-server.exe') return dir;
+      else if (entry.name.toLowerCase() === exe) return dir;
     }
   }
   return null;
@@ -113,48 +117,66 @@ function hasNvidia() {
  * Install the engine under `home`, reporting progress. Resolves true when a
  * server binary and both models are in place.
  *
- * The CPU build and the models are mandatory — without them nothing
- * transcribes. The CUDA build is best-effort on top: a machine that fails to
- * fetch it still works, just at CPU speed, exactly as setup.ps1 behaves.
+ * On Windows the CPU build and the models are mandatory and the CUDA build is
+ * best-effort on top — a machine that fails to fetch it still works, just at
+ * CPU speed, exactly as setup.ps1 behaves. On macOS there is one build (Metal
+ * is inside it) from our own feed, since ggml-org publishes none.
  */
 async function run(opts) {
-  const o = { ...DEFAULTS, gpu: hasNvidia(), progress: () => { }, ...opts };
+  const o = {
+    ...DEFAULTS,
+    platform: process.platform === 'darwin' ? 'mac-arm64' : 'win-x64',
+    gpu: hasNvidia(),
+    progress: () => { },
+    ...opts
+  };
   if (!o.home) throw new Error('provision.run needs a home directory');
+  const mac = o.platform === 'mac-arm64';
+  const exe = mac ? 'whisper-server' : 'whisper-server.exe';
 
   const tmp = path.join(o.home, 'tmp');
-  const binCpu = path.join(o.home, 'bin', 'win-x64');
-  const binGpu = path.join(o.home, 'bin', 'win-x64-gpu');
+  const binMain = path.join(o.home, 'bin', o.platform);
+  const binGpu = path.join(o.home, 'bin', `${o.platform}-gpu`);
   const models = path.join(o.home, 'models');
   fs.mkdirSync(tmp, { recursive: true });
   fs.mkdirSync(models, { recursive: true });
 
-  const steps = 1 + (o.gpu ? 1 : 0) + o.models.length;
+  const steps = 1 + (!mac && o.gpu ? 1 : 0) + o.models.length;
   let step = 0;
   const tell = (label, pct) => o.progress({ step, steps, label, pct });
 
-  const engineZip = async (zipName, target, label) => {
+  const engineZip = async (url, target, label) => {
     step++;
-    if (fs.existsSync(path.join(target, 'whisper-server.exe'))) { tell(`${label} — already here`, 100); return; }
+    if (fs.existsSync(path.join(target, exe))) { tell(`${label} — already here`, 100); return; }
     tell(label, 0);
-    const zip = path.join(tmp, zipName);
-    await download(`${o.engineBase}/${zipName}`, zip, pct => tell(label, pct));
-    const out = path.join(tmp, path.basename(zipName, '.zip'));
+    const zip = path.join(tmp, path.basename(new URL(url, 'http://x').pathname));
+    await download(url, zip, pct => tell(label, pct));
+    const out = path.join(tmp, path.basename(zip, '.zip'));
     extractZip(zip, out);
-    const src = findServerDir(out);
-    if (!src) throw new Error(`${zipName} did not contain whisper-server.exe`);
+    const src = findServerDir(out, exe);
+    if (!src) throw new Error(`${path.basename(zip)} did not contain ${exe}`);
     copyDir(src, target);
+    // zip extraction does not reliably keep the executable bit
+    if (process.platform !== 'win32') {
+      for (const f of fs.readdirSync(target)) {
+        try { fs.chmodSync(path.join(target, f), 0o755); } catch { /* best effort */ }
+      }
+    }
     tell(`${label} — done`, 100);
   };
 
   try {
-    await engineZip(o.cpuZip, binCpu, 'Transcription engine (8 MB)');
-
-    if (o.gpu) {
-      try {
-        await engineZip(o.gpuZip, binGpu, 'GPU acceleration (646 MB)');
-      } catch (err) {
-        // CPU still transcribes; a failed GPU download must not block install
-        tell(`GPU build skipped: ${err.message}`, 100);
+    if (mac) {
+      await engineZip(o.macZip, binMain, 'Transcription engine (Metal)');
+    } else {
+      await engineZip(`${o.engineBase}/${o.cpuZip}`, binMain, 'Transcription engine (8 MB)');
+      if (o.gpu) {
+        try {
+          await engineZip(`${o.engineBase}/${o.gpuZip}`, binGpu, 'GPU acceleration (646 MB)');
+        } catch (err) {
+          // CPU still transcribes; a failed GPU download must not block install
+          tell(`GPU build skipped: ${err.message}`, 100);
+        }
       }
     }
 
@@ -171,10 +193,20 @@ async function run(opts) {
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* next run */ }
   }
 
-  const ready = fs.existsSync(path.join(binCpu, 'whisper-server.exe'))
+  const ready = fs.existsSync(path.join(binMain, exe))
     && o.models.every(name => fs.existsSync(path.join(models, `ggml-${name}.bin`)));
   if (ready) tell('Engine ready', 100);
   return ready;
 }
 
-module.exports = { run, hasNvidia, download, extractZip, WHISPER_TAG, DEFAULTS };
+/** "0.1.2" newer than "0.1.0"? Plain numeric fields, no prerelease games. */
+function newerVersion(a, b) {
+  const A = String(a).split('.').map(Number);
+  const B = String(b).split('.').map(Number);
+  for (let i = 0; i < Math.max(A.length, B.length); i++) {
+    if ((A[i] || 0) !== (B[i] || 0)) return (A[i] || 0) > (B[i] || 0);
+  }
+  return false;
+}
+
+module.exports = { run, hasNvidia, download, extractZip, newerVersion, WHISPER_TAG, DEFAULTS };
