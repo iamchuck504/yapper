@@ -683,6 +683,7 @@ function holdDisplayAwake(on) {
 
 function closeRecFile() {
   holdDisplayAwake(false);
+  stopSoloDrain();
   sysAudio.stop();          // whether or not a file is open, stop capturing
   if (recFd === null) return;
   try { engine.finishWav(recFd, recBytes); } catch { /* disk gone */ }
@@ -703,17 +704,14 @@ ipcMain.handle('recording-start', async (_e, participants) => {
   // one-sided audio rather than a delayed start.
   if (process.platform === 'darwin') {
     holdDisplayAwake(true);
+    lastMicChunkAt = Date.now();     // give the renderer its grace period
     sysAudio.start();
+    startSoloDrain();
   }
   return recFolder;
 });
 
-ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
-  let buf = Buffer.from(arrayBuffer);
-  // The microphone sets the pace: take exactly as much system audio as the
-  // renderer just sent, so the mix stays aligned with the file's own clock.
-  const sys = sysAudio.take(buf.length);
-  if (sys) buf = sysaudio.mixPcm(buf, sys);
+function writeRecorded(buf) {
   if (recFd !== null) {
     try {
       fs.writeSync(recFd, buf, 0, buf.length, engine.WAV_HEADER + recBytes);
@@ -724,7 +722,55 @@ ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
   }
   // the same samples feed the live transcript, so the renderer only sends once
   if (liveOn) live.write(buf);
+}
+
+let lastMicChunkAt = 0;
+
+ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
+  let buf = Buffer.from(arrayBuffer);
+  // Empty chunks still arrive when the audio graph is running but producing
+  // nothing, and counting those as "the microphone is driving" is what let a
+  // recording end up empty: the pace looked healthy, so the system audio was
+  // never written on its own, and the chunks themselves carried no samples.
+  if (buf.length) lastMicChunkAt = Date.now();
+  // The microphone sets the pace: take exactly as much system audio as the
+  // renderer just sent, so the mix stays aligned with the file's own clock.
+  const sys = sysAudio.take(buf.length);
+  if (sys) buf = sysaudio.mixPcm(buf, sys);
+  writeRecorded(buf);
 });
+
+// The microphone setting the pace has a failure mode: no microphone, no pace,
+// and nothing written at all — including the system audio that was being
+// captured perfectly the whole time. A refused microphone permission or an
+// unplugged headset would produce an empty recording of a meeting the machine
+// could hear. So when the renderer goes quiet, the far side is written on its
+// own rather than piling up in a buffer nobody drains.
+const SILENT_MIC_MS = 1000;
+let soloTimer = null;
+let soloWrote = false;
+
+function startSoloDrain() {
+  soloWrote = false;
+  if (soloTimer || process.platform !== 'darwin') return;
+  soloTimer = setInterval(() => {
+    if (recFd === null || sysAudio.state !== 'capturing') return;
+    if (Date.now() - lastMicChunkAt < SILENT_MIC_MS) return;   // the mic is driving
+    const sys = sysAudio.take(engine.BYTES_PER_SEC / 2);        // half a second
+    if (sys && sys.some(b => b !== 0)) {
+      if (!soloWrote) {
+        soloWrote = true;
+        console.log('[audio] the microphone is silent — writing system audio on its own');
+      }
+      writeRecorded(sys);
+    }
+  }, 500);
+}
+
+function stopSoloDrain() {
+  if (soloTimer) clearInterval(soloTimer);
+  soloTimer = null;
+}
 
 ipcMain.handle('recording-finish', async (_e, title, markers) => {
   closeRecFile();

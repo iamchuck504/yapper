@@ -80,6 +80,12 @@ and then dropped as not worth the dependency; see the history of
    Mac gives the microphone nothing to hear, so anything left came from the
    capture path.
 
+   **If the helper dies mid-meeting, it restarts itself once** and, if it will
+   not come back, says so on screen. Silence there was the dangerous outcome:
+   `take()` starts returning null, the microphone carries on alone, and the
+   recording quietly becomes half a conversation that nobody notices until
+   afterwards. Killing the helper during a recording is how that was found.
+
    **A sleeping display costs you that audio.** ScreenCaptureKit lists no
    displays while the screen is asleep, and a capture filter needs one even
    when only the audio is wanted — the helper reports `no displays` and there

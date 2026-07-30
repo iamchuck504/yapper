@@ -38,6 +38,8 @@ function create({ probePath, onStatus = () => { } } = {}) {
   let buffered = 0;
   let dropped = 0;
   let state = 'off';        // off | starting | capturing | unavailable
+  let stopping = false;     // an expected exit: stop() asked for it
+  let restarts = 0;         // one silent retry per recording, no more
 
   const push = data => {
     chunks.push(data);
@@ -49,7 +51,7 @@ function create({ probePath, onStatus = () => { } } = {}) {
     }
   };
 
-  return {
+  const api = {
     get state() { return state; },
     get buffered() { return buffered; },
     get droppedBytes() { return dropped; },
@@ -69,6 +71,7 @@ function create({ probePath, onStatus = () => { } } = {}) {
           return resolve(false);
         }
         state = 'starting';
+        stopping = false;
         chunks = []; buffered = 0; dropped = 0;
 
         try {
@@ -102,11 +105,29 @@ function create({ probePath, onStatus = () => { } } = {}) {
         });
         proc.on('close', code => {
           proc = null;
+          const wasCapturing = state === 'capturing';
           if (state !== 'off') {
-            state = code === 2 ? 'unavailable' : (state === 'capturing' ? 'off' : 'unavailable');
+            state = code === 2 ? 'unavailable' : (wasCapturing ? 'off' : 'unavailable');
             if (code === 2) onStatus({ ok: false, reason: 'permission' });
           }
           settle(false);
+
+          // Dying mid-recording is the dangerous case: take() starts returning
+          // null, the microphone alone carries on, and the recording quietly
+          // becomes half a conversation. One silent retry covers a transient
+          // fault — the far side loses a second, not the rest of the meeting —
+          // and if it will not come back, say so rather than let the user find
+          // out afterwards.
+          if (wasCapturing && !stopping) {
+            if (restarts < 1) {
+              restarts++;
+              api.start().then(ok => {
+                if (!ok) onStatus({ ok: false, reason: 'stopped' });
+              });
+            } else {
+              onStatus({ ok: false, reason: 'stopped' });
+            }
+          }
         });
 
         // Never hang the start of a recording on a helper that says nothing.
@@ -145,7 +166,12 @@ function create({ probePath, onStatus = () => { } } = {}) {
     },
 
     stop() {
+      stopping = true;      // so the exit is not mistaken for a crash
       state = 'off';
+      // The retry budget is per recording, and it is spent here rather than in
+      // start(), which the retry itself calls — resetting there would buy an
+      // unlimited supply of retries from a helper that crashes on a loop.
+      restarts = 0;
       chunks = []; buffered = 0;
       if (proc) {
         try { proc.kill(); } catch { /* already gone */ }
@@ -153,6 +179,8 @@ function create({ probePath, onStatus = () => { } } = {}) {
       }
     }
   };
+
+  return api;
 }
 
 module.exports = { create, mixPcm, MAX_BUFFERED };

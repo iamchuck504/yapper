@@ -353,9 +353,15 @@ const meetingPrompt = $('meeting-prompt');
 // conversation, and the user is the only one who can fix that.
 window.yapper.onSystemAudioStatus(info => {
   if (info.ok) return;
-  setStatus(statusEl, info.reason === 'permission' || info.reason === 'helper'
-    ? 'Only your microphone is being recorded. To capture the other side of the call, allow Yapper under System Settings › Privacy & Security › Screen Recording, then record again.'
-    : 'Only your microphone is being recorded: system audio could not be started.',
+  // 'stopped' is the one that arrives mid-recording: capture was working and
+  // died. Said differently on purpose — the rest of this meeting is one-sided,
+  // and finding that out afterwards is worse than being interrupted now.
+  setStatus(statusEl,
+    info.reason === 'stopped'
+      ? 'System audio stopped partway through — from here only your microphone is being recorded.'
+      : info.reason === 'permission' || info.reason === 'helper'
+        ? 'Only your microphone is being recorded. To capture the other side of the call, allow Yapper under System Settings › Privacy & Security › Screen Recording, then record again.'
+        : 'Only your microphone is being recorded: system audio could not be started.',
     true);
 });
 
