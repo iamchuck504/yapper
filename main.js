@@ -331,11 +331,31 @@ ipcMain.handle('set-llm-settings', async (_e, next) => {
 });
 
 ipcMain.handle('test-llm', async (_e, override) => {
-  const cfg = Object.assign(llmConfig(), override || {});
-  // a key typed but not yet saved is passed through directly
-  if (override && typeof override.apiKey === 'string' && override.apiKey.trim()) {
-    cfg.apiKey = override.apiKey.trim();
-  }
+  const o = override || {};
+  const s = readSettings();
+  migrateLlmSettings(s);
+
+  // The provider named here decides which key is used — never the stored
+  // default merged with a provider the caller supplied. Merging them turned
+  // "test this endpoint" into a way to send a key issued for one service to
+  // another one entirely.
+  const provider = (typeof o.provider === 'string' && llm.PROVIDERS[o.provider])
+    ? o.provider
+    : (s.llmProvider || 'claude-cli');
+  const slot = llmSlot(s, provider);
+  const typed = typeof o.apiKey === 'string' ? o.apiKey.trim() : '';
+  const pick = (given, saved) =>
+    (typeof given === 'string' && given.trim()) ? given.trim() : (saved || '');
+
+  const cfg = {
+    provider,
+    // a key typed but not yet saved is honoured; otherwise this provider's own
+    apiKey: typed || keystore.open(safeStorage, slot.key),
+    model: pick(o.model, slot.model),
+    baseUrl: pick(o.baseUrl, slot.baseUrl),
+    claudePath: resolveClaude()
+  };
+
   try {
     return await llm.test(cfg);
   } catch (err) {

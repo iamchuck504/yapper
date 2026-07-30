@@ -119,10 +119,25 @@ async function generate(config, { system, input, maxTokens = 8000 }) {
   if (p.needsBaseUrl && !(config.baseUrl || '').trim()) {
     throw new Error(`${p.label} needs an endpoint URL. Add it in Settings.`);
   }
-  const out = await p.run(config, { system, input, maxTokens });
+  let out;
+  try {
+    out = await p.run(config, { system, input, maxTokens });
+  } catch (err) {
+    // Providers quote the Authorization header back in rejection messages, and
+    // that message is shown in the UI and could end up in a screenshot or a
+    // shared screen. The credential does not belong in it.
+    throw new Error(redact(err.message, config.apiKey));
+  }
   const text = String(out || '').trim();
   if (!text) throw new Error(`${p.label} returned an empty response.`);
   return text;
+}
+
+/** Take a secret out of text meant for a human. */
+function redact(text, secret) {
+  const s = String(secret || '').trim();
+  if (!s || s.length < 8) return text;
+  return String(text).split(s).join('[key hidden]');
 }
 
 /**
