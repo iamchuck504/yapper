@@ -95,7 +95,7 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1774 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
+| `main.js` | 1778 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
 | `engine.js` | 640 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 342 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
@@ -430,6 +430,17 @@ are passages, they are the entire context and the prompt requires a bracketed
 citation per claim. `test-search-ui.js` asks about a topic that appears in no
 meeting and asserts no answer comes back.
 
+**A detected meeting is offered twice, in the two places the person might be.**
+It arrives as an in-window card *and* as a real OS notification, because the
+moment a meeting starts you are looking at Zoom, not at Yapper. On macOS the
+toast carries a real button; on Windows Electron's `Notification` has no actions,
+so the whole toast is the button and the body says "Click to start recording".
+Verified with `build/probe-notify.js`: the toast reports `show` on Windows 11 with
+or without a Start Menu shortcut, so the old rule that an AppUserModelID needs
+one to be allowed to notify does not apply here. Two things are deliberately
+*not* notified: notes being ready, and the meeting app releasing the microphone
+while a recording is still running. Both are in-window only today.
+
 **The app opens on the day, and nothing else may take the screen.** On launch the
 first question is usually "what happened, what do I owe", not "record
 something" — so `Today` is the landing view. Two consequences were handled with
@@ -644,6 +655,7 @@ run can never touch a real meeting):
 | `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |
 | `test-bubble-fit.js`, `test-splash-mark.js`, `icon-verify.js` | The overlay fits its own controls; the splash mark loads under CSP; the icon's corners, halo and every `.ico` size |
 | `probe-empty.js` | Not an assertion — it boots against an empty profile and prints what every view says, so a first run can be read instead of guessed at. It is how the weekly panel's wall of zeros and its dead "write it again" button were found |
+| `probe-notify.js` | Shows one real meeting-detected toast and reports what the OS did with it. `WITH_SHORTCUT=1` adds a Start Menu shortcut first, to test whether the AppUserModelID needs one — on Windows 11 it does not; the toast displays either way |
 
 **Spending model calls** (minutes, run deliberately): `test-styles.js` runs every
 note style against one transcript and compares the sections returned with the
