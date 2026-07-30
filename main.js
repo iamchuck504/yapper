@@ -1852,6 +1852,12 @@ function notifyMeeting(label) {
   };
   n.on('click', start);
   n.on('action', start);
+  // Whether the OS actually put it on screen is not obvious from anywhere else:
+  // a notification that is refused fails silently, and the only symptom is a
+  // user saying the app never told them about a meeting.
+  n.on('show', () => console.log('[meetings] notification shown'));
+  n.on('failed', (_e, err) =>
+    console.log('[meetings] the OS refused the notification:', String(err).slice(0, 200)));
   n.show();
   return n;      // returned so a probe can watch whether the OS actually shows it
 }

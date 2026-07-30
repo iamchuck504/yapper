@@ -74,6 +74,8 @@
       ],
       "icon": "build/yapper-icon-dark.png",
       "category": "public.app-category.productivity",
+      "identity": "-",
+      "hardenedRuntime": false,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Yapper records meetings with your microphone and transcribes them on this Mac."
       }
