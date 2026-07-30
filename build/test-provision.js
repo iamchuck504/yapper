@@ -87,6 +87,9 @@ server.listen(0, '127.0.0.1', async () => {
   const base = `http://127.0.0.1:${server.address().port}`;
   const opts = home => ({
     home,
+    // pinned: the default follows the host, so on a Mac these Windows cases
+    // would silently switch to mac-arm64 and reach for the real feed
+    platform: 'win-x64',
     engineBase: `${base}/engine`,
     modelBase: `${base}/models`,
     progress: p => progressLog.push(p)
