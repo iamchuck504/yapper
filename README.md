@@ -4,6 +4,10 @@ A Granola clone: records your meetings, transcribes them **locally** with Whispe
 
 Runs on **Windows** and **macOS (Apple Silicon)**. Both record both sides of a call, transcribe on the machine, and detect meetings automatically — see [Platforms](#platforms) for the two places they still differ.
 
+> **Installing:** **[Windows](docs/INSTALL-WINDOWS.md)** · **[macOS](docs/INSTALL-MACOS.md)** — step by step, including the warnings each OS shows and why.
+>
+> **What every feature does:** **[docs/FEATURES.md](docs/FEATURES.md)**.
+>
 > For architecture and build structure: **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 >
 > **Manual with screenshots + honest assessment** (what it does well, what is missing, and the comparison against Granola in both directions): **[docs/MANUAL.md](docs/MANUAL.md)**.

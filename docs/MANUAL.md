@@ -12,6 +12,12 @@ For internals — module map, IPC surface, measured performance, the reasoning
 behind each decision — see [ARCHITECTURE.md](../ARCHITECTURE.md). This document
 is about using it and judging it.
 
+If you only want to get it running, the step-by-step guides are shorter and
+newer: **[Installing on Windows](INSTALL-WINDOWS.md)**, **[Installing on
+macOS](INSTALL-MACOS.md)**, and **[what every feature does](FEATURES.md)**. This
+document keeps the honest assessment — what works, what is missing, and how it
+compares to Granola in both directions.
+
 ---
 
 ## 1. Install and first run
