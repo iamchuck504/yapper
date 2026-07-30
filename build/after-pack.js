@@ -31,10 +31,24 @@ const DARK = [{ appearance: 'luminosity', value: 'dark' }];
 
 // /usr/bin/actool exists even with only the Command Line Tools installed — it
 // is a shim that fails at runtime with an xcode-select error. Presence proves
-// nothing, so ask it to do something and see whether it can.
-function actoolWorks() {
-  const r = spawnSync('actool', ['--version'], { encoding: 'utf8' });
-  return r.status === 0;
+// nothing, so each candidate is asked to do something and judged on whether it
+// could. Xcode's own copy is tried too: a freshly installed Xcode is not the
+// active developer directory until someone runs `sudo xcode-select -s`, and
+// this build has no business demanding a password.
+function findActool() {
+  const candidates = [
+    { bin: 'actool', env: process.env },
+    ...['/Applications/Xcode.app', '/Applications/Xcode-beta.app']
+      .map(app => ({
+        bin: path.join(app, 'Contents/Developer/usr/bin/actool'),
+        env: { ...process.env, DEVELOPER_DIR: path.join(app, 'Contents/Developer') }
+      }))
+  ];
+  for (const c of candidates) {
+    if (c.bin !== 'actool' && !fs.existsSync(c.bin)) continue;
+    if (spawnSync(c.bin, ['--version'], { env: c.env, encoding: 'utf8' }).status === 0) return c;
+  }
+  return null;
 }
 
 function scale(src, px, dest) {
@@ -58,7 +72,8 @@ exports.default = async function afterPack(context) {
     console.log('[icon] no yapper-icon-dark.png — run build/icon-dark.js; keeping the legacy icon');
     return;
   }
-  if (!actoolWorks()) {
+  const actool = findActool();
+  if (!actool) {
     console.log('[icon] actool unavailable (needs full Xcode, not Command Line Tools).');
     console.log('[icon] shipping the legacy .icns — macOS will draw it dark-slabbed on dark-icon Macs.');
     return;
@@ -85,14 +100,14 @@ exports.default = async function afterPack(context) {
 
     const out = path.join(work, 'out');
     fs.mkdirSync(out);
-    const r = spawnSync('actool', [
+    const r = spawnSync(actool.bin, [
       '--compile', out,
       '--platform', 'macosx',
       '--minimum-deployment-target', '11.0',
       '--app-icon', 'AppIcon',
       '--output-partial-info-plist', path.join(work, 'partial.plist'),
       path.join(work, 'Yapper.xcassets')
-    ], { encoding: 'utf8' });
+    ], { env: actool.env, encoding: 'utf8' });
     if (r.status !== 0) throw new Error(`actool failed: ${(r.stderr || r.stdout || '').slice(0, 400)}`);
 
     const car = path.join(out, 'Assets.car');
