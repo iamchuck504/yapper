@@ -13,8 +13,36 @@ const library = require('./library');
 const actions = require('./actions');
 const search = require('./search');
 const digest = require('./digest');
+const provision = require('./provision');
+const { pathToFileURL } = require('url');
 
 const MEETINGS_DIR = path.join(app.getPath('documents'), 'Meetings');
+
+// An installed copy runs from a read-only asar and cannot keep the 1.3 GB
+// engine next to its code the way a development checkout does. It lives in a
+// per-machine folder instead, downloaded on first run (provision.js). The
+// calibration sample has to be repointed too: this process can read inside the
+// asar, but the whisper server is a separate process that cannot.
+if (app.isPackaged) {
+  engine.setHome(engineHome());
+  engine.setCalibrationWav(path.join(__dirname, 'build', 'calibration.wav')
+    .replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`));
+}
+
+// Two instances would fight over the whisper server's port and the settings
+// file, and an installed app gets double-launched all the time. The second
+// launch hands over to the first and exits.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    }
+  });
+}
 
 // One-time migration from the old Spanish folder/file names
 function migrateOldData() {
@@ -250,7 +278,9 @@ ipcMain.handle('get-open-at-login', async () => readSettings().openAtLogin !== f
 const APP_ID = 'com.yapper.meetingnotes';
 
 function appIconPath() {
-  return path.join(__dirname, 'build', 'yapper-icon.ico');
+  // Installed, the icon is embedded in the exe itself — and the .ico inside the
+  // asar is unreadable to the shell anyway. In development, the loose file.
+  return app.isPackaged ? process.execPath : path.join(__dirname, 'build', 'yapper-icon.ico');
 }
 
 function refreshShortcutIcons() {
@@ -537,6 +567,7 @@ app.whenReady().then(() => {
     app.setAppUserModelId(APP_ID);
     refreshShortcutIcons();
   }
+  setupAutoUpdate();
   // a monitor being unplugged or rescaled can strand the bubble off-screen too
   screen.on('display-metrics-changed', keepBubbleOnScreen);
   screen.on('display-removed', keepBubbleOnScreen);
@@ -1129,6 +1160,74 @@ async function notesReady() {
 ipcMain.handle('style-sections', async () => ({ ...SECTION_SETS }));
 
 ipcMain.handle('check-environment', async () => checkEnvironment());
+
+// ---------- first-run engine download ----------
+// A fresh install has the app shell and nothing to transcribe with. The
+// renderer notices (check-environment says no whisper) and asks for this; the
+// download reports through its own channel and the environment is re-checked —
+// which is also what triggers calibration — once the engine lands.
+
+let provisioning = null;
+
+function ensureEngine() {
+  if (engine.isInstalled() && engine.hasModel('base') && engine.hasModel('small')) {
+    return Promise.resolve(true);
+  }
+  if (!provisioning) {
+    provisioning = provision.run({
+      home: engineHome(),
+      gpu: engine.hasNvidiaGpu(),
+      progress: p => broadcast('engine-setup-progress', p)
+    }).then(ok => {
+      provisioning = null;
+      if (ok) envCache = null;          // the next check measures the machine
+      return ok;
+    }).catch(err => {
+      provisioning = null;
+      console.log('[provision] failed:', err.message);
+      broadcast('engine-setup-progress', { error: err.message });
+      return false;
+    });
+  }
+  return provisioning;
+}
+
+function engineHome() {
+  return app.isPackaged
+    ? path.join(process.env.LOCALAPPDATA || app.getPath('userData'), 'Yapper', 'engine')
+    : __dirname;
+}
+
+ipcMain.handle('engine-setup', async () => ensureEngine());
+
+// ---------- auto-update ----------
+// Installed copies keep themselves current from the release feed: checked at
+// launch and every few hours, downloaded in the background, applied on quit —
+// or right away if the user clicks the pill the renderer shows. A development
+// checkout updates with git and skips all of this.
+
+let updater = null;
+
+function setupAutoUpdate() {
+  if (!app.isPackaged) return;
+  try {
+    const { autoUpdater } = require('electron-updater');
+    updater = autoUpdater;
+    updater.autoDownload = true;
+    updater.autoInstallOnAppQuit = true;   // ignoring the pill still updates, just later
+    updater.on('update-downloaded', info => broadcast('update-ready', { version: info.version }));
+    updater.on('error', err => console.log('[update] check failed:', String(err && err.message).slice(0, 200)));
+    updater.checkForUpdates().catch(() => { /* offline is fine */ });
+    setInterval(() => updater.checkForUpdates().catch(() => { }), 4 * 60 * 60 * 1000);
+  } catch (err) {
+    console.log('[update] not available:', err.message);
+  }
+}
+
+ipcMain.handle('update-restart', async () => {
+  if (updater) updater.quitAndInstall();
+  return !!updater;
+});
 
 ipcMain.handle('save-notes', async (_e, folder, md) => {
   fs.writeFileSync(path.join(folder, 'notes.md'), md, 'utf8');
@@ -1790,12 +1889,18 @@ ipcMain.handle('export-pdf', async (_e, html, suggestedName) => {
   });
   if (res.canceled || !res.filePath) return null;
 
-  // Render from a real file inside renderer/ so relative font URLs resolve
-  // (a data: URL is an opaque origin and cannot load the bundled woff2).
-  const tmpHtml = path.join(__dirname, 'renderer', '.pdf-export.html');
+  // Render from a real file so the fonts load (a data: URL is an opaque origin
+  // and cannot fetch the bundled woff2). The file goes in temp — an installed
+  // app cannot write inside itself — and a <base> points its relative URLs
+  // back at renderer/, which Electron can serve even from inside the asar.
+  const tmpHtml = path.join(app.getPath('temp'), `yapper-pdf-${process.pid}.html`);
+  const baseTag = `<base href="${pathToFileURL(path.join(__dirname, 'renderer') + path.sep).href}">`;
+  const doc = /<head[^>]*>/i.test(html)
+    ? html.replace(/<head[^>]*>/i, m => m + baseTag)
+    : baseTag + html;
   const pdfWin = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
   try {
-    fs.writeFileSync(tmpHtml, html, 'utf8');
+    fs.writeFileSync(tmpHtml, doc, 'utf8');
     await pdfWin.loadFile(tmpHtml);
     await new Promise(r => setTimeout(r, 250));   // let the webfont settle
     const data = await pdfWin.webContents.printToPDF({

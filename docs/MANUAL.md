@@ -16,15 +16,30 @@ is about using it and judging it.
 
 ## 1. Install and first run
 
-Current state, stated plainly: **there is no installer.** The app runs from
-source. This is the single biggest gap between Yapper and a shippable product.
+**For users: an installer.** `Yapper-Setup-<version>.exe` (~83 MB) installs
+per-user — no admin rights — creates the shortcuts, and on first launch the app
+downloads the transcription engine itself, with progress on screen: ~650 MB on
+a CPU-only machine, ~1.3 GB when an NVIDIA GPU is detected (the CUDA build).
+Recording stays disabled until that lands. Installed copies then **keep
+themselves updated** from the release feed: checked at launch and every four
+hours, downloaded in the background, applied on quit — or immediately via the
+"Update ready — restart" pill in the sidebar. The whole loop is exercised by
+`build/e2e-update.ps1`, which installs a 0.1.0, serves it a 0.1.1, and checks
+that what is on disk afterwards is 0.1.1.
+
+Two honest caveats. The installer is **not code-signed** — no certificate — so
+SmartScreen shows "Windows protected your PC" and the user has to click
+*More info → Run anyway* once. And the update feed lives on GitHub Releases,
+so the machine needs to reach github.com.
+
+**For development: from source.**
 
 ```powershell
 git clone https://github.com/iamchuck504/yapper
 cd yapper
-npm install          # one dependency: Electron
-.\setup.ps1          # downloads whisper.cpp + models (~3.2 GB, GPU build if CUDA)
-npm start
+npm install          # electron + electron-builder + electron-updater
+.\setup.ps1          # downloads whisper.cpp + models next to the code
+npm start            # run;  npm run dist builds the installer
 ```
 
 On first run the app plays an 11-second real-speech sample through the
@@ -192,7 +207,9 @@ transcript, notes, title. Useful for phone recordings and voice memos.
 | Audio auto-release after transcript | Working, with per-meeting keep toggle |
 | BYOK providers + OS-keystore key storage | Working (6 providers) |
 | Dark/light theme, read-aloud, start with Windows | Working |
-| Installer / packaged build | **Missing** |
+| Windows installer (per-user NSIS) | Working, unsigned |
+| First-run engine download with progress | Working |
+| Auto-update from the release feed | Working, proven end to end |
 | macOS / mobile | **Missing** |
 | Speaker labels | **Missing** |
 | Calendar integration | **Missing** |
@@ -211,9 +228,10 @@ than assert (empty profile, notifications, dead waveforms).
 These are the true costs of the current build. None of them is hidden by the
 UI; several are deliberate trade-offs, marked as such.
 
-1. **No installer.** Cloning a repo, running npm and a 3.2 GB PowerShell setup
-   is developer onboarding, not user onboarding. Until this exists, only
-   technical users can run Yapper.
+1. **The installer is unsigned.** A code-signing certificate costs money and
+   identity paperwork; without one, SmartScreen warns on first install and some
+   corporate policies block unsigned executables outright. The auto-updater
+   works unsigned, but signing is what "install without a scary screen" costs.
 2. **Windows only.** The capture layer (WASAPI loopback) and the detection
    layer (CapabilityAccessManager) are Windows APIs. macOS needs a whisper.cpp
    arm64 build, a ScreenCaptureKit capture path, notarization, and an Apple
@@ -248,7 +266,9 @@ UI; several are deliberate trade-offs, marked as such.
     audio. The transcript-quality bar is what makes this bet acceptable.
 11. **Windows notifications carry no buttons** (Electron limitation) — the
     whole toast is the click target.
-12. **No auto-update.** Updating means `git pull`.
+12. **Updates depend on the release feed being maintained.** Installed copies
+    update themselves, but only from versions somebody actually published
+    (`npm run release`); a development checkout still updates with `git pull`.
 13. **UI is English only.**
 14. **The transcript is not editable in-app.** Notes are; the transcript file
     must be edited externally if a word is wrong.
@@ -316,8 +336,10 @@ local capture client; Yapper is a local application, full stop.**
 
 ### Where Granola is genuinely ahead
 
-1. **It installs.** Download, sign in, done — against clone + npm + 3.2 GB.
-   This gap dominates every other comparison for a normal user.
+1. **It installs without a warning.** Both now install and self-update, but
+   Granola's binaries are code-signed and notarized; Yapper's installer trips
+   SmartScreen until it is signed, and Yapper's first run still downloads the
+   engine where Granola is ready immediately.
 2. **Platforms and sync.** Mac + Windows + iPhone, notes following the user.
    Yapper is one Windows machine.
 3. **Speaker attribution.** "You said / they said" changes how useful a
@@ -338,9 +360,11 @@ local capture client; Yapper is a local application, full stop.**
 
 Neutral estimates of shape, not commitments; ordered by leverage.
 
-- **Installer** — electron-builder for the app shell; `setup.ps1` already
-  performs the engine/model download and would become the first-run step.
-  Highest-leverage single item on the list.
+- ~~Installer~~ — **done**: NSIS per-user installer, first-run engine download.
+- ~~Auto-update~~ — **done**: electron-updater against the release feed, the
+  full loop proven by `build/e2e-update.ps1`.
+- **Code signing** — a certificate (or Azure Trusted Signing) to stop the
+  SmartScreen warning; now the highest-leverage item for sharing.
 - **"You vs Them" speaker attribution** — mic and system audio already travel
   on separate buses internally; recording them as two channels (or two files)
   and tagging transcript segments by channel would deliver the 80% case
@@ -354,7 +378,6 @@ Neutral estimates of shape, not commitments; ordered by leverage.
   notarization; needs Apple hardware and a developer account.
 - **True diarization** — heavier (tinydiarize / pyannote class models); the
   channel split above is the cheap first step.
-- **Auto-update** — electron-updater, once an installer exists.
 - **Renderer split** — mechanical refactor of the 2,500-line file into
   modules; no user-visible change, pays down the maintenance cost.
 

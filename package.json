@@ -5,9 +5,66 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node build/test-llm.js && node build/test-keystore.js && node build/test-live-logic.js && node build/test-dedup.js && node build/test-actions.js && node build/test-library.js && node build/test-search.js && node build/test-digest.js && node build/test-bounds.js && node build/test-meetings.js && node build/test-section-coverage.js && node build/test-ipc-wiring.js && node build/test-docs.js"
+    "test": "node build/test-llm.js && node build/test-keystore.js && node build/test-live-logic.js && node build/test-dedup.js && node build/test-actions.js && node build/test-library.js && node build/test-search.js && node build/test-digest.js && node build/test-provision.js && node build/test-bounds.js && node build/test-meetings.js && node build/test-section-coverage.js && node build/test-ipc-wiring.js && node build/test-docs.js",
+    "dist": "electron-builder --win",
+    "release": "electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
   },
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.yapper.meetingnotes",
+    "productName": "Yapper",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "engine.js",
+      "live.js",
+      "llm.js",
+      "keystore.js",
+      "bounds.js",
+      "library.js",
+      "actions.js",
+      "search.js",
+      "digest.js",
+      "provision.js",
+      "preload.js",
+      "renderer/**/*",
+      "!renderer/.pdf-export.html",
+      "build/calibration.wav"
+    ],
+    "asarUnpack": [
+      "build/calibration.wav"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/yapper-icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "Yapper-Setup-${version}.exe"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "iamchuck504",
+        "repo": "yapper-releases"
+      }
+    ]
   }
 }

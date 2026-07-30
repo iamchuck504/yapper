@@ -98,10 +98,16 @@ for (const page of ['index.html', 'bubble.html', 'splash.html']) {
   check(`${page} declara una CSP`,
     /Content-Security-Policy/.test(read(path.join('renderer', page))), 'no la trae');
 }
-check('sigue habiendo una sola devDependency',
-  Object.keys(JSON.parse(read('package.json')).devDependencies).length === 1, 'ya no es una');
-check('sigue sin dependencias de ejecución',
-  !JSON.parse(read('package.json')).dependencies, 'aparecieron dependencies');
+// The dependency footprint is a documented claim (§10): exactly electron and
+// electron-builder to develop, exactly electron-updater at runtime. Anything
+// new showing up here has to be argued for in ARCHITECTURE.md first.
+const pkg = JSON.parse(read('package.json'));
+check('las devDependencies siguen siendo exactamente electron y electron-builder',
+  JSON.stringify(Object.keys(pkg.devDependencies).sort()) === '["electron","electron-builder"]',
+  JSON.stringify(Object.keys(pkg.devDependencies)));
+check('la única dependencia de ejecución sigue siendo electron-updater',
+  JSON.stringify(Object.keys(pkg.dependencies || {})) === '["electron-updater"]',
+  JSON.stringify(Object.keys(pkg.dependencies || {})));
 
 // --- the files the docs point a reviewer at ---
 for (const f of ['preload.js', 'engine.js', 'live.js', 'main.js', 'llm.js',

@@ -6,6 +6,10 @@ Clon de Granola AI: graba tus reuniones, las transcribe **localmente** con Whisp
 >
 > **Manual con capturas + evaluación honesta** (qué hace bien, qué le falta, y la
 > comparación con Granola en ambas direcciones): **[docs/MANUAL.md](docs/MANUAL.md)** (en inglés).
+>
+> **Para instalar sin clonar nada:** `npm run dist` produce `Yapper-Setup-<versión>.exe`
+> (instala por usuario, baja el motor solo en el primer arranque, y se auto-actualiza
+> desde el feed de releases con `npm run release`).
 
 ## En vivo (estilo Granola)
 
