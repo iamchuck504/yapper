@@ -20,6 +20,29 @@ function fail(msg) { console.log('FAIL  ' + msg); process.exit(1); }
   if (!engine.hasModel('base')) fail('falta el modelo base');
   if (!fs.existsSync(WAV_10S)) fail('falta el wav de prueba de 10 s');
 
+  // A server outlives a parent that is killed rather than closed, and it holds
+  // its model resident — hundreds of megabytes, once per crash, for as long as
+  // the machine stays up. Starting the engine has to clear those out first.
+  if (process.platform !== 'win32') {
+    const { spawn, spawnSync } = require('child_process');
+    const orphan = spawn(engine.serverPath(),
+      ['-m', engine.modelPath('base'), '--host', '127.0.0.1', '--port', '8791'],
+      { detached: true, stdio: 'ignore' });
+    orphan.unref();
+    await new Promise(r => setTimeout(r, 2500));
+    const alive = () => String(spawnSync('pgrep', ['-f', engine.serverPath()],
+      { encoding: 'utf8' }).stdout || '').split('\n').filter(s => s.trim()).length;
+    const before = alive();
+    if (before === 0) fail('no pude crear un servidor huérfano para la prueba');
+
+    await engine.start('base');
+    const after = alive();
+    // exactly one: ours. The orphan is gone and we did not kill ourselves.
+    if (after !== 1) fail(`quedaron ${after} servidores tras arrancar (había ${before})`);
+    console.log(`huérfanos   : ${before} antes, ${after} después (el nuestro)`);
+    await engine.stop();
+  }
+
   const wav = fs.readFileSync(WAV_10S);
   console.log(`\nventana de prueba: ${(wav.length / 32000).toFixed(1)} s de audio\n`);
 

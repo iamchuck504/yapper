@@ -88,7 +88,11 @@ These shaped most of the decisions below, so they are worth stating first.
   preload bridge.
 - **whisper-server is a long-lived child**, not a per-request spawn: the live
   transcript re-decodes a rolling window about once a second, and loading the
-  model each time would cost more than the inference.
+  model each time would cost more than the inference. Being a child, it
+  outlives a parent that is *killed* rather than closed, holding its model
+  resident — so `engine.js` sweeps for abandoned servers once per run, before
+  starting its first one. Measured at 802 MB across four of them after an
+  afternoon of crash testing.
 
 ---
 
