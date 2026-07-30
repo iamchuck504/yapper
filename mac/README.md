@@ -85,11 +85,30 @@ run `sudo xcode-select -s /Applications/Xcode.app` once, then build normally.
    a second engine compile and doubles the artifact size for a shrinking
    audience.
 
-## What was verified from Windows, and what was not
+## What has actually run on a Mac
 
-The platform branches that could be tested off-Mac are tested:
-`test-provision.js` covers the mac engine layout (bin/mac-arm64, no -gpu
-variant, our feed URL) and the version comparison behind the update notice.
-The engine compile, the dmg build, Gatekeeper behavior, microphone permission
-prompts and real capture on macOS **have not run yet** — they need the
-MacBook. Treat the first `build-app.sh` run as a shakedown, not a formality.
+The shakedown happened on 2026-07-30, on an M4 Pro running macOS 27. What was
+verified, in the order it was done:
+
+- **The engine compiles.** whisper.cpp v1.9.1, Metal and Accelerate/BLAS both
+  detected, `whisper-server` at 3.5 MB. Published to the feed as
+  `engine-v1.9.1`, which until then did not exist — every Mac's first run was
+  404ing.
+- **The app builds.** dmg and zip, arm64, via `electron-builder --mac`.
+- **Gatekeeper did not block it.** With the quarantine attribute cleared the
+  app opens directly; the right-click → Open dance was not needed.
+- **Transcription works, on the GPU.** `engine.js` against a real wav:
+  `using MTL0 backend`, 21.7 s of audio in 0.5 s, timestamps and windowing as
+  in production. Notes came back from `llm.js` through the Claude CLI.
+- **The whole suite passes here**, 13 files, after `test-provision.js` stopped
+  assuming the host was Windows.
+
+Not yet exercised: microphone permission and live capture (they need a person
+at the keyboard), and the icon's asset catalog (needs Xcode, see above).
+
+Two things bit during that first run and are worth knowing before the next one.
+`electron-builder` rewrites `package.json` after packaging, dropping `scripts`,
+`devDependencies` and the whole `build` block — check `git diff` before
+committing. And publishing an engine release marks it *latest* on the feed
+unless told otherwise, which points both update checks at a release that has no
+`latest.yml`; `build-engine.sh` now passes `--latest=false`.
