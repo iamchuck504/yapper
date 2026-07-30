@@ -41,6 +41,7 @@
     <!-- ===== Record view ===== -->
     <section id="view-record">
       <div class="view-head">
+        <button id="action-summary" class="action-summary hidden" title="Open your action items"></button>
         <h1 class="page-title">New meeting</h1>
         <p class="view-sub">Record live or import audio — transcribed on your machine, summarized by AI.</p>
       </div>
@@ -300,12 +301,24 @@
     <section id="view-reminders" class="hidden">
       <div class="view-head">
         <h1 class="page-title">Action items</h1>
-        <p class="view-sub">Your reminders across all meetings — check off, edit inline, or delete.</p>
+        <p class="view-sub">Everything your meetings left you with. Owners and dates come from what was
+          actually said — blanks mean nobody named one.</p>
       </div>
 
       <div class="add-reminder">
-        <input id="new-reminder" type="text" placeholder="Add a reminder…" autocomplete="off" spellcheck="false" />
+        <input id="new-reminder" type="text" placeholder="Add an action item…" autocomplete="off" spellcheck="false" />
         <button id="btn-add-reminder" class="btn-primary">Add</button>
+      </div>
+
+      <div class="opt-row filter-row">
+        <div id="action-filter" class="seg">
+          <button class="seg-btn active" data-filter="open">Open</button>
+          <button class="seg-btn" data-filter="high">High priority</button>
+          <button class="seg-btn" data-filter="mine">With an owner</button>
+          <button class="seg-btn" data-filter="done">Done</button>
+          <button class="seg-btn" data-filter="all">All</button>
+        </div>
+        <span id="action-count" class="mic-hint"></span>
       </div>
 
       <ul id="reminders-list"></ul>

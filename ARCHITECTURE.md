@@ -88,20 +88,22 @@ These shaped most of the decisions below, so they are worth stating first.
 
 ## 3. Module map
 
-Application code, 6,500 lines total. No framework, no build step — the files
+Application code, 6,900 lines total. No framework, no build step — the files
 that ship are the files that run.
 
 ### Main process
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1540 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
+| `main.js` | 1613 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep |
 | `engine.js` | 640 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `llm.js` | 322 | Note providers (§6) behind one `generate()` call |
 | `live.js` | 304 | Live transcription: rolling window, LocalAgreement-2 confirmation |
+| `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
+| `actions.js` | 239 | Reading action items out of the notes, and folding duplicates together |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
-| `preload.js` | 81 | The only bridge between renderer and main |
+| `preload.js` | 83 | The only bridge between renderer and main |
 
 `keystore.js` and `bounds.js` are separate files for one reason: they are pure
 functions, so they can be tested without booting Electron, and `keystore.js`
@@ -112,9 +114,9 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 1882 | Main window: capture graph, views, notes rendering, exports, reminders, settings |
-| `renderer/style.css` | 1218 | Everything visual, light and dark |
-| `renderer/index.html` | 319 | Main window markup |
+| `renderer/app.js` | 2005 | Main window: capture graph, views, notes rendering, exports, reminders, settings |
+| `renderer/style.css` | 1278 | Everything visual, light and dark |
+| `renderer/index.html` | 332 | Main window markup |
 | `renderer/bubble.html` | 188 | The always-on-top live transcript overlay |
 | `renderer/bubble.js` | 125 | Its behaviour, including sizing itself to its own controls |
 | `renderer/splash.html` | 104 | Boot screen, including the first-run calibration status |
@@ -179,18 +181,18 @@ phrase and a word lost on the seam.
 
 ## 5. IPC surface
 
-58 channels, all declared in `preload.js` — that file is the complete list of
+60 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
 
-**Request/response (38)** — recording lifecycle (`recording-start`,
+**Request/response (40)** — recording lifecycle (`recording-start`,
 `recording-finish`), import (`import-audio`, `import-read`, `import-open`,
 `import-close`, `legacy-audio`), processing (`transcribe`, `summarize`,
 `regenerate`, `generate-title`, `save-notes`), meetings (`list-meetings`,
 `load-meeting`, `delete-meeting`, `open-folder`), reminders (4), settings
 (`get/set-open-at-login`, `get/set-llm-settings`, `test-llm`, `style-sections`,
-`check-environment`), exports (`save-text-file`, `export-pdf`), live
+`check-environment`), the library (`refresh-library`, `list-actions`), exports (`save-text-file`, `export-pdf`), live
 (`live-start`, `live-stop`), bubble (`bubble-show`, `bubble-hide`),
 `open-external`.
 

@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld('yapper', {
   setLlmSettings: next => invoke('set-llm-settings', next),
   testLlm: override => invoke('test-llm', override),
   listReminders: () => invoke('list-reminders'),
+  listActions: () => invoke('list-actions'),
+  refreshLibrary: () => invoke('refresh-library'),
   addReminder: (text, source) => invoke('add-reminder', text, source),
   updateReminder: (id, fields) => invoke('update-reminder', id, fields),
   deleteReminder: id => invoke('delete-reminder', id),

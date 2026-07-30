@@ -9,6 +9,8 @@ const engine = require('./engine');
 const live = require('./live');
 const llm = require('./llm');
 const keystore = require('./keystore');
+const library = require('./library');
+const actions = require('./actions');
 
 const MEETINGS_DIR = path.join(app.getPath('documents'), 'Meetings');
 
@@ -991,6 +993,7 @@ ipcMain.handle('summarize', async (_e, folder, transcript, options) => {
   writeParticipants(folder, options && options.participants);
   const out = await runModel(buildPrompt(options), transcript);
   fs.writeFileSync(path.join(folder, 'notes.md'), out, 'utf8');
+  refreshLibrary();               // new notes can carry new action items
   return out;
 });
 
@@ -1001,6 +1004,7 @@ ipcMain.handle('regenerate', async (_e, folder, options) => {
   const transcript = fs.readFileSync(transcriptPath, 'utf8');
   const out = await runModel(buildPrompt(options), transcript);
   fs.writeFileSync(path.join(folder, 'notes.md'), out, 'utf8');
+  refreshLibrary();               // new notes can carry new action items
   return out;
 });
 
@@ -1091,6 +1095,7 @@ ipcMain.handle('check-environment', async () => checkEnvironment());
 
 ipcMain.handle('save-notes', async (_e, folder, md) => {
   fs.writeFileSync(path.join(folder, 'notes.md'), md, 'utf8');
+  refreshLibrary();               // edited notes can change the action items
   return true;
 });
 
@@ -1287,7 +1292,12 @@ ipcMain.handle('add-reminder', async (_e, text, source) => {
   const t = String(text || '').trim();
   if (!t) return null;
   const list = readReminders();
-  const r = { id: crypto.randomUUID(), text: t, done: false, source: source || '', createdAt: Date.now() };
+  const now = Date.now();
+  const r = {
+    id: crypto.randomUUID(), text: t, done: false, source: source || '',
+    owner: '', due: '', priority: 'normal', folder: '', meeting: source || '',
+    sources: [], createdAt: now, updatedAt: now
+  };
   list.unshift(r);
   writeReminders(list);
   return r;
@@ -1303,6 +1313,69 @@ ipcMain.handle('update-reminder', async (_e, id, fields) => {
 ipcMain.handle('delete-reminder', async (_e, id) => {
   writeReminders(readReminders().filter(x => x.id !== id));
   return true;
+});
+
+// ---------- the library: one index over every meeting ----------
+// The weekly summary, the daily digest, the action items and the search all ask
+// questions about every meeting at once. This keeps a derived index so they do
+// not each re-read twenty-eight folders, and folds the action items written in
+// the notes into the one list the user already has.
+
+function libraryFile() {
+  return path.join(app.getPath('userData'), 'index.json');
+}
+
+let libraryCache = null;
+
+/**
+ * Bring the index up to date and pull in any action items from notes that have
+ * changed. Returns the meetings, newest first.
+ */
+function refreshLibrary() {
+  const { meetings, changed } = library.refresh({
+    meetingsDir: MEETINGS_DIR,
+    indexFile: libraryFile()
+  });
+  libraryCache = meetings;
+
+  // Only meetings whose files actually changed can have new tasks in them, so
+  // an unchanged library costs nothing.
+  const incoming = changed.flatMap(m => m.items);
+  if (incoming.length) {
+    const now = Date.now();
+    const { list, added, merged } = actions.mergeActionItems(readReminders(), incoming, now);
+    for (const item of list) if (!item.id) item.id = crypto.randomUUID();
+    if (added || merged) {
+      writeReminders(list);
+      console.log(`[library] action items: ${added} new, ${merged} folded into existing`);
+    }
+  }
+  return meetings;
+}
+
+function meetings() {
+  return libraryCache || refreshLibrary();
+}
+
+ipcMain.handle('refresh-library', async () => refreshLibrary().length);
+
+/** Everything the action items view needs, with its meeting resolved. */
+ipcMain.handle('list-actions', async () => {
+  const byFolder = new Map(meetings().map(m => [m.folder, m]));
+  return readReminders().map(r => {
+    const m = byFolder.get(r.folder);
+    return {
+      ...r,
+      meeting: r.meeting || (m ? (m.title || m.name) : ''),
+      meetingDate: r.meetingDate || (m ? m.date : ''),
+      // a task mentioned in several meetings shows all of them
+      mentions: (r.sources || []).filter(f => byFolder.has(f)).map(f => ({
+        folder: f,
+        title: byFolder.get(f).title || byFolder.get(f).name,
+        date: byFolder.get(f).date
+      }))
+    };
+  });
 });
 
 // ---------- meeting auto-detection ----------
