@@ -48,6 +48,8 @@ contextBridge.exposeInMainWorld('yapper', {
   heldAudio: () => invoke('held-audio'),
   releaseHeldAudio: () => invoke('release-held-audio'),
   setOpenAtLogin: enabled => invoke('set-open-at-login', enabled),
+  getBubbleCorner: () => invoke('get-bubble-corner'),
+  setBubbleCorner: corner => invoke('set-bubble-corner', corner),
   listMeetings: () => invoke('list-meetings'),
   loadMeeting: folder => invoke('load-meeting', folder),
   deleteMeeting: folder => invoke('delete-meeting', folder),
