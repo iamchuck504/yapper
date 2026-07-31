@@ -109,7 +109,7 @@ that ship are the files that run.
 | `engine.js` | 787 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
-| `llm.js` | 345 | Note providers (§6) behind one `generate()` call |
+| `llm.js` | 367 | Note providers (§6) behind one `generate()` call |
 | `live.js` | 310 | Live transcription: rolling window, LocalAgreement-2 confirmation |
 | `actions.js` | 253 | Reading action items out of the notes, and folding duplicates together |
 | `provision.js` | 380 | First-run engine download for installed copies (Windows and macOS): resumable and retried, recording-first in its ordering, plus the version comparison behind update notices |
