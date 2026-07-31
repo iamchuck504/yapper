@@ -472,28 +472,66 @@ function transcribeFile(file, opts = {}) {
   return serialize(() => transcribeFileNow(file, opts));
 }
 
+// ---------------------------------------------------------------- one server
+//
+// whisper-server decodes one request at a time, and a second /inference sent
+// while the first is in flight does not queue — it wedges. Seen on a real
+// 24-minute meeting: two sockets ESTABLISHED from the app, both idle, the
+// server burning 1 second of CPU across five minutes and never answering
+// anything again. The recording survived because it was already on disk, but
+// the transcript never arrived and the app sat there looking slow.
+//
+// It got there through a check-then-act race. `busy()` said false, the live
+// loop went on to await a model switch and build its window, and a full-file
+// transcription started in that gap. Both then had a request in flight.
+//
+// So the claim is taken here, synchronously, and there are two ways to take
+// it. `serialize` waits its turn — for work that must not be dropped.
+// `tryExclusive` refuses instead of waiting, which is what the live loop
+// wants: a window decoded thirty seconds late is not a live transcript.
+
 let jobs = Promise.resolve();
-let running = 0;
+let running = 0;      // 1 while a request is actually in flight
+let claimed = 0;      // queued *or* in flight, counted the instant work is asked for
 
 function serialize(fn) {
+  claimed++;
   // runs whether or not the previous job succeeded
   const start = () => { running++; return fn(); };
-  const done = v => { running--; return v; };
-  const failed = e => { running--; throw e; };
+  const done = v => { running--; claimed--; return v; };
+  const failed = e => { running--; claimed--; throw e; };
   const run = jobs.then(start, start).then(done, failed);
   jobs = run.then(() => {}, () => {});
   return run;
 }
 
 /**
- * True while a full-file transcription holds the server. The live loop checks
- * this and steps aside: both want the same single server, and a transcription of
- * another meeting started mid-recording used to kill the live transcript
- * outright — "whisper-server is not running", over and over, and it never came
- * back.
+ * Run `fn` only if the server is free this instant; otherwise return null
+ * without waiting. The check and the claim are one synchronous step, which is
+ * the whole point — `busy()` was two, and the gap between them is where the
+ * wedged server came from.
+ *
+ * null means "not now, try later". A real inference always resolves an object.
+ */
+async function tryExclusive(fn) {
+  if (claimed > 0) return null;
+  claimed++;
+  running++;
+  try {
+    return await fn();
+  } finally {
+    running--;
+    claimed--;
+  }
+}
+
+/**
+ * True while anything holds the server, queued or running. The live loop reads
+ * it to bail out early and cheaply — but it is an optimisation now, not the
+ * guard. `tryExclusive` is the guard.
  */
 function busy() {
-  return running > 0;
+  return claimed > 0;
 }
 
 /** Which model the running server has loaded, if any. */
@@ -685,7 +723,7 @@ module.exports = {
   modelPath, hasModel,
   TIERS, tierConfig, guessTier, tierFromBenchmark, hasNvidiaGpu, isAppleSilicon,
   CALIBRATION_MODEL, calibrate,
-  start, stop, busy, loaded, transcribeWav, transcribeFile,
+  start, stop, busy, serialize, tryExclusive, loaded, transcribeWav, transcribeFile,
   deduplicate, undoStutter,
   wavFromPcm, openWav, finishWav, repairWav, WAV_HEADER, BYTES_PER_SEC
 };

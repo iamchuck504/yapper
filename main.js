@@ -908,12 +908,15 @@ ipcMain.handle('transcribe', async (_e, folder) => {
   // arriving. Wait for it here rather than fall back to `base` — `small` is
   // what ships precisely because `base` was not good enough on real meeting
   // audio (ARCHITECTURE §8), and the recording is on disk going nowhere.
-  if (!engine.hasModel(tier.finalModel)) {
+  //
+  // Only for a download already in flight. A model missing with nothing
+  // running is a broken install, not a slow one: starting a fresh 490 MB fetch
+  // at the moment someone asked for a transcript would hide that behind a
+  // progress line instead of reporting it. Falling through lets engine.start()
+  // raise "model is missing", which says so plainly.
+  if (!engine.hasModel(tier.finalModel) && provisioning) {
     send('\rFinishing the engine download…');
-    if (!await ensureModel(tier.finalModel)) {
-      throw new Error('The transcription model is still downloading. Your recording is '
-        + 'saved — open this meeting again once the download finishes.');
-    }
+    await ensureModel(tier.finalModel);
   }
 
   let lines;
@@ -1393,13 +1396,15 @@ function ensureEngine() {
 }
 
 /**
- * What transcription waits on. By the time a meeting ends the background
- * download has usually finished; when it has not, this is where the wait
- * happens — with the audio already safe on disk.
+ * What transcription waits on: the download that is *already running*, not a
+ * new one. By the time a meeting ends the background half has usually
+ * finished; when it has not, this is where the wait happens — with the audio
+ * already safe on disk.
  */
 async function ensureModel(name) {
   if (engine.hasModel(name)) return true;
-  await startProvisioning();
+  if (!provisioning) return false;    // nothing in flight; the caller reports it
+  await provisioning;
   return engine.hasModel(name);
 }
 

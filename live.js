@@ -210,9 +210,16 @@ async function pass(s) {
   let words;
   const t0 = Date.now();
   try {
-    const res = await engine.transcribeWav(engine.wavFromPcm(pcm),
-      { language: s.language, prompt: s.prompt });
+    // The claim, not the question. `busy()` above is an early out; between it
+    // and here we awaited a model switch, and a full-file transcription
+    // starting in that gap used to leave two requests in flight and wedge the
+    // server for good. tryExclusive refuses rather than queues: a window
+    // decoded after a 30-second transcription is not live any more.
+    const res = await engine.tryExclusive(() =>
+      engine.transcribeWav(engine.wavFromPcm(pcm),
+        { language: s.language, prompt: s.prompt }));
     if (s.stopped) return;
+    if (res === null) return again();      // the server is taken; skip this pass
     words = [];
     for (const seg of res.segments || []) {
       for (const w of seg.words || []) {
