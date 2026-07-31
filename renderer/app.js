@@ -7,6 +7,14 @@ const viewSearch = $('view-search');
 const btnRecord = $('btn-record');
 const btnStop = $('btn-stop');
 const btnNew = $('btn-new');
+const btnNewLabel = $('btn-new-label');
+
+/** The sidebar button doubles as the recording indicator and the way back. */
+function markRecordingInSidebar(on) {
+  btnNew.classList.toggle('recording', on);
+  btnNew.title = on ? 'Recording — click to go back to the controls' : '';
+  if (!on) btnNewLabel.textContent = 'New meeting';
+}
 const btnRegen = $('btn-regen');
 const btnCopy = $('btn-copy');
 const btnOpenFolder = $('btn-open-folder');
@@ -1046,6 +1054,7 @@ $('ep-stop').addEventListener('click', () => { clearEndedPrompt(); stopAndProces
  */
 async function abortRecording(err) {
   recording = false;
+  markRecordingInSidebar(false);
   try { await stopLivePreview(); } catch { /* it may never have started */ }
   stopPcmTap();
   cleanupCapture();          // also tells main the recording is over
@@ -1174,6 +1183,7 @@ async function startRecording() {
     currentFolder = await window.yapper.recordingStart(recParticipants());
     paused = false;     // the tap reads this on its very first block
     recording = true;
+    markRecordingInSidebar(true);
 
     startPcmTap();      // the single audio source: file and live share it
     startLivePreview();
@@ -1214,6 +1224,7 @@ async function startRecording() {
     timerInterval = setInterval(() => {
       const text = stamp(elapsed());
       timerEl.textContent = text;
+      btnNewLabel.textContent = `Recording — ${text}`;
       window.yapper.bubbleState({ timer: text });
     }, 500);
   } catch (err) {
@@ -1249,6 +1260,7 @@ function cleanupCapture() {
 async function stopAndProcess() {
   if (!recording) return;
   recording = false;                 // no further samples reach the file
+  markRecordingInSidebar(false);
   // If the Screen Recording prompt is up, its reopen button was held back
   // while a meeting was in the air. Nothing is at stake now.
   const relaunch = $('sp-relaunch');

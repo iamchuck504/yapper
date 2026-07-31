@@ -12,9 +12,13 @@
       <span class="brand-name">Yapper<i>/</i></span>
     </div>
 
+    <!-- Also the way back to the recording view. Leaving it reading "New
+         meeting" mid-meeting hid both facts: that a recording was running, and
+         that this was the door back to the controls for it. -->
     <button id="btn-new" class="new-btn">
-      <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-      New meeting
+      <svg class="new-plus" viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <span class="rec-pip"></span>
+      <span id="btn-new-label">New meeting</span>
     </button>
 
     <button id="btn-home" class="nav-btn">
