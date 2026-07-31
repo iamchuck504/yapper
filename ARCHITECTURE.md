@@ -105,14 +105,14 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 2117 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `main.js` | 2219 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
 | `engine.js` | 648 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
 | `llm.js` | 322 | Note providers (§6) behind one `generate()` call |
 | `live.js` | 304 | Live transcription: rolling window, LocalAgreement-2 confirmation |
 | `actions.js` | 253 | Reading action items out of the notes, and folding duplicates together |
-| `provision.js` | 213 | First-run engine download for installed copies (Windows and macOS), and the version comparison behind update notices |
+| `provision.js` | 380 | First-run engine download for installed copies (Windows and macOS): resumable and retried, recording-first in its ordering, plus the version comparison behind update notices |
 | `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
 | `sysaudio.js` | 186 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
 | `meetings.js` | 72 | Which running app counts as a meeting, in both platforms' vocabularies |
@@ -649,11 +649,24 @@ why:
 - **The engine moved out of the app.** An installed copy runs from a read-only
   asar; `engine.setHome()` points bin/ and models/ at
   `%LOCALAPPDATA%\Yapper\engine`, and `provision.js` fills it on first run —
-  the CPU build always (8 MB), the CUDA build when `nvidia-smi` answers
-  (646 MB), the two models (608 MB) — with progress in the status area and
-  recording disabled until it lands. Every download goes to a `.part` first, so
-  a killed download never looks installed. Bundling the engine instead would
-  make the installer 1.4 GB for everyone.
+  the CPU build always (8 MB), the two models (608 MB), then the CUDA build
+  when `nvidia-smi` answers (646 MB) — with progress in the status area.
+  Bundling the engine instead would make the installer 1.4 GB for everyone.
+- **The order is the first impression.** Everything needed to *record* comes
+  first: the server binary and `base`, about 160 MB, after which progress
+  reports `usable: true` and `main.js` opens the app. `small` and the CUDA
+  build arrive behind it while the app already works. The asymmetry is the
+  argument — a meeting not recorded is gone, a transcript can always be made
+  later from audio already on disk. Transcription waits for `small` at the
+  point it actually needs it (`ensureModel`), and the live transcript falls
+  back to `base` in the meantime rather than disappearing.
+- **Downloads resume.** Every file goes to a `.part` first, so a killed
+  download never looks installed — and that `.part` now *survives* the
+  failure, because losing a 490 MB model at 95% and starting over is the most
+  likely way an install fails on home wifi. The next attempt sends
+  `Range: bytes=<what we have>-`, guarded by `If-Range` so a file that changed
+  on the server restarts cleanly instead of splicing two versions together.
+  Three retries with a growing pause sit on top.
 - **`calibration.wav` is asar-unpacked.** This process can read inside the
   asar; the whisper server is a separate process and cannot.
 - **The PDF export writes to temp** with a `<base>` back into `renderer/` —
@@ -678,6 +691,21 @@ branches live in the same files: `provision.js` downloads a self-hosted Metal
 engine from the feed (ggml-org publishes no mac binary — `mac/build-engine.sh`
 compiles and publishes it once per engine version), and the two native helpers
 are compiled alongside the app.
+
+**And a zip, plus `mac/install.sh`.** Without a Developer ID certificate the dmg
+route ends in a Gatekeeper block, and since macOS 15 the right-click → Open
+escape is gone — the user has to find *Open Anyway* in System Settings. The
+block is not macOS judging the app, though: it is `com.apple.quarantine`, which
+the *browser* attaches to a download. `curl` attaches none, so a one-line
+installer that fetches the zip and unpacks it into `/Applications` lands a copy
+that opens normally. It is not a stand-in for signing — Apple vouches for
+nothing either way — so what the script puts in place of a signature is a
+sha512 check against `latest-mac.yml`: enough to catch a corrupt or tampered
+download, not enough to survive a compromised feed, and it says so. `ditto`
+rather than `unzip`, because the Electron framework's `Versions/Current`
+symlink does not survive the latter. `mac/e2e-install.sh` proves all of it
+against a local feed. When the certificate arrives this becomes a footnote and
+notarization takes over.
 
 Three constraints are worth knowing before touching that build, all learned the
 hard way and all documented in `mac/README.md`:

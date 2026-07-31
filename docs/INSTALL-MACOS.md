@@ -17,25 +17,61 @@ Transcription runs on the GPU through Metal. On an M4 Pro a pass takes ~102 ms,
 which is comfortably in the fastest tier — you get a live transcript during the
 meeting.
 
-## 1. Download
+## 1. Install
+
+There are two ways in, and they differ only in how much of §2 you have to read.
+
+**The short way — one command, nothing to click**
+
+```bash
+curl -fsSL https://github.com/iamchuck504/yapper-releases/releases/latest/download/install.sh | bash
+```
+
+It downloads the app, checks it against the checksum published with the
+release, puts it in `/Applications` and opens it. No Gatekeeper detour — see
+§2 for exactly why, because the reason matters.
+
+Piping a script into a shell is a real thing to be careful about. The script
+is short and readable, so read it first if you like:
+
+```bash
+curl -fsSL https://github.com/iamchuck504/yapper-releases/releases/latest/download/install.sh | less
+```
+
+**The ordinary way — the dmg**
 
 **[github.com/iamchuck504/yapper-releases/releases/latest](https://github.com/iamchuck504/yapper-releases/releases/latest)**
 
-Take `Yapper-<version>-arm64.dmg` (~95 MB). Open it and drag Yapper to
-Applications, as usual.
+Take `Yapper-<version>-arm64.dmg` (~95 MB), open it, drag Yapper to
+Applications. Then §2 applies.
 
-## 2. Gatekeeper will block the first open
+## 2. Gatekeeper, and why the two ways differ
 
 This is the awkward part, and it is worth understanding rather than just
 working around.
 
 The app is **signed ad-hoc** — with its own identity, not with an Apple
 Developer certificate. Apple charges $99/year for one, and this build does not
-have it, so Gatekeeper refuses to open it. It is not a judgement about the app;
-it is the absence of a paid signature.
+have it. It is not a judgement about the app; it is the absence of a paid
+signature.
 
-**Since macOS 15, the old right-click → Open trick no longer works** for
-unsigned apps. Two ways through:
+What actually triggers the block is narrower than it looks. macOS is not
+inspecting the app and objecting — it is reacting to `com.apple.quarantine`,
+an attribute your **browser** attaches to anything it downloads. `curl` does
+not attach it, which is the whole of the difference: the installer above lands
+an app with no quarantine flag, so nothing blocks it.
+
+**What that costs.** Apple is not vouching for those bytes either way — no
+certificate means no notarization, whichever route you take. What the
+installer puts in its place is a checksum: it verifies the download against
+the sha512 published in the release manifest and refuses to install on a
+mismatch. That catches a corrupted or tampered download. It does **not**
+protect you if the release feed itself is compromised, since the manifest and
+the app come from the same place. Installing this way means trusting whoever
+publishes that repo.
+
+**If you took the dmg instead**, macOS will block the first open. Since
+macOS 15 the old right-click → Open trick no longer works. Two ways through:
 
 **Option A — System Settings (no Terminal)**
 
@@ -57,11 +93,22 @@ then opens normally, forever.
 ## 3. First launch downloads the engine
 
 The dmg ships the app, not the transcription engine. On first launch Yapper
-downloads whisper.cpp — built for Metal — and its models, about **650 MB**, with
-progress on screen. Recording stays disabled until it lands. This happens once.
+downloads whisper.cpp — built for Metal — and its models, about **650 MB** in
+all, with progress on screen. This happens once.
+
+**You do not wait for all of it.** The first ~160 MB is everything needed to
+record; at that point the app opens and the button works, while the larger
+model keeps downloading behind it. If you finish a meeting before it lands,
+the recording is saved and transcribed as soon as it does — the wait moves to
+a place where nothing is at stake. During that window the live transcript runs
+on the smaller model, so it is a little rougher than it will be later.
 
 Then it plays an 11-second speech sample through the engine and measures your
 machine, which takes a few seconds and is remembered.
+
+**If the download is interrupted** — wifi drops, or you quit — it picks up
+from where it stopped rather than starting the 490 MB model again. Reopening
+Yapper resumes it.
 
 ## 4. The two permissions
 
@@ -137,18 +184,27 @@ which opens the releases page.
 
 **What updating actually involves:**
 
-1. Download the new dmg and drag Yapper into Applications, replacing the old one.
-2. **Do the Gatekeeper step again.** The new download carries its own quarantine
-   flag — either *Open Anyway* in System Settings, or
-   `xattr -dr com.apple.quarantine /Applications/Yapper.app`.
-3. That is it. **The engine and models are not downloaded again** — they live in
-   `~/Library/Application Support/yapper`, outside the app — so an update is the
-   ~95 MB dmg rather than another 650 MB.
-4. **Your meetings are untouched.** They are in `~/Documents/Meetings` and have
-   nothing to do with the app bundle.
-5. Permissions stay granted, since the bundle id does not change.
+Re-run the installer. It quits the running copy, replaces it and reopens it:
 
-When the project has an Apple Developer certificate, steps 1 and 2 disappear and
+```bash
+curl -fsSL https://github.com/iamchuck504/yapper-releases/releases/latest/download/install.sh | bash
+```
+
+Or, the dmg way: download the new one, drag Yapper into Applications, and **do
+the Gatekeeper step again** — the new download carries its own quarantine flag,
+so either *Open Anyway* in System Settings or
+`xattr -dr com.apple.quarantine /Applications/Yapper.app`.
+
+Either way:
+
+- **The engine and models are not downloaded again** — they live in
+  `~/Library/Application Support/yapper`, outside the app — so an update is
+  ~95 MB rather than another 650 MB.
+- **Your meetings are untouched.** They are in `~/Documents/Meetings` and have
+  nothing to do with the app bundle.
+- Permissions stay granted, since the bundle id does not change.
+
+When the project has an Apple Developer certificate, none of this is needed and
 updates install themselves as they do on Windows.
 
 ## Uninstalling
