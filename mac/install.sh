@@ -111,9 +111,18 @@ say "Unpacking…"
 ditto -x -k "$WORK/$ZIP" "$WORK/out" || fail "Could not unpack the download."
 [ -d "$WORK/out/Yapper.app" ] || fail "The zip did not contain Yapper.app."
 
-# Only now is the old copy touched, so a failure above leaves it working.
+# The new copy is written beside the old one first. Deleting and then copying
+# would mean a full-disk or permissions failure at exactly the wrong moment
+# leaves no Yapper at all — the window is narrowed to a rename, which either
+# happens or does not.
+STAGE="$(dirname "$APP")/.Yapper.app.incoming"
+rm -rf "$STAGE"
+ditto "$WORK/out/Yapper.app" "$STAGE" || {
+  rm -rf "$STAGE"
+  fail "Could not write to $(dirname "$APP"). The copy you had is untouched."
+}
 rm -rf "$APP"
-ditto "$WORK/out/Yapper.app" "$APP" || fail "Could not write to /Applications."
+mv "$STAGE" "$APP" || fail "Could not put Yapper in place."
 
 # curl attaches no quarantine, but a previous install from a browser may have
 # left the attribute on the folder; clear it so this copy opens either way.
