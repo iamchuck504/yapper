@@ -1,5 +1,6 @@
 ﻿const { app, BrowserWindow, ipcMain, session, desktopCapturer, shell, dialog, screen,
-  Notification, globalShortcut, safeStorage, powerSaveBlocker } = require('electron');
+  Notification, globalShortcut, safeStorage, powerSaveBlocker,
+  Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -203,8 +204,73 @@ ipcMain.on('bubble-pause', () => {
   if (win && !win.isDestroyed()) win.webContents.send('remote-pause');
 });
 ipcMain.on('bubble-focus-main', () => {
-  if (win && !win.isDestroyed()) { win.show(); win.focus(); }
+  showMainWindow();
 });
+
+function showMainWindow() {
+  if (win && !win.isDestroyed()) { win.show(); win.focus(); }
+  if (process.platform === 'darwin') app.focus({ steal: true });
+}
+
+// ---------- the menu bar ----------
+// The app spends a meeting behind the call it is recording, so what it most
+// needs is a way to start and stop without being found first. On macOS that is
+// the menu bar. It is also the only honest place to answer "is this recording
+// right now?" while the window is buried three spaces away — the floating
+// bubble answers it too, but the bubble can be closed and this cannot.
+//
+// The icon is a template image: black artwork carried by its alpha, which
+// macOS repaints for a light menu bar, a dark one, and the inverted state
+// while the menu is open. Handing it the amber tile would put a coloured
+// square up there that goes muddy in half of those. build/icon-tray.js writes
+// it from the same artwork the app icon comes from.
+
+let tray = null;
+
+function trayMenu() {
+  return Menu.buildFromTemplate([
+    rendererRecording
+      ? {
+        label: 'Stop recording',
+        click: () => { if (win && !win.isDestroyed()) win.webContents.send('remote-stop'); }
+      }
+      : {
+        label: 'New meeting',
+        click: () => {
+          showMainWindow();
+          if (win && !win.isDestroyed()) win.webContents.send('start-recording');
+        }
+      },
+    { type: 'separator' },
+    { label: 'Open Yapper', click: showMainWindow },
+    { type: 'separator' },
+    { label: 'Quit Yapper', click: () => app.quit() }
+  ]);
+}
+
+/** Keep the menu bar honest about what the app is doing. */
+function refreshTray() {
+  if (!tray || tray.isDestroyed()) return;
+  tray.setToolTip(rendererRecording ? 'Yapper — recording' : 'Yapper');
+  // A template image cannot carry colour, so the state is said with a dot
+  // beside it rather than by tinting the mark red and hoping.
+  tray.setTitle(rendererRecording ? ' ●' : '');
+  tray.setContextMenu(trayMenu());
+}
+
+function createTray() {
+  if (process.platform !== 'darwin' || tray) return;
+  const icon = nativeImage.createFromPath(
+    path.join(__dirname, 'build', 'yapper-tray-Template.png'));
+  if (icon.isEmpty()) {
+    // Not worth failing a launch over: everything the menu bar offers is
+    // reachable from the window.
+    return console.log('[tray] icon missing; no menu bar item this run');
+  }
+  icon.setTemplateImage(true);
+  tray = new Tray(icon);
+  refreshTray();
+}
 
 function createWindow() {
   // The last theme is remembered so the window paints its own background colour
@@ -589,6 +655,7 @@ app.whenReady().then(() => {
   screen.on('display-metrics-changed', keepBubbleOnScreen);
   screen.on('display-removed', keepBubbleOnScreen);
   initOpenAtLogin();
+  createTray();
   bootWithSplash();
 });
 app.on('window-all-closed', () => app.quit());
@@ -2220,6 +2287,7 @@ ipcMain.on('autodetect-set', (_e, enabled) => {
 
 ipcMain.on('recording-state', (_e, recording) => {
   rendererRecording = !!recording;
+  refreshTray();               // the menu bar says start or stop, never both
   meetingGoneStreak = 0;
   // once a recording ends, allow the same app to trigger a fresh prompt later
   if (!rendererRecording) meetingCurrent = null;

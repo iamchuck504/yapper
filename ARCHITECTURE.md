@@ -105,7 +105,7 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 2256 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `main.js` | 2401 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
 | `engine.js` | 729 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
@@ -808,6 +808,8 @@ run can never touch a real meeting):
 | `test-home-ui.js` | The day and the week against a real model: only today's meetings and decisions appear, every line opens its source, an empty day offers the last one that had something, the weekly review cites real meetings and does not repeat the task list, and a week with one set of notes is explained rather than written |
 | `test-actions-ui.js` | The action list: filters, the meeting each item came from, and completing one |
 | `test-silence-warning.js` | A microphone delivering exact zeros — the asleep wireless headset — is announced on screen within seconds, the recording keeps going, and the warning clears itself when the device wakes |
+| `test-tray.js` | macOS: the menu bar icon loads, is the height the bar asks for, and is black-on-alpha with no colour left in it — createTray() skips itself silently when the icon will not load, so a malformed template would remove the feature with no error anywhere |
+| `test-sys-meter.js` | macOS: the System meter moves with real audio playing, read from the pixels it drew rather than from the data that reached the renderer, and goes flat again on stop |
 | `test-screen-prompt.js` | macOS: a refused Screen Recording permission raises a prompt with the two steps the user cannot take from inside the app, says the grant applies only after reopening rather than "record again", and a helper dying mid-meeting — a different problem — does not raise it |
 | `test-smoke.js` | Every view, control and export, while listening for renderer errors |
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
