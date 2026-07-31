@@ -189,7 +189,12 @@ async function calibrate({ passes = 3 } = {}) {
   const times = [];
   for (let i = 0; i < passes; i++) {
     const t = Date.now();
-    await transcribeWav(wav, { language: 'en' });
+    // Through the queue like everything else. Calibration used to reach the
+    // server directly, which was harmless while it only ran at startup — but
+    // it reruns whenever the engine's binary flavour changes, and that can now
+    // happen mid-session, when the background half of the first-run download
+    // finishes.
+    await serialize(() => transcribeWav(wav, { language: 'en' }));
     times.push(Date.now() - t);
   }
   await stop();
@@ -330,6 +335,25 @@ async function stop() {
  * Transcribe a WAV buffer (16 kHz mono PCM) through the running server.
  * Returns whisper.cpp's verbose JSON so callers can use segment timestamps.
  */
+// A request that never answers is what this path is most exposed to:
+// whisper-server accepts an /inference and then wedges — sockets open, no CPU,
+// no reply, ever. Twice in one day, and both times the app waited forever with
+// "Transcribing…" on screen, because nothing here had a deadline. The lock
+// that caused those is fixed; a server can still wedge for reasons of its own,
+// and the app must not wait out the heat death of the universe for it.
+//
+// The budget is proportional to the audio — a 10-second live window and a
+// two-minute final window are not the same wait — with a floor for short ones.
+// Four times real time is about a thirteen-fold margin over the slowest
+// machine the tier table admits, so nothing healthy trips it.
+let testDeadlineMs = 0;      // see __setDeadline in the exports
+
+function deadlineFor(wavBuffer) {
+  if (testDeadlineMs) return testDeadlineMs;
+  const seconds = Math.max(0, (wavBuffer.length - WAV_HEADER) / BYTES_PER_SEC);
+  return Math.max(60000, Math.round(seconds * 4000));
+}
+
 function transcribeWav(wavBuffer, { language = 'auto', prompt = '' } = {}) {
   return new Promise((resolve, reject) => {
     if (!proc) return reject(new Error('whisper-server is not running'));
@@ -348,6 +372,11 @@ function transcribeWav(wavBuffer, { language = 'auto', prompt = '' } = {}) {
       + `\r\n--${boundary}--\r\n`);
     const body = Buffer.concat([head, wavBuffer, tail]);
 
+    let timer = null;
+    const done = fn => (...args) => { clearTimeout(timer); fn(...args); };
+    const ok = done(resolve);
+    const fail = done(reject);
+
     const req = http.request({
       host: '127.0.0.1', port, path: '/inference', method: 'POST',
       headers: {
@@ -359,11 +388,22 @@ function transcribeWav(wavBuffer, { language = 'auto', prompt = '' } = {}) {
       res.setEncoding('utf8');
       res.on('data', c => { out += c; });
       res.on('end', () => {
-        try { resolve(JSON.parse(out)); }
-        catch { reject(new Error(`whisper-server replied with: ${out.slice(0, 200)}`)); }
+        try { ok(JSON.parse(out)); }
+        catch { fail(new Error(`whisper-server replied with: ${out.slice(0, 200)}`)); }
       });
     });
-    req.on('error', reject);
+    req.on('error', fail);
+
+    const budget = deadlineFor(wavBuffer);
+    timer = setTimeout(() => {
+      // A server that did not answer this one will not answer the next either,
+      // so it goes. Every caller's recovery path starts a fresh one — the
+      // file transcription retries the window outright, and the live loop
+      // takes its model back on its next pass.
+      req.destroy(new Error(`whisper-server timed out after ${Math.round(budget / 1000)}s`));
+      stop().catch(() => { /* it is already gone, which is the goal */ });
+    }, budget);
+
     req.write(body);
     req.end();
   });
@@ -579,7 +619,7 @@ async function transcribeFileNow(file, { language = 'auto', model, prompt = '', 
         // The server can be killed under us — antivirus, an out-of-memory kill,
         // the user ending the task. One retry with a fresh one costs a few
         // seconds; failing outright costs the whole transcript.
-        if (!/ECONNRESET|ECONNREFUSED|socket hang up|not running/i.test(err.message)) throw err;
+        if (!/ECONNRESET|ECONNREFUSED|socket hang up|not running|timed out/i.test(err.message)) throw err;
         await stop();
         await start(model);
         res = await transcribeWav(wavFromPcm(pcm.subarray(0, read)), { language, prompt })
@@ -734,6 +774,14 @@ module.exports = {
   TIERS, tierConfig, guessTier, tierFromBenchmark, hasNvidiaGpu, isAppleSilicon,
   CALIBRATION_MODEL, calibrate,
   start, stop, busy, serialize, tryExclusive, loaded, transcribeWav, transcribeFile,
-  deduplicate, undoStutter,
-  wavFromPcm, openWav, finishWav, repairWav, WAV_HEADER, BYTES_PER_SEC
+  deduplicate, undoStutter, deadlineFor,
+  wavFromPcm, openWav, finishWav, repairWav, WAV_HEADER, BYTES_PER_SEC,
+
+  // Test seam, and the only one in this file. A wedged server — the failure
+  // that cost a meeting its transcript twice in one day — cannot be summoned
+  // from a real whisper: it has to be played by a socket that accepts a
+  // request and says nothing. This points the client at that socket, and
+  // shortens the deadline so proving a timeout does not take a real minute.
+  __pointAtServer(p, aPort) { proc = p; port = aPort; loadedModel = p ? 'test' : null; },
+  __setDeadline(ms) { testDeadlineMs = ms; }
 };
