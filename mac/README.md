@@ -22,6 +22,34 @@ bash mac/build-app.sh      # every release: dmg + zip, uploaded to the
 all** — the engine on the feed is ours. `provision.js` downloads it on every
 Mac's first run, exactly like the Windows first run.
 
+## Installing without the Gatekeeper detour
+
+`mac/install.sh` rides along as a release asset and installs from the zip:
+
+```bash
+curl -fsSL https://github.com/iamchuck504/yapper-releases/releases/latest/download/install.sh | bash
+```
+
+The point is narrow and worth stating exactly. Gatekeeper's block is triggered
+by `com.apple.quarantine`, which the *browser* attaches to a download — not by
+macOS inspecting the app. `curl` attaches none, so a copy installed this way
+opens with no detour. **This is not a substitute for signing.** Apple vouches
+for nothing either way; what the script substitutes is a sha512 check against
+`latest-mac.yml`, which catches a corrupt or tampered download but not a
+compromised feed. When the Developer ID certificate exists, this stops being
+the recommended path and notarization takes over.
+
+Two things the release flow now depends on, both in `build-app.sh`: the **zip**
+goes up alongside the dmg (the installer has nothing to fetch otherwise), and
+`install.sh` goes up with it so the script and the build it installs are cut
+together.
+
+`bash mac/e2e-install.sh` drives the whole thing against a local feed and a
+throwaway folder — it checks the checksum is really enforced, that a tampered
+zip leaves the existing copy alone, that the framework symlinks survive
+unpacking, and that the installed copy carries no quarantine. It needs
+`dist/` populated by `npx electron-builder --mac` first.
+
 ## Deployment targets are not optional
 
 `swiftc` defaults to the SDK's own version, so a build made on a beta produces

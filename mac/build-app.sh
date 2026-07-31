@@ -50,9 +50,17 @@ echo "== subiendo al release v$VERSION"
 # latest.yml, which the Windows build owns — so a release cut only here would be
 # invisible to every Mac already installed.
 FEED="dist/latest-mac.yml"
+# El zip sube junto al dmg porque es lo que instala mac/install.sh: curl no le
+# pone cuarentena a lo que baja, así que esa vía se salta el bloqueo de
+# Gatekeeper que el dmg sí provoca. Sin el zip en el feed, el instalador de una
+# línea no tiene qué bajar.
+ZIP="dist/Yapper-$VERSION-arm64-mac.zip"
 if gh release view "v$VERSION" --repo "$REPO" >/dev/null 2>&1; then
   gh release upload "v$VERSION" "$DMG" --repo "$REPO" --clobber
+  test -f "$ZIP"  && gh release upload "v$VERSION" "$ZIP"  --repo "$REPO" --clobber
   test -f "$FEED" && gh release upload "v$VERSION" "$FEED" --repo "$REPO" --clobber
+  # el instalador se corta con el build que instala, en vez de vivir en una rama
+  gh release upload "v$VERSION" mac/install.sh --repo "$REPO" --clobber
 else
   echo "no existe el release v$VERSION en $REPO — publica primero desde Windows (npm run release)"
   exit 1
@@ -61,3 +69,4 @@ fi
 echo ""
 echo "listo: https://github.com/$REPO/releases/tag/v$VERSION"
 echo "prueba local: open \"$DMG\""
+echo "instalación limpia: curl -fsSL https://github.com/$REPO/releases/latest/download/install.sh | bash"
