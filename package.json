@@ -1,7 +1,7 @@
 {
   "name": "yapper",
   "version": "0.1.4",
-  "description": "Graba reuniones, las transcribe localmente y genera resúmenes con IA",
+  "description": "Graba reuniones, las transcribe localmente y genera res\u00famenes con IA",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -40,6 +40,8 @@
       "preload.js",
       "renderer/**/*",
       "!renderer/.pdf-export.html",
+      "build/yapper-tray-Template.png",
+      "build/yapper-tray-Template@2x.png",
       "build/calibration.wav",
       "build/mic-probe",
       "build/system-audio"
@@ -85,7 +87,7 @@
         "NSBluetoothAlwaysUsageDescription": null,
         "NSBluetoothPeripheralUsageDescription": null,
         "NSMicrophoneUsageDescription": "Yapper records meetings with your microphone and transcribes them on this Mac.",
-        "NSAudioCaptureUsageDescription": "Yapper records the other side of your calls — the audio your Mac is playing — and transcribes it on this Mac.",
+        "NSAudioCaptureUsageDescription": "Yapper records the other side of your calls \u2014 the audio your Mac is playing \u2014 and transcribes it on this Mac.",
         "NSScreenCaptureUsageDescription": "Only used on macOS 13, where capturing system audio has no other route. No screen content is ever read: the video side is reduced to 2x2 pixels and discarded."
       }
     },
