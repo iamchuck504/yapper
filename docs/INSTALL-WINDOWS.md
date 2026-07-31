@@ -42,8 +42,15 @@ Yapper downloads whisper.cpp and its models, with progress on screen:
 - **~650 MB** on a CPU-only machine
 - **~1.3 GB** if an NVIDIA GPU is detected — the extra is the CUDA build
 
-Recording stays disabled until this finishes. It happens once. There is no
-Python, no ffmpeg, no build tools, and nothing to configure.
+**You do not wait for all of it.** The first ~160 MB is everything needed to
+record; the app opens there and the rest arrives behind it, CUDA build last of
+all — it buys speed, not the ability to record. If a meeting ends before the
+larger model has landed, the recording is saved and transcribed as soon as it
+does. It happens once. There is no Python, no ffmpeg, no build tools, and
+nothing to configure.
+
+**An interrupted download resumes** from where it stopped rather than starting
+the 490 MB model over. Reopening Yapper picks it up.
 
 Right after, the app plays an 11-second speech sample through the engine and
 **measures your machine** to decide whether it can offer a live transcript. That

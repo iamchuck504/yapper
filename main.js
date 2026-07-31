@@ -904,6 +904,18 @@ ipcMain.handle('transcribe', async (_e, folder) => {
     if (win && !win.isDestroyed()) win.webContents.send('transcribe-progress', text);
   };
 
+  // On a machine that recorded during its first hour, `small` may still be
+  // arriving. Wait for it here rather than fall back to `base` — `small` is
+  // what ships precisely because `base` was not good enough on real meeting
+  // audio (ARCHITECTURE §8), and the recording is on disk going nowhere.
+  if (!engine.hasModel(tier.finalModel)) {
+    send('\rFinishing the engine download…');
+    if (!await ensureModel(tier.finalModel)) {
+      throw new Error('The transcription model is still downloading. Your recording is '
+        + 'saved — open this meeting again once the download finishes.');
+    }
+  }
+
   let lines;
   try {
     lines = await engine.transcribeFile(wav, {
@@ -1314,30 +1326,81 @@ ipcMain.handle('check-environment', async () => checkEnvironment());
 // renderer notices (check-environment says no whisper) and asks for this; the
 // download reports through its own channel and the environment is re-checked —
 // which is also what triggers calibration — once the engine lands.
+//
+// It opens on the *usable* milestone, not the complete one. The engine binary
+// and `base` are ~160 MB; `small` is another ~490 MB behind them. Waiting for
+// all of it before the first recording is possible costs a new user ten
+// minutes of nothing, and it buys nothing back: a meeting not recorded is gone
+// for good, while a transcript can always be produced afterwards from audio
+// already on disk. So recording opens early and `small` keeps arriving.
+//
+// Two promises, therefore. `provisioning` is the whole job; `usable` settles
+// the moment recording is possible, and never rejects on its own — if the run
+// dies before that point, the run's own result is the answer.
 
-let provisioning = null;
+let provisioning = null;      // the whole download, or null when none is running
+let usable = null;            // resolves when recording can start
 
+function engineUsable() {
+  return engine.isInstalled() && engine.hasModel(engine.CALIBRATION_MODEL);
+}
+
+function engineComplete() {
+  return engine.isInstalled() && engine.hasModel('base') && engine.hasModel('small');
+}
+
+/** Start the download if it is not already running. Returns the whole job. */
+function startProvisioning() {
+  if (provisioning) return provisioning;
+
+  let reachedUsable;
+  usable = new Promise(res => { reachedUsable = res; });
+
+  provisioning = provision.run({
+    home: engineHome(),
+    gpu: engine.hasNvidiaGpu(),
+    progress: p => {
+      broadcast('engine-setup-progress', p);
+      if (p.usable) {
+        envCache = null;      // recording is possible; re-check and calibrate
+        reachedUsable(true);
+      }
+    }
+  }).then(ok => {
+    provisioning = null;
+    if (ok) envCache = null;            // the next check measures the machine
+    reachedUsable(engineUsable());      // no-op if the milestone already fired
+    return ok;
+  }).catch(err => {
+    provisioning = null;
+    console.log('[provision] failed:', err.message);
+    broadcast('engine-setup-progress', { error: err.message });
+    reachedUsable(engineUsable());
+    return false;
+  });
+
+  return provisioning;
+}
+
+/** What the renderer waits on before it lets anyone press record. */
 function ensureEngine() {
-  if (engine.isInstalled() && engine.hasModel('base') && engine.hasModel('small')) {
+  if (engineUsable()) {
+    if (!engineComplete()) startProvisioning();   // finish `small` in the background
     return Promise.resolve(true);
   }
-  if (!provisioning) {
-    provisioning = provision.run({
-      home: engineHome(),
-      gpu: engine.hasNvidiaGpu(),
-      progress: p => broadcast('engine-setup-progress', p)
-    }).then(ok => {
-      provisioning = null;
-      if (ok) envCache = null;          // the next check measures the machine
-      return ok;
-    }).catch(err => {
-      provisioning = null;
-      console.log('[provision] failed:', err.message);
-      broadcast('engine-setup-progress', { error: err.message });
-      return false;
-    });
-  }
-  return provisioning;
+  const whole = startProvisioning();
+  return Promise.race([usable, whole]);
+}
+
+/**
+ * What transcription waits on. By the time a meeting ends the background
+ * download has usually finished; when it has not, this is where the wait
+ * happens — with the audio already safe on disk.
+ */
+async function ensureModel(name) {
+  if (engine.hasModel(name)) return true;
+  await startProvisioning();
+  return engine.hasModel(name);
 }
 
 function engineHome() {
@@ -1393,7 +1456,10 @@ async function checkMacUpdate() {
   for (const name of ['latest-mac.yml', 'latest.yml']) {
     const tmp = path.join(app.getPath('temp'), `yapper-${name}-${process.pid}`);
     try {
-      await provision.download(`${RELEASES_LATEST}/download/${name}`, tmp);
+      // A manifest is a few hundred bytes: nothing to resume, and a missing
+      // one is an answer rather than something to sit through retries for.
+      await provision.download(`${RELEASES_LATEST}/download/${name}`, tmp,
+        null, { retries: 0, resume: false });
       const m = fs.readFileSync(tmp, 'utf8').match(/^version:\s*(\S+)/m);
       try { fs.unlinkSync(tmp); } catch { /* temp */ }
       if (!m) continue;
@@ -2082,9 +2148,21 @@ ipcMain.handle('live-start', async (_e, participants) => {
   await liveStopInternal();
   const tier = engine.tierConfig(readSettings().tier || engine.guessTier());
   if (!tier.live) return false;
+
+  // The fast tier transcribes live with `small`, which can still be arriving
+  // during the first session. `base` is what the steady tier uses for exactly
+  // this job and it is strictly quicker, so the live transcript degrades to it
+  // rather than disappearing. The final pass still waits for `small`.
+  let liveModel = tier.liveModel;
+  if (!engine.hasModel(liveModel)) {
+    if (!engine.hasModel(engine.CALIBRATION_MODEL)) return false;
+    liveModel = engine.CALIBRATION_MODEL;
+    console.log(`[live] ${tier.liveModel} not downloaded yet; using ${liveModel}`);
+  }
+
   try {
     const ok = await live.start({
-      model: tier.liveModel,
+      model: liveModel,
       cadenceMs: tier.cadenceMs,
       windowSec: tier.windowSec,
       maxHoldSec: tier.maxHoldSec,

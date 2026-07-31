@@ -59,8 +59,10 @@ having no Apple Developer certificate:
 On both, the installer ships the app and not the engine: **first launch
 downloads** whisper.cpp and its models with progress on screen — ~650 MB, or
 ~1.3 GB on Windows when an NVIDIA GPU is detected (the CUDA build). Recording
-stays disabled until that lands. The feed lives on GitHub Releases, so the
-machine needs to reach github.com.
+opens after the first ~160 MB of that, not at the end; the larger model
+arrives behind it and a meeting recorded meanwhile is transcribed as soon as
+it lands. An interrupted download resumes rather than restarting. The feed
+lives on GitHub Releases, so the machine needs to reach github.com.
 
 **For development: from source.**
 
