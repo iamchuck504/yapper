@@ -128,6 +128,14 @@ mv "$STAGE" "$APP" || fail "Could not put Yapper in place."
 # left the attribute on the folder; clear it so this copy opens either way.
 xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 
+# Replacing a bundle in place leaves LaunchServices holding the old record, and
+# an unsigned app changes identity with every build, so the mismatch is
+# guaranteed rather than unlucky. Seen after a few updates in a row: macOS
+# started treating Yapper as an accessory and stopped giving it a Dock icon.
+# Re-registering costs nothing and keeps the app what it says it is.
+LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+[ -x "$LSREG" ] && "$LSREG" -f "$APP" 2>/dev/null || true
+
 INSTALLED="$(defaults read "$APP/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null || echo "$VERSION")"
 say "Yapper $INSTALLED is in /Applications."
 
