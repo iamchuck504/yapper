@@ -93,15 +93,42 @@ function broadcast(channel, payload) {
 }
 
 // Small always-on-top window showing the live transcript while recording.
+// Where the capsule appears when a recording starts. It does not remember
+// being dragged — every meeting puts it back — so the corner it starts in is
+// the one it lives in for most people, and the bottom right is the wrong one
+// as often as it is the right one: it sits on exactly the strip of screen a
+// video call fills with its own controls.
+const BUBBLE_INSET = 24;   // gap from the edge when it first appears
+const BUBBLE_CORNERS = new Set(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+
+/** The corner the capsule is asked to live in, defaulted and validated once. */
+function bubbleCorner() {
+  const c = readSettings().bubbleCorner;
+  return BUBBLE_CORNERS.has(c) ? c : 'bottom-right';
+}
+
+function bubbleOrigin(w, h) {
+  // workArea, not workAreaSize: the latter is width and height with no origin,
+  // so "top" came out as y=24 in screen coordinates — underneath the menu bar
+  // on macOS, and underneath a top-docked taskbar on Windows. The work area
+  // knows where it actually begins.
+  const area = screen.getPrimaryDisplay().workArea;
+  const [vertical, horizontal] = bubbleCorner().split('-');
+  return {
+    x: horizontal === 'left' ? area.x + BUBBLE_INSET : area.x + area.width - w - BUBBLE_INSET,
+    y: vertical === 'top' ? area.y + BUBBLE_INSET : area.y + area.height - h - BUBBLE_INSET
+  };
+}
+
 function createBubble() {
   if (bubble && !bubble.isDestroyed()) { bubble.showInactive(); return; }
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const w = 470, h = 280;   // matches EXPANDED in bubble.js; it resizes itself if collapsed
+  const { x, y } = bubbleOrigin(w, h);
   bubble = new BrowserWindow({
     width: w,
     height: h,
-    x: width - w - 24,
-    y: height - h - 24,
+    x,
+    y,
     frame: false,
     transparent: true,
     resizable: false,
@@ -188,9 +215,15 @@ ipcMain.on('bubble-state', (_e, state) => {
 ipcMain.on('bubble-resize', (_e, size) => {
   if (!bubble || bubble.isDestroyed() || !size) return;
   const b = bubble.getBounds();
+  // A capsule that expands has to grow *away* from its corner, or it walks off
+  // the screen. Anchoring the bottom-right was right while the bottom right
+  // was the only corner it could live in; with a choice, that anchor drags it
+  // out of any of the other three — collapsing from 470×280 to 122×50 moved it
+  // 348 px right and 230 px down, out of the top-left it was asked for.
+  const [vertical, horizontal] = bubbleCorner().split('-');
   bubble.setBounds({
-    x: b.x + b.width - size.w,
-    y: b.y + b.height - size.h,
+    x: horizontal === 'left' ? b.x : b.x + b.width - size.w,
+    y: vertical === 'top' ? b.y : b.y + b.height - size.h,
     width: size.w,
     height: size.h
   });
@@ -351,6 +384,24 @@ function initOpenAtLogin() {
 }
 
 ipcMain.handle('get-open-at-login', async () => readSettings().openAtLogin !== false);
+
+ipcMain.handle('get-bubble-corner', async () => bubbleCorner());
+
+ipcMain.handle('set-bubble-corner', async (_e, corner) => {
+  if (!BUBBLE_CORNERS.has(corner)) return false;
+  const s = readSettings();
+  s.bubbleCorner = corner;
+  writeSettings(s);
+  // Move the one on screen too, so the choice is answered now rather than at
+  // the start of some future meeting.
+  if (bubble && !bubble.isDestroyed()) {
+    const [w, h] = bubble.getSize();
+    const { x, y } = bubbleOrigin(w, h);
+    bubble.setPosition(x, y);
+    keepBubbleOnScreen();
+  }
+  return true;
+});
 
 // ---------- keep the shortcuts showing the current icon ----------
 // A .lnk stores its own copy of the icon path, so changing the app's icon does

@@ -2150,6 +2150,31 @@ btnImport.addEventListener('click', async () => {
   }
 });
 
+// Where the capsule appears each recording. It never remembered being dragged,
+// so the corner it starts in is the corner it lives in — and the bottom right
+// is wrong as often as it is right, since that is where a video call puts its
+// own controls.
+const cornerSeg = $('corner-seg');
+
+async function initBubbleCorner() {
+  const current = await window.yapper.getBubbleCorner().catch(() => 'bottom-right');
+  paintCorner(current);
+}
+
+function paintCorner(corner) {
+  cornerSeg.querySelectorAll('.seg-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.corner === corner));
+}
+
+cornerSeg.addEventListener('click', e => {
+  const btn = e.target.closest('.seg-btn');
+  if (!btn) return;
+  paintCorner(btn.dataset.corner);
+  window.yapper.setBubbleCorner(btn.dataset.corner);
+});
+
+initBubbleCorner();
+
 btnNew.addEventListener('click', () => {
   stopSpeak();
   currentFolder = null;
