@@ -106,7 +106,7 @@ that ship are the files that run.
 | File | Lines | Responsibility |
 |---|---:|---|
 | `main.js` | 2470 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
-| `engine.js` | 729 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
+| `engine.js` | 787 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
 | `llm.js` | 345 | Note providers (§6) behind one `generate()` call |
@@ -809,6 +809,7 @@ run can never touch a real meeting):
 | `test-actions-ui.js` | The action list: filters, the meeting each item came from, and completing one |
 | `test-silence-warning.js` | A microphone delivering exact zeros — the asleep wireless headset — is announced on screen within seconds, the recording keeps going, and the warning clears itself when the device wakes |
 | `test-bubble-corner.js` | Which corner the capsule appears in: measured geometrically against the display's work area rather than by reading the setting back, including that a resize keeps it in the corner instead of walking it out |
+| `test-wedged-server.js` | A server that accepts a request and never answers — played by a socket, since a real wedge cannot be summoned. Asserts the request ends, names the timeout, is recognised by the retry that restarts the engine, and that a real transcript still completes afterwards |
 | `test-recording-signpost.js` | Walking away from a recording and finding the way back: the sidebar button becomes the indicator and stays the route, checked by leaving for Action items mid-recording and returning — which is exactly how the gap was found |
 | `test-tray.js` | macOS: the menu bar icon loads, is the height the bar asks for, and is black-on-alpha with no colour left in it — createTray() skips itself silently when the icon will not load, so a malformed template would remove the feature with no error anywhere |
 | `test-sys-meter.js` | macOS: the System meter moves with real audio playing, read from the pixels it drew rather than from the data that reached the renderer, and goes flat again on stop |
