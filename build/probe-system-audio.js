@@ -58,6 +58,12 @@ app.whenReady().then(async () => {
   say('  · silenciando la salida para que el micrófono no pueda oír nada');
   osa('set volume output muted true');
 
+  // The audio is the evidence, and stopAndProcess() releases it the moment a
+  // transcript exists — so this probe used to pass only when capture had
+  // failed and the transcript came out empty. Working capture deleted its own
+  // proof. Keep the recording for this meeting.
+  await win.webContents.executeJavaScript('window.yapper.setKeepAudio(true)', true);
+
   await $('startRecording()');
   await new Promise(r => setTimeout(r, 2500));      // let the helper come up
 

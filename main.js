@@ -644,7 +644,14 @@ let recBytes = 0;
 const sysAudio = sysaudio.create({
   probePath: helperPath('system-audio'),
   onStatus: info => {
-    if (info.ok) return console.log('[audio] capturing system audio');
+    if (info.ok) {
+      console.log(`[audio] capturing system audio via ${info.via || 'screen'}`);
+      // The display block is taken when the recording starts, before the route
+      // is known, because guessing wrong the other way costs the far side of
+      // the meeting. A tap does not need it, so it is let go here.
+      if (info.via === 'tap') holdDisplayAwake(false);
+      return;
+    }
     console.log(`[audio] system audio unavailable (${info.reason})`,
       info.detail ? `— ${info.detail}` : '');
     // The renderer says "recording the microphone only" if this never turns on.
@@ -660,11 +667,15 @@ function helperPath(name) {
   return app.isPackaged ? p.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`) : p;
 }
 
-// A sleeping display costs macOS its system audio: ScreenCaptureKit lists no
+// A sleeping display costs ScreenCaptureKit its system audio: it lists no
 // displays while the screen is asleep, and a capture filter needs one even when
 // only the audio is wanted. A meeting where you mostly listen is exactly the
 // meeting where the screen dims — so the display is held awake for as long as
-// the recording lasts, and released the moment it ends.
+// that route is in use, and released the moment the recording ends.
+//
+// A Core Audio process tap has no such requirement, so on macOS 14.4+ the
+// screen is left alone. Keeping a laptop's display lit through an hour of
+// listening was a real cost, paid only because of how the audio was reached.
 let displayAwake = null;
 
 function holdDisplayAwake(on) {
@@ -1686,10 +1697,17 @@ ipcMain.handle('open-external', async (_e, url) => {
 // refuses to apply the grant to a process that was already running — so the
 // honest instruction has three steps, two of which the app can just do.
 
-ipcMain.handle('open-screen-settings', async () => {
+// Two doors, two panes. Sending someone to Screen Recording when what they
+// need is System Audio Recording Only is worse than saying nothing: the switch
+// they are looking for is not on that page at all.
+const SETTINGS_PANE = {
+  audio: 'x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture',
+  screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+};
+
+ipcMain.handle('open-screen-settings', async (_e, which) => {
   if (process.platform !== 'darwin') return false;
-  await shell.openExternal(
-    'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+  await shell.openExternal(SETTINGS_PANE[which] || SETTINGS_PANE.screen);
   return true;
 });
 

@@ -149,12 +149,15 @@ unpacked from the asar — nothing can be executed from inside one.
 
 | Helper | Lines | Answers |
 |---|---:|---|
-| `mac/system-audio.swift` | 109 | What the machine is playing, as 16 kHz mono PCM on stdout (ScreenCaptureKit) |
+| `mac/system-audio.swift` | 339 | What the machine is playing, as 16 kHz mono PCM on stdout (a Core Audio process tap, falling back to ScreenCaptureKit) |
 | `mac/mic-probe.swift` | 58 | Which processes hold the microphone right now, as bundle ids (CoreAudio) |
 
 They are deliberately dumb: they answer one question on stdout and exit codes
-carry the only nuance (`2` from the audio helper means the Screen Recording
-permission is missing, which is recoverable). Everything that can be decided in
+carry the only nuance (`2` from the audio helper means a permission is missing,
+which is recoverable — and since there are two routes there are two
+permissions, so it names which one on stderr first: sending someone to Screen
+Recording when the switch they need is under System Audio Recording Only is
+worse than saying nothing). Everything that can be decided in
 JavaScript — buffering, mixing, which bundle id counts as a meeting — stays in
 `sysaudio.js` and `meetings.js`, where it can be tested without a Mac in the
 loop.

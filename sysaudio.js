@@ -39,6 +39,9 @@ function create({ probePath, onStatus = () => { } } = {}) {
   let dropped = 0;
   let state = 'off';        // off | starting | capturing | unavailable
   let stopping = false;     // an expected exit: stop() asked for it
+  // 'audio' or 'screen', named by the helper before it exits with 2 — the
+  // two doors do not lead to the same Settings pane.
+  let missingPermission = null;
   let restarts = 0;         // one silent retry per recording, no more
 
   const push = data => {
@@ -88,13 +91,23 @@ function create({ probePath, onStatus = () => { } } = {}) {
         proc.stdout.on('data', push);
         // The helper says "capturing" on stderr once the stream is live, and
         // exits with 2 when the permission is the thing standing in the way.
+        // Which permission depends on the door it took — a process tap wants
+        // "System Audio Recording Only", ScreenCaptureKit wants Screen
+        // Recording — and it names it before exiting so the app can point at
+        // the pane that actually holds the switch.
         proc.stderr.on('data', d => {
           const text = d.toString();
-          if (/capturing/.test(text)) {
+          const which = /permission:\s*(audio|screen)/.exec(text);
+          if (which) missingPermission = which[1];
+          const live = /capturing:\s*(tap|screen)/.exec(text);
+          if (live || /capturing/.test(text)) {
             state = 'capturing';
-            onStatus({ ok: true });
+            // Which door it came through decides whether the display has to be
+            // held awake: a tap does not care, ScreenCaptureKit cannot capture
+            // without a display at all.
+            onStatus({ ok: true, via: live ? live[1] : 'screen' });
             settle(true);
-          } else if (text.trim()) {
+          } else if (text.trim() && !which) {
             onStatus({ ok: false, reason: 'helper', detail: text.trim().slice(0, 200) });
           }
         });
@@ -108,7 +121,7 @@ function create({ probePath, onStatus = () => { } } = {}) {
           const wasCapturing = state === 'capturing';
           if (state !== 'off') {
             state = code === 2 ? 'unavailable' : (wasCapturing ? 'off' : 'unavailable');
-            if (code === 2) onStatus({ ok: false, reason: 'permission' });
+            if (code === 2) onStatus({ ok: false, reason: 'permission', which: missingPermission });
           }
           settle(false);
 

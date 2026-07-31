@@ -117,7 +117,7 @@ Everything above works on both. These are the differences that remain:
 | Install | signed-by-nobody NSIS installer | unsigned `.dmg`, Gatekeeper asks the first time |
 | Hardware | x64 | Apple Silicon only |
 
-**macOS permissions.** The first recording asks for the microphone, and for **Screen Recording** — the latter is what system audio capture requires, and macOS grants it in System Settings › Privacy & Security › Screen Recording, after which the app must be reopened. No screen content is ever read: the video side of the capture is configured down to 2×2 pixels once a second and thrown away. Without it, Yapper records the microphone alone and says so on screen.
+**macOS permissions.** The first recording asks for the microphone, and for **System Audio Recording Only** — the permission that lets Yapper hear the other side of the call, granted in System Settings › Privacy & Security, after which the app must be reopened. It does exactly what its name says: system audio through a Core Audio process tap, no screen and no other app's data. On macOS 13, where that permission does not exist, Yapper falls back to ScreenCaptureKit and has to ask for **Screen Recording** instead; no screen content is ever read there either, the video side being reduced to 2×2 pixels once a second and thrown away. Without either, Yapper records the microphone alone and says so on screen.
 
 **The screen stays awake while recording on macOS.** Not a preference — a requirement: ScreenCaptureKit offers no displays while the screen is asleep, and with no display there is no capture, so a meeting you mostly listen to would quietly lose the other side halfway through. The block is released as soon as the recording stops.
 
