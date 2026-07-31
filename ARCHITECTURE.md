@@ -21,7 +21,7 @@ npm test                                               # no model or GPU needed
 
 Reading order for a review, shortest useful path first:
 
-1. **`preload.js`** (80 lines) — the entire boundary between the privileged and
+1. **`preload.js`** (105 lines) — the entire boundary between the privileged and
    unprivileged halves. If something is not in here, the UI cannot do it.
 2. **`engine.js` §"tiers"** — the performance contract, with the measurements it
    is based on in the comments.
@@ -105,7 +105,7 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 2219 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `main.js` | 2256 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
 | `engine.js` | 648 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
@@ -118,7 +118,7 @@ that ship are the files that run.
 | `meetings.js` | 72 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
-| `preload.js` | 100 | The only bridge between renderer and main |
+| `preload.js` | 105 | The only bridge between renderer and main |
 
 `keystore.js` and `bounds.js` are separate files for one reason: they are pure
 functions, so they can be tested without booting Electron, and `keystore.js`
@@ -129,9 +129,9 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 2611 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
-| `renderer/style.css` | 1510 | Everything visual, light and dark |
-| `renderer/index.html` | 425 | Main window markup |
+| `renderer/app.js` | 2713 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
+| `renderer/style.css` | 1533 | Everything visual, light and dark |
+| `renderer/index.html` | 440 | Main window markup |
 | `renderer/bubble.html` | 184 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
 | `renderer/bubble.js` | 174 | Its behaviour, including sizing itself to its own contents |
 | `renderer/splash.html` | 104 | Boot screen, including the first-run calibration status |

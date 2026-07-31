@@ -65,6 +65,11 @@ let bigEtag = '"v1"';
 const server = http.createServer((req, res) => {
   hits[req.url] = (hits[req.url] || 0) + 1;
 
+  // Models served the way the real CDN serves them, so resume can be exercised
+  // through provision.run() and not only through download() on its own — the
+  // scenario being reproduced is quitting mid-download and reopening.
+  if (req.url.startsWith('/rmodels/')) req.url = '/ranged/big.bin';
+
   if (req.url === '/ranged/big.bin') {
     const range = /^bytes=(\d+)-/.exec(req.headers.range || '');
     const ifRange = req.headers['if-range'];
@@ -263,6 +268,33 @@ server.listen(0, '127.0.0.1', async () => {
     clearInterval(stopCutting);
     check('reintenta solo y termina el archivo', fs.readFileSync(R3).equals(big));
     check('y avisa de cada reintento en vez de callarlo', notes.length > 0);
+
+    // ---- cerrar la app a media descarga y reabrirla ----
+    // El caso de verdad, extremo a extremo: no download() suelto, sino la
+    // instalación entera cortada y retomada en una segunda corrida, que es lo
+    // que pasa cuando alguien cierra Yapper con la barra a la mitad.
+    const Q = path.join(ROOT, 'homeQ');
+    const qOpts = { ...opts(Q), gpu: false, modelBase: `${base}/rmodels`, retries: 0 };
+    servedBytes = 0;
+    cutAfter = 120;                       // muere dentro del primer modelo
+    let first = null;
+    try { first = await provision.run(qOpts); } catch { first = 'threw'; }
+    check('una instalación cortada no dice que terminó', first === true, false);
+    const partQ = path.join(Q, 'models', 'ggml-base.bin.part');
+    check('y deja el fragmento del modelo en curso', fs.existsSync(partQ));
+    const heldQ = fs.statSync(partQ).size;
+
+    cutAfter = 0;                         // la red vuelve
+    check('reabrir la completa', await provision.run(qOpts));
+    check('los dos modelos quedaron enteros', ['base', 'small'].every(m =>
+      fs.readFileSync(path.join(Q, 'models', `ggml-${m}.bin`)).equals(big)));
+    check('sin fragmentos abandonados',
+      fs.readdirSync(path.join(Q, 'models')).filter(f => f.includes('.part')).length, 0);
+    // Lo exacto, no una cota: 120 B antes del corte, 380 B al reanudar, 500 B
+    // del segundo modelo. Que el total sea el tamaño de los dos archivos
+    // significa que ningún byte viajó dos veces.
+    check('y ningún byte viajó dos veces', servedBytes, big.length * 2);
+    check('el fragmento retenido era el punto de corte', heldQ, 120);
 
     // ---- version comparison, what the mac update notice hangs on ----
     check('0.1.1 es más nueva que 0.1.0', provision.newerVersion('0.1.1', '0.1.0'));

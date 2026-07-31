@@ -2645,7 +2645,18 @@ async function provisionEngine() {
   btnImport.disabled = true;
   let usable = false;
   window.yapper.onEngineSetup(p => {
-    if (!p || p.error) return;         // the invoke result carries the failure
+    if (!p) return;
+    if (p.error) {
+      // Before the app opened, the invoke result carries this and the caller
+      // reports it. After — the background half failing is the only way anyone
+      // hears about it, and leaving "still downloading" on screen for a
+      // download that has stopped is worse than saying nothing.
+      if (usable) {
+        setStatus(statusEl, 'The rest of the transcription engine could not be '
+          + 'downloaded. Recording works; the first transcript will retry it.', true);
+      }
+      return;
+    }
     if (p.usable) usable = true;
     if (/engine ready/i.test(p.label || '')) {
       statusEl.classList.add('hidden'); // everything is down; nothing left to say

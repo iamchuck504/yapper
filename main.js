@@ -1689,9 +1689,11 @@ ipcMain.handle('open-screen-settings', async () => {
 });
 
 ipcMain.handle('relaunch-app', async () => {
-  // The renderer holds the audio and will not offer this mid-recording, but a
-  // relaunch that discards a meeting is bad enough to check for twice.
-  if (liveOn) return false;
+  // The renderer disables the button mid-recording, but a relaunch that throws
+  // a meeting away is bad enough to check for twice. `rendererRecording` and
+  // not `liveOn`: the modest tier records with no live transcript at all, so
+  // `liveOn` is false through a perfectly real meeting.
+  if (rendererRecording) return false;
   app.relaunch();
   app.exit(0);
   return true;
