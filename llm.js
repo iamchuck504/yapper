@@ -13,6 +13,9 @@
 const https = require('https');
 const http = require('http');
 const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const TIMEOUT_MS = 180000;
 
@@ -181,10 +184,31 @@ async function listModels(config) {
 
 // ---------------------------------------------------------------- claude cli
 
+/**
+ * Somewhere harmless for the CLI to work in.
+ *
+ * This is not housekeeping. A GUI app launched from the Dock inherits `/` as
+ * its working directory, a child process inherits that in turn, and the CLI
+ * reads its working directory for context when it starts. Pointed at the root
+ * of the disk it walks into everything macOS protects — and because it is
+ * Yapper's child, macOS attributes every one of those requests to Yapper. The
+ * symptom was a queue of permission dialogs at the end of a recording, asking
+ * for folders, then Photos, then Apple Music, from an app that wanted none of
+ * them and touches none of them.
+ *
+ * An empty directory of our own gives it nothing to find.
+ */
+function cliWorkDir() {
+  const dir = path.join(os.tmpdir(), 'yapper-cli');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch { /* fall back below */ }
+  return fs.existsSync(dir) ? dir : os.tmpdir();
+}
+
 function runClaudeCli(config, { system, input }) {
   return new Promise((resolve, reject) => {
     const bin = config.claudePath || 'claude';
-    const proc = spawn(bin, ['-p', system, '--output-format', 'text'], { env: { ...process.env } });
+    const proc = spawn(bin, ['-p', system, '--output-format', 'text'],
+      { env: { ...process.env }, cwd: cliWorkDir() });
     let out = '', errOut = '';
     proc.stdout.on('data', d => { out += d.toString('utf8'); });
     proc.stderr.on('data', d => { errOut += d.toString('utf8'); });
