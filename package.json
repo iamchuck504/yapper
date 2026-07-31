@@ -1,6 +1,6 @@
 {
   "name": "yapper",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Graba reuniones, las transcribe localmente y genera resúmenes con IA",
   "main": "main.js",
   "scripts": {
