@@ -52,6 +52,18 @@ const tick = ms => new Promise(r => setTimeout(r, ms));
   check('y la transcripción de archivo completa', await file, 'done');
   check('sin solaparse ni una vez', peak, 1);
 
+  // ---- el orden inverso, que es el que se escapó ----
+  // La primera versión sólo probaba cola-primero. En producción pasó al revés:
+  // el bucle en vivo tenía una petición en el aire cuando llegó la
+  // transcripción de archivo, la cola parecía vacía y arrancó encima. Dos
+  // peticiones, servidor trabado, 36 minutos de reunión sin transcribir.
+  peak = 0;
+  const liveFirst = engine.tryExclusive(() => job(80));   // el vivo toma el turno
+  const fileAfter = engine.serialize(() => job(10));      // y el archivo llega detrás
+  check('el vivo tomó el turno', await liveFirst, 'done');
+  check('y el archivo esperó su turno en vez de encimarse', await fileAfter, 'done');
+  check('nunca hubo dos peticiones a la vez', peak, 1);
+
   // ---- varias en cola no se pisan entre ellas ----
   peak = 0;
   const many = await Promise.all([40, 10, 25, 5].map(ms =>

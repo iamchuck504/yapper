@@ -517,12 +517,22 @@ async function tryExclusive(fn) {
   if (claimed > 0) return null;
   claimed++;
   running++;
-  try {
-    return await fn();
-  } finally {
-    running--;
-    claimed--;
-  }
+  const run = (async () => {
+    try {
+      return await fn();
+    } finally {
+      running--;
+      claimed--;
+    }
+  })();
+  // And it joins the queue. Claiming alone was not enough: `serialize` waits
+  // its turn on `jobs`, which knew nothing about a try-claim, so a live pass
+  // already in flight left the queue looking empty and the next full-file
+  // transcription started straight into it. Two requests, and the server
+  // wedges — the same failure this was written to prevent, reached from the
+  // other direction. The first version of the test only drove one order.
+  jobs = jobs.then(() => run, () => run).then(() => { }, () => { });
+  return run;
 }
 
 /**
