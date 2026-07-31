@@ -271,7 +271,7 @@ bullet whose citation does not resolve to a meeting in that week.
 
 ## 5. IPC surface
 
-72 channels, all declared in `preload.js` — that file is the complete list of
+74 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
@@ -291,13 +291,17 @@ the library (`refresh-library`, `list-actions`), retrieval
 (`live-start`, `live-stop`), bubble (`bubble-show`, `bubble-hide`),
 `open-external`.
 
-**Fire-and-forget (10)** — `recording-chunk` (the audio itself), `set-theme`,
-`recording-state`, `autodetect-set`, `mark-shortcut`, and five bubble messages.
+**Fire-and-forget (11)** — `recording-chunk` (the audio itself), `set-theme`,
+`recording-state`, `autodetect-set`, `mark-shortcut`, `sys-gain` (macOS: the
+system meter's slider, since the mixing it controls happens in main), and five
+bubble messages.
 
-**Main → renderer (13)** — `transcribe-progress`, `live-transcript`,
+**Main → renderer (14)** — `transcribe-progress`, `live-transcript`,
 `meeting-detected`, `meeting-ended`, `start-recording`, `mark-moment`,
 `remote-stop`, `remote-pause`, `bubble-state`, `keep-audio-changed`,
-`engine-setup-progress`, `update-ready`, `system-audio-status`.
+`engine-setup-progress`, `update-ready`, `system-audio-status`,
+`system-wave` (macOS: the samples the System meter draws, which never reach
+the renderer any other way).
 
 ---
 

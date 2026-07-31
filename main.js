@@ -746,9 +746,61 @@ ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
   if (buf.length) lastMicChunkAt = Date.now();
   // The microphone sets the pace: take exactly as much system audio as the
   // renderer just sent, so the mix stays aligned with the file's own clock.
-  const sys = sysAudio.take(buf.length);
-  if (sys) buf = sysaudio.mixPcm(buf, sys);
+  let sys = sysAudio.take(buf.length);
+  if (sys) {
+    sys = applySysGain(sys);
+    sendSysWave(sys);
+    buf = sysaudio.mixPcm(buf, sys);
+  }
   writeRecorded(buf);
+});
+
+// ---------- the system meter ----------
+// On Windows the loopback runs through the renderer's own audio graph, so an
+// analyser node draws that meter for free. On macOS the samples never reach
+// the renderer at all — they are captured natively and mixed here — so the
+// meter drew a flat line and its gain slider moved nothing. For the one source
+// a user most wants to confirm is arriving, that is worse than showing no
+// meter: it looks like silence rather than like an unanswered question.
+//
+// So the waveform is sent from here, already shaped the way drawWave reads it:
+// one byte per point, centred on 128.
+
+const SYS_WAVE_POINTS = 128;
+const SYS_WAVE_MS = 50;               // ~20 fps, well past what an eye reads
+let sysGain = 1;
+let lastSysWaveAt = 0;
+
+function applySysGain(pcm) {
+  if (sysGain === 1) return pcm;
+  const out = Buffer.from(pcm);
+  for (let i = 0; i + 1 < out.length; i += 2) {
+    // saturate rather than wrap, for the same reason mixPcm does: wrapping
+    // turns a loud moment into noise
+    const v = Math.round(out.readInt16LE(i) * sysGain);
+    out.writeInt16LE(v > 32767 ? 32767 : v < -32768 ? -32768 : v, i);
+  }
+  return out;
+}
+
+function sendSysWave(pcm) {
+  const now = Date.now();
+  if (now - lastSysWaveAt < SYS_WAVE_MS) return;
+  const samples = pcm.length >> 1;
+  if (!samples) return;
+  lastSysWaveAt = now;
+  const out = Buffer.alloc(SYS_WAVE_POINTS, 128);
+  const stride = Math.max(1, Math.floor(samples / SYS_WAVE_POINTS));
+  for (let i = 0; i < SYS_WAVE_POINTS; i++) {
+    const at = Math.min(samples - 1, i * stride);
+    out[i] = 128 + Math.max(-128, Math.min(127, Math.round(pcm.readInt16LE(at * 2) / 256)));
+  }
+  broadcast('system-wave', out);
+}
+
+ipcMain.on('sys-gain', (_e, g) => {
+  const n = Number(g);
+  sysGain = Number.isFinite(n) && n >= 0 && n <= 4 ? n : 1;
 });
 
 // The microphone setting the pace has a failure mode: no microphone, no pace,
@@ -767,8 +819,10 @@ function startSoloDrain() {
   soloTimer = setInterval(() => {
     if (recFd === null || sysAudio.state !== 'capturing') return;
     if (Date.now() - lastMicChunkAt < SILENT_MIC_MS) return;   // the mic is driving
-    const sys = sysAudio.take(engine.BYTES_PER_SEC / 2);        // half a second
+    let sys = sysAudio.take(engine.BYTES_PER_SEC / 2);          // half a second
     if (sys && sys.some(b => b !== 0)) {
+      sys = applySysGain(sys);
+      sendSysWave(sys);
       if (!soloWrote) {
         soloWrote = true;
         console.log('[audio] the microphone is silent — writing system audio on its own');
