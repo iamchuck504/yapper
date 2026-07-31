@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld('yapper', {
   engineSetup: () => invoke('engine-setup'),
   onEngineSetup: cb => ipcRenderer.on('engine-setup-progress', (_e, p) => cb(p)),
   updateRestart: () => invoke('update-restart'),
+  openReleasesPage: () => invoke('open-releases-page'),
   onUpdateReady: cb => ipcRenderer.on('update-ready', (_e, info) => cb(info)),
   styleSections: () => invoke('style-sections'),
   getLlmSettings: () => invoke('get-llm-settings'),
@@ -95,5 +96,10 @@ contextBridge.exposeInMainWorld('yapper', {
 
   // macOS only: system audio is captured natively, so whether it worked is
   // something only the main process knows.
-  onSystemAudioStatus: cb => ipcRenderer.on('system-audio-status', (_e, info) => cb(info))
+  onSystemAudioStatus: cb => ipcRenderer.on('system-audio-status', (_e, info) => cb(info)),
+
+  // macOS only: the two halves of granting Screen Recording that the user
+  // cannot reach from inside the app.
+  openScreenSettings: () => invoke('open-screen-settings'),
+  relaunchApp: () => invoke('relaunch-app')
 });

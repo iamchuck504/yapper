@@ -535,7 +535,8 @@ body.light #btn-theme .icon-moon { display: block; }
 
 /* ---- Meeting detected prompt ---- */
 /* Floats over whatever view is open, bottom-right, clear of the theme button. */
-#meeting-prompt {
+#meeting-prompt,
+#screen-prompt {
   position: fixed;
   right: 20px;
   bottom: 20px;
@@ -560,9 +561,32 @@ body.light #btn-theme .icon-moon { display: block; }
 }
 .mp-text { flex: 1; display: flex; flex-direction: column; gap: 1px; }
 .mp-text strong { font-size: 13.5px; font-weight: 650; }
-#mp-app { font-size: 12px; color: var(--text-3); }
-#meeting-prompt .btn-primary { height: 32px; padding: 0 14px; }
-#meeting-prompt .btn-ghost { height: 32px; }
+#mp-app, #sp-detail { font-size: 12px; color: var(--text-3); }
+#meeting-prompt .btn-primary,
+#screen-prompt .btn-primary { height: 32px; padding: 0 14px; }
+#meeting-prompt .btn-ghost,
+#screen-prompt .btn-ghost { height: 32px; }
+
+/* Three buttons and a sentence explaining why reopening is not optional do not
+   fit the meeting prompt's single row — laid out as a block, the actions sit
+   under the text instead of squeezing it. */
+#screen-prompt {
+  max-width: 440px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 12px;
+  align-items: start;
+}
+#screen-prompt .mp-dot { margin-top: 6px; }
+#screen-prompt .sp-actions {
+  grid-column: 2;
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+/* Quitting mid-recording would discard the meeting, so the button says why it
+   is unavailable instead of vanishing and leaving a dead end. */
+#screen-prompt .btn-ghost[disabled] { opacity: 0.45; cursor: not-allowed; }
 
 /* ---- Record zone ---- */
 .mic-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }

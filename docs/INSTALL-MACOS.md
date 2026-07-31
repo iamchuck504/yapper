@@ -130,15 +130,21 @@ The reason the permission is called Screen Recording is that macOS provides no
 audio-only permission to ask for — ScreenCaptureKit is the supported way to get
 system audio, and it lives under that switch.
 
-It is **not** a simple yes/no prompt:
+It is **not** a simple yes/no prompt — it takes three steps, and Yapper does
+two of them for you. When it notices the permission is missing it offers:
 
-1. macOS shows a dialog pointing at System Settings.
-2. Open **System Settings → Privacy & Security → Screen Recording**.
-3. Turn Yapper on.
-4. **Quit and reopen Yapper.** macOS does not apply it to a running app.
+- **Open Settings** — jumps straight to Privacy & Security → Screen Recording,
+  where you turn Yapper on
+- **Quit and reopen** — because **macOS does not apply the grant to an app that
+  was already running.** Skipping this is the reason people grant the
+  permission and still record only themselves
 
-If you skip it, Yapper records anyway and says on screen that only your
-microphone is being captured. You can grant it later and record again.
+The reopen button waits if you are mid-recording: quitting then would throw the
+meeting away. Stop first and it becomes available.
+
+If you skip the whole thing, Yapper records anyway and says on screen that only
+your microphone is being captured. You can grant it later; the meetings you
+already recorded keep whatever they captured at the time.
 
 ## 5. Record something
 
@@ -225,9 +231,9 @@ That directory holds settings and the downloaded engine (~600 MB).
 app it cannot verify. Option B above (`xattr -dr`) clears it.
 
 **No sound from the other side of the call.** Screen Recording is not granted,
-or was granted without reopening the app. Check System Settings → Privacy &
-Security → Screen Recording, then quit and reopen Yapper. The app also says so
-on screen while recording.
+or — far more often — was granted without reopening the app. Yapper says so on
+screen while recording and offers both steps as buttons; take the **Quit and
+reopen** one, because that is the half that is easy to skip.
 
 **No notification when a meeting starts.** Meeting auto-detection needs macOS
 14.4 or newer. Below that everything else works and the offer simply never

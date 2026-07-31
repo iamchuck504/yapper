@@ -1475,10 +1475,23 @@ async function checkMacUpdate() {
   }
 }
 
+// The command that updates a Mac in one step. Sending someone to the releases
+// page instead means the dmg, which means the Gatekeeper detour again — every
+// version, forever, for a build that is never going to be signed until there
+// is a certificate. This is the same installer they arrived through.
+const MAC_INSTALL_CMD =
+  `curl -fsSL ${RELEASES_LATEST}/download/install.sh | bash`;
+
 ipcMain.handle('update-restart', async () => {
   if (updater) { updater.quitAndInstall(); return 'installing'; }
-  if (macUpdateVersion) { shell.openExternal(RELEASES_LATEST); return 'browser'; }
+  if (macUpdateVersion) return { kind: 'command', command: MAC_INSTALL_CMD };
   return 'none';
+});
+
+// The page is still one click away for anyone who would rather see it.
+ipcMain.handle('open-releases-page', async () => {
+  await shell.openExternal(RELEASES_LATEST);
+  return true;
 });
 
 ipcMain.handle('save-notes', async (_e, folder, md) => {
@@ -1659,6 +1672,28 @@ const ALLOWED_LINKS = new Set(llm.providerList().map(p => p.keyUrl).filter(Boole
 ipcMain.handle('open-external', async (_e, url) => {
   if (!ALLOWED_LINKS.has(url)) return false;
   await shell.openExternal(url);
+  return true;
+});
+
+// ---------- the Screen Recording dead end ----------
+// Telling someone to grant a permission is only useful if they can act on it.
+// macOS puts this one behind a settings pane the app cannot toggle, and then
+// refuses to apply the grant to a process that was already running — so the
+// honest instruction has three steps, two of which the app can just do.
+
+ipcMain.handle('open-screen-settings', async () => {
+  if (process.platform !== 'darwin') return false;
+  await shell.openExternal(
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+  return true;
+});
+
+ipcMain.handle('relaunch-app', async () => {
+  // The renderer holds the audio and will not offer this mid-recording, but a
+  // relaunch that discards a meeting is bad enough to check for twice.
+  if (liveOn) return false;
+  app.relaunch();
+  app.exit(0);
   return true;
 });
 

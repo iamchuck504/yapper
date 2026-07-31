@@ -351,18 +351,39 @@ const meetingPrompt = $('meeting-prompt');
 // process, so its failures have to be reported from there. The one worth acting
 // on is the permission: without Screen Recording the recording is half a
 // conversation, and the user is the only one who can fix that.
+const screenPrompt = $('screen-prompt');
+
 window.yapper.onSystemAudioStatus(info => {
   if (info.ok) return;
+
+  // The permission case gets buttons rather than a sentence. It used to say
+  // "then record again", which does not work: macOS does not apply the grant
+  // to a process that was already running, so following the instruction to the
+  // letter produced another one-sided recording and no explanation.
+  if (info.reason === 'permission' || info.reason === 'helper') {
+    $('sp-relaunch').disabled = recording;
+    $('sp-relaunch').title = recording
+      ? 'Stop the recording first — reopening now would discard it.'
+      : '';
+    screenPrompt.classList.remove('hidden');
+    return;
+  }
+
   // 'stopped' is the one that arrives mid-recording: capture was working and
   // died. Said differently on purpose — the rest of this meeting is one-sided,
   // and finding that out afterwards is worse than being interrupted now.
   setStatus(statusEl,
     info.reason === 'stopped'
       ? 'System audio stopped partway through — from here only your microphone is being recorded.'
-      : info.reason === 'permission' || info.reason === 'helper'
-        ? 'Only your microphone is being recorded. To capture the other side of the call, allow Yapper under System Settings › Privacy & Security › Screen Recording, then record again.'
-        : 'Only your microphone is being recorded: system audio could not be started.',
+      : 'Only your microphone is being recorded: system audio could not be started.',
     true);
+});
+
+$('sp-settings').addEventListener('click', () => window.yapper.openScreenSettings());
+$('sp-dismiss').addEventListener('click', () => screenPrompt.classList.add('hidden'));
+$('sp-relaunch').addEventListener('click', async () => {
+  if (recording) return;                 // the disabled state already says why
+  await window.yapper.relaunchApp();
 });
 
 window.yapper.onMeetingDetected(info => {
@@ -1192,6 +1213,10 @@ function cleanupCapture() {
 async function stopAndProcess() {
   if (!recording) return;
   recording = false;                 // no further samples reach the file
+  // If the Screen Recording prompt is up, its reopen button was held back
+  // while a meeting was in the air. Nothing is at stake now.
+  const relaunch = $('sp-relaunch');
+  if (relaunch) { relaunch.disabled = false; relaunch.title = ''; }
   await stopLivePreview();
   stopPcmTap();
   cleanupCapture();
@@ -2607,17 +2632,29 @@ refreshReminders();
 })();
 
 /**
- * The one-time engine download, narrated in the status area. Recording stays
- * disabled while it runs — there is nothing to record into yet — and the
- * environment is re-checked afterwards, which is when calibration happens.
+ * The one-time engine download, narrated in the status area.
+ *
+ * It resolves at the *usable* milestone, not the complete one: the engine and
+ * the first model are enough to record, and the larger model keeps arriving
+ * afterwards. So the narration has two halves — a blocking one, and a quieter
+ * one that has to stay visible, because a transcript that waits for a download
+ * nobody mentioned reads as the app being stuck.
  */
 async function provisionEngine() {
   btnRecord.disabled = true;
   btnImport.disabled = true;
+  let usable = false;
   window.yapper.onEngineSetup(p => {
     if (!p || p.error) return;         // the invoke result carries the failure
+    if (p.usable) usable = true;
+    if (/engine ready/i.test(p.label || '')) {
+      statusEl.classList.add('hidden'); // everything is down; nothing left to say
+      return;
+    }
     const pct = p.pct != null ? ` — ${Math.round(p.pct)}%` : '';
-    setStatus(statusEl, `Setting up transcription (one-time download, step ${p.step} of ${p.steps}):\n${p.label}${pct}`);
+    setStatus(statusEl, usable
+      ? `You can record now. Still downloading, so the first transcript may wait for it:\n${p.label}${pct}`
+      : `Setting up transcription (one-time download, step ${p.step} of ${p.steps}):\n${p.label}${pct}`);
   });
   setStatus(statusEl, 'Setting up transcription — a one-time download…');
   let ok = false;
@@ -2625,7 +2662,8 @@ async function provisionEngine() {
   btnRecord.disabled = false;
   btnImport.disabled = false;
   if (!ok) return null;
-  statusEl.classList.add('hidden');
+  // The status is left alone on purpose: the handler above hides it when the
+  // background half finishes, which is usually after this returns.
   return window.yapper.checkEnvironment();
 }
 
@@ -2644,10 +2682,21 @@ window.yapper.onUpdateReady(info => {
     : `Update ${info && info.version ? 'v' + info.version : ''} ready — restart`.replace('  ', ' ');
   b.classList.remove('hidden');
 });
-$('btn-update').addEventListener('click', () => {
+$('btn-update').addEventListener('click', async () => {
   if (recording && !updateIsManual) {
     setStatus(statusEl, 'Recording — the update will install when Yapper closes.');
     return;
   }
-  window.yapper.updateRestart();
+  const res = await window.yapper.updateRestart();
+
+  // macOS cannot apply an unsigned update to itself, so what comes back is the
+  // one command that does it. Putting it on the clipboard beats opening a page
+  // that ends in the dmg and the Gatekeeper detour all over again.
+  if (res && res.kind === 'command') {
+    let copied = false;
+    try { await navigator.clipboard.writeText(res.command); copied = true; } catch { /* below */ }
+    setStatus(statusEl, copied
+      ? `Update copied to your clipboard. Paste it in Terminal:\n\n${res.command}\n\nIt replaces Yapper and reopens it. Your meetings and the engine stay where they are.`
+      : `Run this in Terminal to update:\n\n${res.command}`);
+  }
 });
