@@ -100,6 +100,11 @@ contextBridge.exposeInMainWorld('yapper', {
 
   // macOS only: the two halves of granting Screen Recording that the user
   // cannot reach from inside the app.
+  // macOS only: the system meter is drawn from what the main process mixed,
+  // because these samples never pass through this side.
+  onSystemWave: cb => ipcRenderer.on('system-wave', (_e, bytes) => cb(bytes)),
+  setSysGain: g => ipcRenderer.send('sys-gain', g),
+
   openScreenSettings: which => invoke('open-screen-settings', which),
   relaunchApp: () => invoke('relaunch-app')
 });

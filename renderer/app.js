@@ -39,6 +39,17 @@ let noiseReduction = localStorage.getItem('yapper-noise') || 'standard';
 
 const numOr = (v, d) => (isNaN(parseFloat(v)) ? d : parseFloat(v));
 let gainSys = numOr(localStorage.getItem('yapper-gain-sys'), 1);
+
+// macOS: the system waveform arrives from the main process, since the samples
+// are captured and mixed there. Flat until something is playing, which is the
+// honest resting state rather than a meter that can never move.
+const SYS_WAVE_POINTS = 128;
+const sysWave = new Uint8Array(SYS_WAVE_POINTS).fill(128);
+if (window.yapper.platform === 'darwin') {
+  window.yapper.onSystemWave(bytes => {
+    if (bytes && bytes.length === SYS_WAVE_POINTS) sysWave.set(bytes);
+  });
+}
 let gainMic = numOr(localStorage.getItem('yapper-gain-mic'), 1);
 const micStreams = new Map(); // deviceId|'default' -> MediaStream
 const micNodes = new Map();   // deviceId|'default' -> MediaStreamAudioSourceNode
@@ -714,6 +725,9 @@ gainSysSlider.addEventListener('input', () => {
   gainSysVal.textContent = gainSys.toFixed(1) + '×';
   localStorage.setItem('yapper-gain-sys', gainSys);
   if (sysGainNode) sysGainNode.gain.value = gainSys;
+  // On macOS there is no gain node here to turn: the mixing happens in the
+  // main process, so the slider has to reach it or it moves nothing.
+  if (window.yapper.platform === 'darwin') window.yapper.setSysGain(gainSys);
 });
 
 gainMicSlider.addEventListener('input', () => {
@@ -1095,6 +1109,19 @@ async function startRecording() {
       sysSrc.connect(sysGainNode);
       sysGainNode.connect(dest);
       analysers.sys = makeViz(sysGainNode, vizSys, colSys);
+    } else if (window.yapper.platform === 'darwin') {
+      window.yapper.setSysGain(gainSys);      // the stored preference, applied
+      // No stream to hang an analyser on: on macOS these samples are captured
+      // and mixed in the main process and never reach this side. The meter is
+      // fed from there instead, through something shaped like an analyser so
+      // drawWave and levelOf do not have to know the difference.
+      analysers.sys = {
+        analyser: { getByteTimeDomainData: t => t.set(sysWave) },
+        canvas: vizSys,
+        ctx: vizSys.getContext('2d'),
+        color: colSys,
+        buf: new Uint8Array(SYS_WAVE_POINTS)
+      };
     }
     analysers.mic = makeViz(micBus, vizMic, colMic);
 
@@ -1226,6 +1253,7 @@ async function stopAndProcess() {
   // while a meeting was in the air. Nothing is at stake now.
   const relaunch = $('sp-relaunch');
   if (relaunch) { relaunch.disabled = false; relaunch.title = ''; }
+  sysWave.fill(128);                 // flat, not frozen on the last peak
   await stopLivePreview();
   stopPcmTap();
   cleanupCapture();
