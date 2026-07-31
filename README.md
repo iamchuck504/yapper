@@ -121,7 +121,13 @@ Everything above works on both. These are the differences that remain:
 
 **The screen stays awake while recording on macOS.** Not a preference — a requirement: ScreenCaptureKit offers no displays while the screen is asleep, and with no display there is no capture, so a meeting you mostly listen to would quietly lose the other side halfway through. The block is released as soon as the recording stops.
 
-The updater and the installer both depend on an Apple Developer certificate the project does not have. Until then, macOS updates are a notice rather than an install: the sidebar shows *New version — download* and opens the releases page, and updating means dragging the new dmg over the old app and clearing Gatekeeper again. The engine is not re-downloaded — it lives in `~/Library/Application Support/yapper`, outside the bundle — so an update is the ~95 MB dmg, not another 650 MB, and meetings and granted permissions survive it.
+The updater and the installer both depend on an Apple Developer certificate the project does not have. Until then, macOS updates are a notice rather than an install: the sidebar shows *New version — download*, and installing or updating is one command:
+
+```bash
+curl -fsSL https://github.com/iamchuck504/yapper-releases/releases/latest/download/install.sh | bash
+```
+
+That route exists because the Gatekeeper block comes from the `com.apple.quarantine` attribute a *browser* attaches to a download, not from macOS inspecting the app — `curl` attaches none, so the copy it installs opens normally. Apple still vouches for nothing; `mac/install.sh` verifies the download against the sha512 in the release manifest instead, which catches a corrupted or tampered file but not a compromised feed. The dmg still works and still needs the *Open Anyway* detour; both are in `docs/INSTALL-MACOS.md`. The engine is not re-downloaded — it lives in `~/Library/Application Support/yapper`, outside the bundle — so an update is ~95 MB, not another 650 MB, and meetings and granted permissions survive it.
 
 Note for whoever cuts a release: electron-builder writes one manifest per platform, `latest.yml` from the Windows build and `latest-mac.yml` from the mac one. Both belong on the release, and `mac/build-app.sh` uploads the mac one with the dmg — a release published from only one platform would otherwise tell the other's users that nothing is new.
 
