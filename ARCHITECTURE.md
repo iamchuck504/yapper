@@ -268,18 +268,20 @@ bullet whose citation does not resolve to a meeting in that week.
 
 ## 5. IPC surface
 
-69 channels, all declared in `preload.js` — that file is the complete list of
+72 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
 
-**Request/response (46)** — recording lifecycle (`recording-start`,
+**Request/response (49)** — recording lifecycle (`recording-start`,
 `recording-finish`), import (`import-audio`, `import-read`, `import-open`,
 `import-close`, `legacy-audio`), processing (`transcribe`, `summarize`,
 `regenerate`, `generate-title`, `save-notes`), meetings (`list-meetings`,
 `load-meeting`, `delete-meeting`, `open-folder`), reminders (4), settings
 (`get/set-open-at-login`, `get/set-llm-settings`, `test-llm`, `style-sections`,
-`check-environment`), first-run and updates (`engine-setup`, `update-restart`),
+`check-environment`), first-run and updates (`engine-setup`, `update-restart`,
+`open-releases-page`), the two halves of the macOS Screen Recording grant the
+app can perform on the user's behalf (`open-screen-settings`, `relaunch-app`),
 the library (`refresh-library`, `list-actions`), retrieval
 (`search`, `ask`), the roll-ups (`daily-digest`, `weekly-summary`), exports
 (`save-text-file`, `export-pdf`), live
@@ -799,6 +801,7 @@ run can never touch a real meeting):
 | `test-home-ui.js` | The day and the week against a real model: only today's meetings and decisions appear, every line opens its source, an empty day offers the last one that had something, the weekly review cites real meetings and does not repeat the task list, and a week with one set of notes is explained rather than written |
 | `test-actions-ui.js` | The action list: filters, the meeting each item came from, and completing one |
 | `test-silence-warning.js` | A microphone delivering exact zeros — the asleep wireless headset — is announced on screen within seconds, the recording keeps going, and the warning clears itself when the device wakes |
+| `test-screen-prompt.js` | macOS: a refused Screen Recording permission raises a prompt with the two steps the user cannot take from inside the app, says the grant applies only after reopening rather than "record again", and a helper dying mid-meeting — a different problem — does not raise it |
 | `test-smoke.js` | Every view, control and export, while listening for renderer errors |
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
 | `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |

@@ -59,6 +59,22 @@
     <button id="mp-dismiss" class="btn-ghost">Dismiss</button>
   </div>
 
+  <!-- macOS: granting Screen Recording takes three steps and the app can do
+       two of them. Without the reopen the grant does not apply at all, which
+       is why it is a button and not a sentence. -->
+  <div id="screen-prompt" class="hidden">
+    <span class="mp-dot"></span>
+    <div class="mp-text">
+      <strong>Only your microphone is being recorded</strong>
+      <span id="sp-detail">Allow Yapper under Screen Recording to capture the other side of the call. macOS applies it only after Yapper is reopened.</span>
+    </div>
+    <div class="sp-actions">
+      <button id="sp-settings" class="btn-primary">Open Settings</button>
+      <button id="sp-relaunch" class="btn-ghost">Quit and reopen</button>
+      <button id="sp-dismiss" class="btn-ghost">Dismiss</button>
+    </div>
+  </div>
+
   <main id="content">
 
     <!-- ===== Record view ===== -->
