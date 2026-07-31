@@ -352,6 +352,7 @@ const meetingPrompt = $('meeting-prompt');
 // on is the permission: without Screen Recording the recording is half a
 // conversation, and the user is the only one who can fix that.
 const screenPrompt = $('screen-prompt');
+let missingPane = 'screen';       // which Settings pane the button should open
 
 window.yapper.onSystemAudioStatus(info => {
   if (info.ok) return;
@@ -361,6 +362,14 @@ window.yapper.onSystemAudioStatus(info => {
   // to a process that was already running, so following the instruction to the
   // letter produced another one-sided recording and no explanation.
   if (info.reason === 'permission' || info.reason === 'helper') {
+    // Which permission depends on the route the helper took. Naming the wrong
+    // one sends the user to a page that does not contain the switch.
+    missingPane = info.which === 'audio' ? 'audio' : 'screen';
+    $('sp-detail').textContent = missingPane === 'audio'
+      ? 'Allow Yapper under System Audio Recording Only to capture the other '
+        + 'side of the call. macOS applies it only after Yapper is reopened.'
+      : 'Allow Yapper under Screen Recording to capture the other side of the '
+        + 'call. macOS applies it only after Yapper is reopened.';
     $('sp-relaunch').disabled = recording;
     $('sp-relaunch').title = recording
       ? 'Stop the recording first — reopening now would discard it.'
@@ -379,7 +388,7 @@ window.yapper.onSystemAudioStatus(info => {
     true);
 });
 
-$('sp-settings').addEventListener('click', () => window.yapper.openScreenSettings());
+$('sp-settings').addEventListener('click', () => window.yapper.openScreenSettings(missingPane));
 $('sp-dismiss').addEventListener('click', () => screenPrompt.classList.add('hidden'));
 $('sp-relaunch').addEventListener('click', async () => {
   if (recording) return;                 // the disabled state already says why

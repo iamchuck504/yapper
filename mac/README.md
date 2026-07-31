@@ -59,7 +59,7 @@ are pinned explicitly in `build-app.sh`:
 
 | Helper | Target | Why that version |
 |---|---|---|
-| `system-audio` | `macos13.0` | ScreenCaptureKit audio capture |
+| `system-audio` | `macos13.0` | the ScreenCaptureKit fallback; the process tap it prefers is gated to 14.4 at runtime |
 | `mic-probe` | `macos14.4` | the CoreAudio process list it reads |
 
 `minimumSystemVersion` in package.json says 13.0 to match. Check a build with
@@ -108,21 +108,17 @@ and then dropped as not worth the dependency; see the history of
 
 ## Honest limitations, in order of pain
 
-1. **Screen Recording has to be granted, once.** Both sides of a call are
-   recorded here now, but not through Electron: its loopback is Windows-only,
-   so `mac/system-audio.swift` captures system audio with ScreenCaptureKit and
-   `sysaudio.js` adds those samples to the microphone's in `main.js`. No screen
-   content is ever read — the video side is configured down to 2×2 pixels once
-   a second and discarded — but the permission macOS asks for is still Screen
-   Recording, and there is no audio-only door that avoids it.
+1. **A system-audio permission has to be granted, once.** Both sides of a call
+   are recorded here, but not through Electron: its loopback is Windows-only,
+   so `mac/system-audio.swift` captures system audio and `sysaudio.js` adds
+   those samples to the microphone's in `main.js`. On macOS 14.4+ that is a
+   Core Audio process tap asking for **System Audio Recording Only**; on 13 it
+   falls back to ScreenCaptureKit, which can only be reached through **Screen
+   Recording** — a permission wide enough to read the display, for audio.
 
-   Without it the app records the microphone alone and says so, pointing at
-   System Settings. That is a degraded recording, not a failed one.
-
-   Verified rather than assumed: `build/probe-system-audio.js` mutes the output,
-   plays a clip, records, and checks the file still has signal in it. A muted
-   Mac gives the microphone nothing to hear, so anything left came from the
-   capture path.
+   Without it the app records the microphone alone and says so, offering both
+   Settings and the reopen macOS requires. That is a degraded recording, not a
+   failed one.
 
    **If the helper dies mid-meeting, it restarts itself once** and, if it will
    not come back, says so on screen. Silence there was the dangerous outcome:
@@ -130,15 +126,12 @@ and then dropped as not worth the dependency; see the history of
    recording quietly becomes half a conversation that nobody notices until
    afterwards. Killing the helper during a recording is how that was found.
 
-   **A sleeping display costs you that audio.** ScreenCaptureKit lists no
-   displays while the screen is asleep, and a capture filter needs one even
-   when only the audio is wanted — the helper reports `no displays` and there
-   is nothing to record from. A meeting you mostly listen to is exactly the
-   meeting where the screen dims, so `main.js` holds the display awake with a
-   `powerSaveBlocker` for as long as a recording lasts, and releases it the
-   moment it ends. The helper also waits up to ten seconds for a display to
-   appear rather than giving up, which covers the gap before the blocker takes
-   effect. This was found by the suite failing at 4 a.m. with the lid shut.
+   **A sleeping display only costs the fallback.** ScreenCaptureKit lists no
+   displays while the screen is asleep and a filter needs one even for audio
+   alone, so on that route `main.js` holds the display awake for the length of
+   the recording — found by the suite failing at 4 a.m. with the lid shut. A
+   tap does not care, so the block is released as soon as the helper reports it
+   took that door, and a laptop may dim through a meeting again.
 2. **Unsigned: Gatekeeper blocks the first open.** No Apple Developer account
    ($99/year). The user right-clicks the app → Open → Open, once. Distribution
    without that friction needs the account plus notarization.
@@ -205,3 +198,31 @@ Two things bit during that first run and are worth knowing before the next one.
 committing. And publishing an engine release marks it *latest* on the feed
 unless told otherwise, which points both update checks at a release that has no
 `latest.yml`; `build-engine.sh` now passes `--latest=false`.
+
+## Two doors to the system audio
+
+`system-audio.swift` prefers a **Core Audio process tap** and keeps
+ScreenCaptureKit as a fallback. The difference is not performance, it is what
+the app has to ask the user for:
+
+| Route | Since | Permission |
+|---|---|---|
+| Process tap | macOS 14.4 | **System Audio Recording Only** — what it says |
+| ScreenCaptureKit | macOS 13 | **Screen Recording** — wide enough to read the display |
+
+Asking for Screen Recording in order to hear a call was the worst step in the
+whole install, and the reason the docs needed a paragraph explaining that no
+screen content is read. The tap removes it. It also removes the display block:
+ScreenCaptureKit cannot capture with the screen asleep, a tap does not care, so
+on 14.4+ a laptop is allowed to dim through a meeting.
+
+Verify a build with `build/probe-system-audio.js`, which is the only honest
+test — it mutes the output, plays a clip and checks the recording still has
+signal. Energy alone proves nothing, because the microphone hears the speakers
+too; muting is what makes the capture path the only possible source. Measured
+here: peak 476 through ScreenCaptureKit when it silently failed to start,
+29,677 through the tap.
+
+`YAPPER_FORCE_SCK=1` runs the helper down the fallback path on a machine new
+enough to take the tap — otherwise that branch would only ever execute on
+hardware nobody testing this owns.

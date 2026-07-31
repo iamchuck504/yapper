@@ -81,7 +81,9 @@
       "hardenedRuntime": false,
       "minimumSystemVersion": "13.0",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Yapper records meetings with your microphone and transcribes them on this Mac."
+        "NSMicrophoneUsageDescription": "Yapper records meetings with your microphone and transcribes them on this Mac.",
+        "NSAudioCaptureUsageDescription": "Yapper records the other side of your calls — the audio your Mac is playing — and transcribes it on this Mac.",
+        "NSScreenCaptureUsageDescription": "Only used on macOS 13, where capturing system audio has no other route. No screen content is ever read: the video side is reduced to 2x2 pixels and discarded."
       }
     },
     "nsis": {

@@ -118,23 +118,28 @@ The **first time you record**, macOS asks for two things.
 
 Allow it. Without it nothing is recorded at all.
 
-### Screen Recording — not obvious, and the important one
+### System Audio Recording Only — not obvious, and the important one
 
 This is what lets Yapper capture **what your Mac is playing** — the other side
 of the call. Without it you record only yourself: on speakers your microphone
 picks up some of the other person, and on headphones you lose them completely.
 
-**No screen content is ever read, shown or stored.** The capture is configured
-down to a 2×2 pixel frame once a second and thrown away; only the audio is kept.
-The reason the permission is called Screen Recording is that macOS provides no
-audio-only permission to ask for — ScreenCaptureKit is the supported way to get
-system audio, and it lives under that switch.
+The permission does exactly what its name says. Yapper reads the audio the
+machine is playing, through a Core Audio process tap, and nothing else — no
+screen, no windows, no other app's data.
 
-It is **not** a simple yes/no prompt — it takes three steps, and Yapper does
-two of them for you. When it notices the permission is missing it offers:
+**On macOS 13 this permission does not exist**, and the only route to system
+audio there is ScreenCaptureKit, which lives under **Screen Recording**. Yapper
+falls back to it automatically and asks for that instead. It is a wide
+permission to be asked for audio, which is why it is the fallback and not the
+default: no screen content is ever read, shown or stored — the video side is
+configured down to a 2×2 pixel frame once a second and thrown away.
 
-- **Open Settings** — jumps straight to Privacy & Security → Screen Recording,
-  where you turn Yapper on
+Either way it is **not** a simple yes/no prompt. It takes three steps, and
+Yapper does two of them for you. When it notices the permission is missing it
+offers:
+
+- **Open Settings** — jumps straight to the right pane, where you turn Yapper on
 - **Quit and reopen** — because **macOS does not apply the grant to an app that
   was already running.** Skipping this is the reason people grant the
   permission and still record only themselves
@@ -151,10 +156,12 @@ already recorded keep whatever they captured at the time.
 Press **New meeting**, then record. See [FEATURES.md](FEATURES.md) for what
 everything does.
 
-While recording, **Yapper keeps your screen from sleeping**. That is not a
-preference: ScreenCaptureKit offers nothing to capture while the display is
-asleep, so a meeting you mostly listen to would quietly lose the far side
-halfway through. The block is released the moment you stop.
+**Your screen is left alone.** On macOS 14.4+ system audio comes from a
+process tap, which does not care whether the display is on, so a meeting you
+mostly listen to can dim the screen as usual. On macOS 13, where the capture
+runs through ScreenCaptureKit, the display *is* held awake for the length of
+the recording — that route offers nothing to capture while the screen is
+asleep, and the far side would go missing halfway through.
 
 ## Choosing who writes the notes
 
@@ -230,10 +237,10 @@ That directory holds settings and the downloaded engine (~600 MB).
 **"Yapper is damaged and can't be opened."** macOS says this for a quarantined
 app it cannot verify. Option B above (`xattr -dr`) clears it.
 
-**No sound from the other side of the call.** Screen Recording is not granted,
-or — far more often — was granted without reopening the app. Yapper says so on
-screen while recording and offers both steps as buttons; take the **Quit and
-reopen** one, because that is the half that is easy to skip.
+**No sound from the other side of the call.** The system-audio permission is
+not granted, or — far more often — was granted without reopening the app.
+Yapper says so on screen while recording and offers both steps as buttons; take
+the **Quit and reopen** one, because that is the half that is easy to skip.
 
 **No notification when a meeting starts.** Meeting auto-detection needs macOS
 14.4 or newer. Below that everything else works and the offer simply never

@@ -100,6 +100,6 @@ contextBridge.exposeInMainWorld('yapper', {
 
   // macOS only: the two halves of granting Screen Recording that the user
   // cannot reach from inside the app.
-  openScreenSettings: () => invoke('open-screen-settings'),
+  openScreenSettings: which => invoke('open-screen-settings', which),
   relaunchApp: () => invoke('relaunch-app')
 });
