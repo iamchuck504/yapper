@@ -76,6 +76,27 @@ stop, open the main window. Leave and it shrinks back. The **pin** keeps it open
 It is draggable, follows the light/dark theme, and cannot be dragged off-screen
 or stranded by unplugging a monitor. Toggle: **Floating bubble**.
 
+**Where it appears** is set with **Bubble starts** — any of the four corners.
+It does not remember being dragged, so whatever corner it starts in is the one
+it lives in for the meeting; the default is the bottom left, since the bottom
+right is the strip a video call fills with its own controls. Changing it moves
+the capsule already on screen rather than waiting for the next recording. On a
+MacBook with a notch, the top corners keep clear of it even with the menu bar
+set to hide.
+
+### The menu bar (macOS)
+
+Yapper puts a mark next to the clock: **New meeting** when idle, **Stop
+recording** once one is running, and a dot beside the mark while it is. The
+app spends a meeting behind the call it is recording, and this is the way to
+start or stop one without finding the window first.
+
+### Knowing a recording is running
+
+The sidebar's **New meeting** button becomes **Recording — 12:34** with a pip
+while one is in progress. It is also the way back: open Action items or Search
+mid-meeting and that button returns you to the stop control and the toggles.
+
 ### Meeting auto-detection
 
 Yapper watches which app is holding the microphone — Zoom, Teams, Slack,

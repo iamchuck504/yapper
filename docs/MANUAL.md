@@ -39,22 +39,34 @@ afterwards is 0.1.1.
 newer. Three differences from the Windows path, all of them consequences of
 having no Apple Developer certificate:
 
-- **The first open is blocked.** The build is signed ad-hoc, so Gatekeeper
-  refuses it, and since macOS 15 the old right-click → Open shortcut no longer
-  clears that. Either press *Open Anyway* in System Settings → Privacy &
-  Security after trying once, or run
+- **The first open is blocked — unless it is installed with curl.** The build
+  is signed ad-hoc, so Gatekeeper refuses the dmg, and since macOS 15 the old
+  right-click → Open shortcut no longer clears that. What triggers the block is
+  `com.apple.quarantine`, which a *browser* attaches to a download and curl
+  does not, so the one-line installer sidesteps it entirely:
+  `curl -fsSL .../install.sh | bash`. It verifies the download against the
+  sha512 in the release manifest, which catches a corrupt or tampered file but
+  is not a signature and does not pretend to be. Taking the dmg instead means
+  *Open Anyway* in System Settings → Privacy & Security, or
   `xattr -dr com.apple.quarantine /Applications/Yapper.app`.
 - **Updates notify rather than install themselves** — Squirrel.Mac refuses
-  unsigned updates, so the pill opens the download page. Updating is dragging
-  the new dmg over the old app and clearing Gatekeeper once more; the engine is
-  not re-downloaded, so it costs ~95 MB rather than another 650 MB, and both
-  meetings and granted permissions survive it.
-- **Screen Recording has to be granted** on the first recording, on top of the
-  microphone. It is what captures what the Mac is *playing* — the other side of
-  the call. Nothing of the screen is read or kept: the capture runs at 2×2
-  pixels once a second and is discarded, but macOS offers no audio-only
-  permission to ask for instead. Refused, Yapper records the microphone alone
-  and says so on screen. Meeting auto-detection additionally needs macOS 14.4.
+  unsigned updates, so the pill copies the one-line installer to the clipboard
+  instead of opening a page that ends in the dmg and the Gatekeeper detour all
+  over again. The engine is not re-downloaded, so an update costs ~95 MB rather
+  than another 650 MB, and meetings survive it. Permissions do **not**: an
+  ad-hoc signature changes identity with every build, so macOS treats each
+  update as a new app and asks again. A stable self-signed certificate would
+  fix that; a Developer ID one would fix all of it.
+- **A system-audio permission has to be granted** on the first recording, on
+  top of the microphone. It is what captures what the Mac is *playing* — the
+  other side of the call. On macOS 14.4+ that is **System Audio Recording
+  Only**, through a Core Audio process tap: it does what its name says and
+  reads nothing else. On macOS 13, where that permission does not exist, Yapper
+  falls back to ScreenCaptureKit and has to ask for Screen Recording instead;
+  nothing of the screen is read or kept there either, the capture running at
+  2×2 pixels once a second and discarded. Refused, Yapper records the
+  microphone alone and offers both the Settings pane and the reopen macOS
+  requires. Meeting auto-detection additionally needs macOS 14.4.
 
 On both, the installer ships the app and not the engine: **first launch
 downloads** whisper.cpp and its models with progress on screen — ~650 MB, or
@@ -233,7 +245,7 @@ transcript, notes, title. Useful for phone recordings and voice memos.
 
 | Area | State |
 |---|---|
-| Record system audio + mic | Working on both (Windows loopback; macOS ScreenCaptureKit helper, needs Screen Recording) |
+| Record system audio + mic | Working on both (Windows loopback; macOS process-tap helper, needs System Audio Recording Only — ScreenCaptureKit and Screen Recording only as the macOS 13 fallback) |
 | Live transcript | Working on `fast`/`steady` machines; absent on `modest` |
 | Full transcription | Working, local, ~63× real time on a 4080 |
 | Notes in 7 styles + custom instructions | Working, provider-dependent |
@@ -280,10 +292,11 @@ UI; several are deliberate trade-offs, marked as such.
    from a ScreenCaptureKit helper rather than the Windows-only loopback, and
    detection asks CoreAudio instead of the registry. What is left all traces
    back to one missing thing, an Apple Developer certificate: Gatekeeper asks
-   on first open, updates notify instead of self-installing, and there is no
-   notarised installer to hand someone. System audio also depends on the user
-   granting Screen Recording; refused, it records the microphone alone and says
-   so. Apple Silicon only. No mobile.
+   on first open — though the one-line installer avoids that, since curl
+   attaches no quarantine — updates notify instead of self-installing, and
+   there is no notarised build to hand someone. System audio also depends on
+   the user granting System Audio Recording Only; refused, it records the
+   microphone alone and says so. Apple Silicon only. No mobile.
 3. **No speaker labels.** The transcript does not say who spoke. Typed
    participants improve name spelling only. (The mic and system channels are
    already separate internally, so "You:" vs "Them:" attribution is reachable —
