@@ -1531,3 +1531,22 @@ details summary:hover { color: var(--text); border-color: var(--border-2); }
 }
 
 .hidden { display: none !important; }
+
+/* The sidebar's "New meeting" button is also the way back to a recording in
+   progress — the only way, once another view is open. Reading "New meeting"
+   mid-meeting hid both that a recording was running and that this was the door
+   back to its controls, which is exactly how it was found: in a real meeting,
+   with no visible way to stop. Recording, it becomes the indicator. */
+.new-btn .rec-pip { display: none; }
+.new-btn.recording .new-plus { display: none; }
+.new-btn.recording .rec-pip {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--rec);
+  flex-shrink: 0;
+  animation: blink 1.4s ease-in-out infinite;
+}
+.new-btn.recording {
+  font-variant-numeric: tabular-nums;   /* the clock must not jitter each second */
+}
