@@ -101,10 +101,25 @@ function broadcast(channel, payload) {
 const BUBBLE_INSET = 24;   // gap from the edge when it first appears
 const BUBBLE_CORNERS = new Set(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
 
+// Bottom left by default, and the reasons are the two edges to stay off. The
+// bottom right is where a video call puts its own controls, which is the strip
+// most likely to be covered while it matters. The top is where the notch is on
+// the MacBooks that have one.
+const DEFAULT_CORNER = 'bottom-left';
+
+// The work area already begins below the menu bar, and on a notched Mac the
+// menu bar is tall enough to contain the notch — so a window inside it cannot
+// reach one. Except with the menu bar set to hide automatically: the work area
+// then starts at the very top of the display, and a capsule placed there on a
+// 14" or 16" MacBook is cut in half by the notch. There is no notch API to
+// ask, so the top edge keeps a menu bar's worth of room whether or not one is
+// currently shown.
+const NOTCH_SAFE_TOP = 40;
+
 /** The corner the capsule is asked to live in, defaulted and validated once. */
 function bubbleCorner() {
   const c = readSettings().bubbleCorner;
-  return BUBBLE_CORNERS.has(c) ? c : 'bottom-right';
+  return BUBBLE_CORNERS.has(c) ? c : DEFAULT_CORNER;
 }
 
 function bubbleOrigin(w, h) {
@@ -112,11 +127,14 @@ function bubbleOrigin(w, h) {
   // so "top" came out as y=24 in screen coordinates — underneath the menu bar
   // on macOS, and underneath a top-docked taskbar on Windows. The work area
   // knows where it actually begins.
-  const area = screen.getPrimaryDisplay().workArea;
+  const display = screen.getPrimaryDisplay();
+  const area = display.workArea;
   const [vertical, horizontal] = bubbleCorner().split('-');
   return {
     x: horizontal === 'left' ? area.x + BUBBLE_INSET : area.x + area.width - w - BUBBLE_INSET,
-    y: vertical === 'top' ? area.y + BUBBLE_INSET : area.y + area.height - h - BUBBLE_INSET
+    y: vertical === 'top'
+      ? Math.max(area.y + BUBBLE_INSET, display.bounds.y + NOTCH_SAFE_TOP)
+      : area.y + area.height - h - BUBBLE_INSET
   };
 }
 

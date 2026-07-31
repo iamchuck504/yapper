@@ -30,7 +30,9 @@ const bubbleWindow = () => BrowserWindow.getAllWindows()
 function cornerOf(b, area) {
   const nearLeft = Math.abs(b.x - (area.x + INSET)) <= 2;
   const nearRight = Math.abs((b.x + b.width) - (area.x + area.width - INSET)) <= 2;
-  const nearTop = Math.abs(b.y - (area.y + INSET)) <= 2;
+  // Arriba ya no es exactamente area.y + INSET: en Mac se mantiene por debajo
+  // de la franja del notch aunque la barra de menús esté oculta.
+  const nearTop = b.y >= area.y && b.y <= area.y + INSET + 40;
   const nearBottom = Math.abs((b.y + b.height) - (area.y + area.height - INSET)) <= 2;
   const v = nearTop ? 'top' : nearBottom ? 'bottom' : '?';
   const h = nearLeft ? 'left' : nearRight ? 'right' : '?';
@@ -47,14 +49,14 @@ app.whenReady().then(async () => {
     // which is exactly what the first version of this got wrong.
     const work = screen.getPrimaryDisplay().workArea;
 
-    check('parte en la esquina de siempre',
-      await $('window.yapper.getBubbleCorner()'), 'bottom-right');
+    check('el default está a la izquierda, lejos de los controles de la llamada',
+      await $('window.yapper.getBubbleCorner()'), 'bottom-left');
 
     await $('window.yapper.bubbleShow()');
     await pause(1200);
     const b0 = bubbleWindow();
     check('la burbuja existe', !!b0);
-    check('y nace abajo a la derecha', cornerOf(b0.getBounds(), work), 'bottom-right');
+    check('y nace ahí', cornerOf(b0.getBounds(), work), 'bottom-left');
 
     for (const corner of ['top-left', 'top-right', 'bottom-left', 'bottom-right']) {
       await $(`window.yapper.setBubbleCorner(${JSON.stringify(corner)})`);
@@ -72,6 +74,21 @@ app.whenReady().then(async () => {
     await pause(1200);
     check('y la siguiente grabación la abre donde quedó',
       cornerOf(bubbleWindow().getBounds(), work), 'top-left');
+
+    // El notch. El área útil normalmente empieza bajo la barra de menús, que en
+    // una MacBook con notch es lo bastante alta para contenerlo — pero con la
+    // barra en ocultarse automáticamente empieza en el borde mismo, y ahí una
+    // cápsula arriba queda partida. No hay API para preguntar por el notch, así
+    // que se comprueba que arriba nunca se pegue al borde físico.
+    if (process.platform === 'darwin') {
+      const d = screen.getPrimaryDisplay();
+      await $(`window.yapper.setBubbleCorner('top-left')`);
+      await pause(500);
+      const top = bubbleWindow().getBounds();
+      check('arriba deja sitio para el notch aunque la barra se oculte',
+        top.y - d.bounds.y >= 40);
+      say(`  · barra de menús: ${d.workArea.y - d.bounds.y} px | cápsula en y=${top.y}`);
+    }
 
     check('un valor inventado se rechaza',
       await $(`window.yapper.setBubbleCorner('middle')`), false);
