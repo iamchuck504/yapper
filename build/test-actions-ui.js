@@ -106,6 +106,24 @@ app.whenReady().then(async () => {
     /5 action items pending/.test(summary.text) && /1 high priority/.test(summary.text),
     summary.text);
 
+  // El botón de tema está fijo a la ventana y flota sobre lo que haya debajo.
+  // En una ventana estrecha la columna llega hasta el borde, y esta barra —lo
+  // primero de la vista— quedaba tapada por él: se veía el botón encima del
+  // texto. Se mide con la ventana chica, que es donde ocurre.
+  const wasSize = win.getSize();
+  win.setSize(1000, 760);
+  await new Promise(r => setTimeout(r, 400));
+  const clash = await $(`(() => {
+    const b = document.getElementById('btn-theme').getBoundingClientRect();
+    const a = document.getElementById('action-summary').getBoundingClientRect();
+    const over = !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
+    return { over, gap: Math.round(b.left - a.right) };
+  })()`);
+  check('la barra no queda debajo del botón de tema en una ventana estrecha',
+    !clash.over, `se solapan ${-clash.gap}px`);
+  win.setSize(wasSize[0], wasSize[1]);
+  await new Promise(r => setTimeout(r, 200));
+
   // ---- the view ----
   await click('#btn-reminders');
   const rows = () => $(`[...document.querySelectorAll('#reminders-list .reminder')].map(li => ({
