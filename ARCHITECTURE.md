@@ -5,20 +5,23 @@ and turns the transcript into notes with a language model. Audio never leaves th
 device; only text is sent, and only to the provider the user picked.
 
 This document is for reviewing how it is put together. `README.md` is the
-user-facing guide (in Spanish).
+user-facing guide; `mac/README.md` is the macOS build runbook.
 
 ## Where to start
 
 ```
 git clone <repo> && cd yapper
-powershell -ExecutionPolicy Bypass -File setup.ps1     # engine + models, ~600 MB
+
+powershell -ExecutionPolicy Bypass -File setup.ps1     # Windows: engine + models, ~600 MB
+bash mac/build-app.sh                                  # macOS: helpers, engine, dmg
+
 npm start
 npm test                                               # no model or GPU needed
 ```
 
 Reading order for a review, shortest useful path first:
 
-1. **`preload.js`** (80 lines) — the entire boundary between the privileged and
+1. **`preload.js`** (112 lines) — the entire boundary between the privileged and
    unprivileged halves. If something is not in here, the UI cannot do it.
 2. **`engine.js` §"tiers"** — the performance contract, with the measurements it
    is based on in the comments.
@@ -29,9 +32,12 @@ Reading order for a review, shortest useful path first:
 ```
 yapper/
 ├── main.js  engine.js  live.js  llm.js  keystore.js  bounds.js  preload.js
+├── sysaudio.js          macOS system audio: helper lifecycle, buffer, mixing
+├── meetings.js          which running app counts as a meeting, per platform
 ├── renderer/            all three windows, plus fonts and the audio worklet
 ├── build/               tests, icon pipeline, and the calibration sample
-├── setup.ps1            provisioning: engine, models, Electron, shortcut
+├── mac/                 the two Swift helpers and the macOS build scripts
+├── setup.ps1            Windows provisioning: engine, models, Electron, shortcut
 ├── bin/    models/      downloaded, gitignored
 ├── README.md            user guide
 └── ARCHITECTURE.md      this file
@@ -82,7 +88,11 @@ These shaped most of the decisions below, so they are worth stating first.
   preload bridge.
 - **whisper-server is a long-lived child**, not a per-request spawn: the live
   transcript re-decodes a rolling window about once a second, and loading the
-  model each time would cost more than the inference.
+  model each time would cost more than the inference. Being a child, it
+  outlives a parent that is *killed* rather than closed, holding its model
+  resident — so `engine.js` sweeps for abandoned servers once per run, before
+  starting its first one. Measured at 802 MB across four of them after an
+  afternoon of crash testing.
 
 ---
 
@@ -95,18 +105,20 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 1954 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
-| `engine.js` | 648 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
+| `main.js` | 2766 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `engine.js` | 988 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
-| `llm.js` | 322 | Note providers (§6) behind one `generate()` call |
-| `live.js` | 304 | Live transcription: rolling window, LocalAgreement-2 confirmation |
+| `llm.js` | 367 | Note providers (§6) behind one `generate()` call |
+| `live.js` | 310 | Live transcription: rolling window, LocalAgreement-2 confirmation |
 | `actions.js` | 253 | Reading action items out of the notes, and folding duplicates together |
-| `provision.js` | 213 | First-run engine download for installed copies (Windows and macOS), and the version comparison behind update notices |
+| `provision.js` | 380 | First-run engine download for installed copies (Windows and macOS): resumable and retried, recording-first in its ordering, plus the version comparison behind update notices |
 | `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
+| `sysaudio.js` | 234 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
+| `meetings.js` | 72 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
-| `preload.js` | 91 | The only bridge between renderer and main |
+| `preload.js` | 112 | The only bridge between renderer and main |
 
 `keystore.js` and `bounds.js` are separate files for one reason: they are pure
 functions, so they can be tested without booting Electron, and `keystore.js`
@@ -117,17 +129,43 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 2611 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
-| `renderer/style.css` | 1510 | Everything visual, light and dark |
-| `renderer/index.html` | 425 | Main window markup |
+| `renderer/app.js` | 2964 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
+| `renderer/style.css` | 1661 | Everything visual, light and dark |
+| `renderer/index.html` | 503 | Main window markup |
 | `renderer/bubble.html` | 184 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
 | `renderer/bubble.js` | 174 | Its behaviour, including sizing itself to its own contents |
-| `renderer/splash.html` | 104 | Boot screen, including the first-run calibration status |
+| `renderer/splash.html` | 116 | Boot screen, including the first-run calibration status; follows the theme |
 | `renderer/pcm-worklet.js` | 33 | The audio-thread tap that produces PCM |
 
 `app.js` is the largest file and the obvious candidate for splitting. It is
 organised in labelled sections (capture, live preview, recording, meeting view,
 exports, reminders, settings) but it is one module.
+
+### The two native helpers (macOS)
+
+Two facts Windows reads straight out of the OS have no JavaScript equivalent on
+macOS, so each is a small Swift binary compiled by `mac/build-app.sh` and
+unpacked from the asar — nothing can be executed from inside one.
+
+| Helper | Lines | Answers |
+|---|---:|---|
+| `mac/system-audio.swift` | 339 | What the machine is playing, as 16 kHz mono PCM on stdout (a Core Audio process tap, falling back to ScreenCaptureKit) |
+| `mac/mic-probe.swift` | 58 | Which processes hold the microphone right now, as bundle ids (CoreAudio) |
+
+They are deliberately dumb: they answer one question on stdout and exit codes
+carry the only nuance (`2` from the audio helper means a permission is missing,
+which is recoverable — and since there are two routes there are two
+permissions, so it names which one on stderr first: sending someone to Screen
+Recording when the switch they need is under System Audio Recording Only is
+worse than saying nothing). Everything that can be decided in
+JavaScript — buffering, mixing, which bundle id counts as a meeting — stays in
+`sysaudio.js` and `meetings.js`, where it can be tested without a Mac in the
+loop.
+
+Neither is required. Without the audio helper the app records the microphone
+alone and says so; without the mic probe, auto-detection stays off. That is the
+same shape as the CUDA build on Windows: better when present, never fatal when
+absent.
 
 ---
 
@@ -233,31 +271,38 @@ bullet whose citation does not resolve to a meeting in that week.
 
 ## 5. IPC surface
 
-68 channels, all declared in `preload.js` — that file is the complete list of
+77 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
 
-**Request/response (46)** — recording lifecycle (`recording-start`,
+**Request/response (51)** — recording lifecycle (`recording-start`,
 `recording-finish`), import (`import-audio`, `import-read`, `import-open`,
 `import-close`, `legacy-audio`), processing (`transcribe`, `summarize`,
 `regenerate`, `generate-title`, `save-notes`), meetings (`list-meetings`,
 `load-meeting`, `delete-meeting`, `open-folder`), reminders (4), settings
-(`get/set-open-at-login`, `get/set-llm-settings`, `test-llm`, `style-sections`,
-`check-environment`), first-run and updates (`engine-setup`, `update-restart`),
+(`get/set-open-at-login`, `get/set-bubble-corner`, `get/set-llm-settings`, `test-llm`, `style-sections`,
+`check-environment`), first-run and updates (`engine-setup`, `update-restart`,
+`open-releases-page`), the two halves of the macOS Screen Recording grant the
+app can perform on the user's behalf (`open-screen-settings`, `relaunch-app`),
 the library (`refresh-library`, `list-actions`), retrieval
 (`search`, `ask`), the roll-ups (`daily-digest`, `weekly-summary`), exports
 (`save-text-file`, `export-pdf`), live
 (`live-start`, `live-stop`), bubble (`bubble-show`, `bubble-hide`),
 `open-external`.
 
-**Fire-and-forget (10)** — `recording-chunk` (the audio itself), `set-theme`,
-`recording-state`, `autodetect-set`, `mark-shortcut`, and five bubble messages.
+**Fire-and-forget (12)** — `recording-chunk` (the audio itself), `set-theme`,
+`get-theme` (the one synchronous one: the theme has to be right on the first
+frame, so there is no round trip to wait for), `recording-state`,
+`autodetect-set`, `mark-shortcut`, `sys-gain` (macOS: the system meter's slider,
+since the mixing it controls happens in main), and five bubble messages.
 
-**Main → renderer (12)** — `transcribe-progress`, `live-transcript`,
+**Main → renderer (14)** — `transcribe-progress`, `live-transcript`,
 `meeting-detected`, `meeting-ended`, `start-recording`, `mark-moment`,
 `remote-stop`, `remote-pause`, `bubble-state`, `keep-audio-changed`,
-`engine-setup-progress`, `update-ready`.
+`engine-setup-progress`, `update-ready`, `system-audio-status`,
+`system-wave` (macOS: the samples the System meter draws, which never reach
+the renderer any other way).
 
 ---
 
@@ -614,11 +659,24 @@ why:
 - **The engine moved out of the app.** An installed copy runs from a read-only
   asar; `engine.setHome()` points bin/ and models/ at
   `%LOCALAPPDATA%\Yapper\engine`, and `provision.js` fills it on first run —
-  the CPU build always (8 MB), the CUDA build when `nvidia-smi` answers
-  (646 MB), the two models (608 MB) — with progress in the status area and
-  recording disabled until it lands. Every download goes to a `.part` first, so
-  a killed download never looks installed. Bundling the engine instead would
-  make the installer 1.4 GB for everyone.
+  the CPU build always (8 MB), the two models (608 MB), then the CUDA build
+  when `nvidia-smi` answers (646 MB) — with progress in the status area.
+  Bundling the engine instead would make the installer 1.4 GB for everyone.
+- **The order is the first impression.** Everything needed to *record* comes
+  first: the server binary and `base`, about 160 MB, after which progress
+  reports `usable: true` and `main.js` opens the app. `small` and the CUDA
+  build arrive behind it while the app already works. The asymmetry is the
+  argument — a meeting not recorded is gone, a transcript can always be made
+  later from audio already on disk. Transcription waits for `small` at the
+  point it actually needs it (`ensureModel`), and the live transcript falls
+  back to `base` in the meantime rather than disappearing.
+- **Downloads resume.** Every file goes to a `.part` first, so a killed
+  download never looks installed — and that `.part` now *survives* the
+  failure, because losing a 490 MB model at 95% and starting over is the most
+  likely way an install fails on home wifi. The next attempt sends
+  `Range: bytes=<what we have>-`, guarded by `If-Range` so a file that changed
+  on the server restarts cleanly instead of splicing two versions together.
+  Three retries with a growing pause sit on top.
 - **`calibration.wav` is asar-unpacked.** This process can read inside the
   asar; the whisper server is a separate process and cannot.
 - **The PDF export writes to temp** with a `<base>` back into `renderer/` —
@@ -638,16 +696,54 @@ why:
   machine without symlink privileges that extraction fails on electron-builder
   25 and works on 26, which is why the pin is `^26`.
 
-**macOS** is code-ready and build-scripted, but has not yet run on a Mac. The
-platform branches live in the same files: `provision.js` downloads a
-self-hosted Metal engine from the feed (ggml-org publishes no mac binary —
-`mac/build-engine.sh` compiles and publishes it once per engine version),
-`mac/build-app.sh` produces the dmg, and updates on mac only *notify* (the
-pill opens the download page) because Squirrel.Mac refuses unsigned updates.
-The honest limitations — microphone-only capture (Electron's loopback is
-Windows-only), Gatekeeper's right-click-open on an unsigned app, no meeting
-auto-detection — are laid out in `mac/README.md`, which is also the runbook
-for the one-time session on Apple hardware.
+**macOS** ships a dmg built by `mac/build-app.sh` on Apple Silicon. The platform
+branches live in the same files: `provision.js` downloads a self-hosted Metal
+engine from the feed (ggml-org publishes no mac binary — `mac/build-engine.sh`
+compiles and publishes it once per engine version), and the two native helpers
+are compiled alongside the app.
+
+**And a zip, plus `mac/install.sh`.** Without a Developer ID certificate the dmg
+route ends in a Gatekeeper block, and since macOS 15 the right-click → Open
+escape is gone — the user has to find *Open Anyway* in System Settings. The
+block is not macOS judging the app, though: it is `com.apple.quarantine`, which
+the *browser* attaches to a download. `curl` attaches none, so a one-line
+installer that fetches the zip and unpacks it into `/Applications` lands a copy
+that opens normally. It is not a stand-in for signing — Apple vouches for
+nothing either way — so what the script puts in place of a signature is a
+sha512 check against `latest-mac.yml`: enough to catch a corrupt or tampered
+download, not enough to survive a compromised feed, and it says so. `ditto`
+rather than `unzip`, because the Electron framework's `Versions/Current`
+symlink does not survive the latter. `mac/e2e-install.sh` proves all of it
+against a local feed. When the certificate arrives this becomes a footnote and
+notarization takes over.
+
+Three constraints are worth knowing before touching that build, all learned the
+hard way and all documented in `mac/README.md`:
+
+- **The signature identity is not cosmetic.** electron-builder leaves Electron's
+  own ad-hoc signature unless told otherwise, so the bundle claimed
+  `com.yapper.meetingnotes` while its signature said `Electron`. macOS keys
+  notification authorisation on the signature, so the app was never registered
+  and never got to ask — notifications simply did not exist, silently.
+  `identity: "-"` fixes it; `hardenedRuntime` is off beside it, since without a
+  certificate it buys nothing and would demand a microphone entitlement the
+  defaults omit.
+- **Deployment targets must be pinned.** `swiftc` defaults to the SDK's version,
+  so building on a beta produces helpers that run on that beta and nowhere else,
+  while the Electron app opens fine — an install that looks healthy and quietly
+  has neither system audio nor meeting detection.
+- **Updates only notify.** Squirrel.Mac refuses unsigned updates, so the pill
+  opens the download page instead of promising a restart it cannot deliver. The
+  check reads `latest-mac.yml` and falls back to `latest.yml`: electron-builder
+  writes one manifest per platform, so a release cut on a Mac leaves the Windows
+  manifest at its old version, and reading only that one announces nothing.
+  `mac/build-app.sh` uploads the mac manifest with the dmg — it used to stay in
+  `dist/`, which is why the feed had never carried one.
+
+Gatekeeper still rejects the ad-hoc signature on someone else's machine, and
+since macOS 15 right-click → Open no longer clears it. That, and self-installing
+updates, and notarisation, are all the same missing item: an Apple Developer
+certificate.
 
 ---
 
@@ -693,6 +789,9 @@ three groups.
 | `test-meetings.js` | The delete path guard |
 | `test-section-coverage.js` | Every note style has a button, every section has a colour rule |
 | `test-ipc-wiring.js` | Every bridge channel has a counterpart |
+| `test-meeting-detect.js` | Which running app counts as a meeting, in both vocabularies — including the helper-process bundle ids Electron apps actually report, which is what the first macOS build got wrong |
+| `test-sysaudio.js` | Mixing system audio into the microphone: saturating instead of wrapping, the bounded buffer, and a helper that is absent leaving the microphone untouched rather than writing silence over it |
+| `test-platform-parity.js` | The Windows assumptions that mean something else on macOS — asking for screen capture to record, registering a login item by executable path, and telling a Mac user to run a PowerShell script |
 
 **Driving the real app** (Electron, a throwaway `Documents` and `userData` so a
 run can never touch a real meeting):
@@ -710,10 +809,22 @@ run can never touch a real meeting):
 | `test-home-ui.js` | The day and the week against a real model: only today's meetings and decisions appear, every line opens its source, an empty day offers the last one that had something, the weekly review cites real meetings and does not repeat the task list, and a week with one set of notes is explained rather than written |
 | `test-actions-ui.js` | The action list: filters, the meeting each item came from, and completing one |
 | `test-silence-warning.js` | A microphone delivering exact zeros — the asleep wireless headset — is announced on screen within seconds, the recording keeps going, and the warning clears itself when the device wakes |
+| `test-bubble-corner.js` | Which corner the capsule appears in: measured geometrically against the display's work area rather than by reading the setting back, including that a resize keeps it in the corner instead of walking it out |
+| `test-app-menu.js` | macOS: the menu bar is this app's rather than Electron's default — the two actions that matter are in File and say which is available right now, Edit carries the editing roles the text fields need, and Reload and the developer tools ship only to unpackaged builds |
+| `test-permissions-early.js` | macOS: the permissions are asked at launch rather than mid-meeting — the microphone through its API, system audio by briefly creating a tap, since that is the only thing that triggers it. Pins that the probe ends (a helper left running holds a tap on everything the machine plays) and that it happens once |
+| `test-audio-orphans.js` | The system-audio helper left behind by a run that died: it holds a tap on everything the machine plays and takes the microphone with it. Its own file because the sweep is once-per-process by design |
+| `test-progressive.js` | Transcribing while the meeting runs. Asserts the result is **identical** to a single pass at the end, byte for byte — the head start is only worth having if it changes nothing but the wait — and that it never takes the last window, which is the one the segment-dropping depends on |
+| `test-wedged-server.js` | A server that accepts a request and never answers — played by a socket, since a real wedge cannot be summoned. Asserts the request ends, names the timeout, is recognised by the retry that restarts the engine, and that a real transcript still completes afterwards |
+| `test-recording-signpost.js` | Walking away from a recording and finding the way back: the sidebar button becomes the indicator and stays the route, checked by leaving for Action items mid-recording and returning — which is exactly how the gap was found |
+| `test-tray.js` | macOS: the menu bar icon loads, is the height the bar asks for, and is black-on-alpha with no colour left in it — createTray() skips itself silently when the icon will not load, so a malformed template would remove the feature with no error anywhere |
+| `test-sys-meter.js` | macOS: the System meter moves with real audio playing, read from the pixels it drew rather than from the data that reached the renderer, and goes flat again on stop |
+| `test-screen-prompt.js` | macOS: a refused Screen Recording permission raises a prompt with the two steps the user cannot take from inside the app, says the grant applies only after reopening rather than "record again", and a helper dying mid-meeting — a different problem — does not raise it |
+| `test-theme.js` | Auto, Light and Dark: what a new install opens on, that the preference is stored as the word chosen rather than the colour it resolved to, that Auto follows the system changing under a running app, and that the corner button commits to a side instead of flipping Auto |
 | `test-smoke.js` | Every view, control and export, while listening for renderer errors |
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
 | `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |
 | `test-bubble-fit.js`, `test-splash-mark.js`, `icon-verify.js` | The overlay in all three states — capsule, hover-open, pinned — fits its contents, opens and closes on the hover messages, keeps the pin across a reload, migrates the old expanded preference, and its bars track the level they are sent; the splash mark loads under CSP; the icon's corners, halo and every `.ico` size |
+| `probe-system-audio.js` | macOS: mutes the output, plays a clip, records, and checks the file still has signal. Energy alone would prove nothing — the microphone hears the speakers too — so muting is what makes the capture path the only possible source |
 | `probe-empty.js` | Not an assertion — it boots against an empty profile and prints what every view says, so a first run can be read instead of guessed at. It is how the weekly panel's wall of zeros and its dead "write it again" button were found |
 | `probe-notify.js` | Shows one real meeting-detected toast and reports what the OS did with it. `WITH_SHORTCUT=1` adds a Start Menu shortcut first, to test whether the AppUserModelID needs one — on Windows 11 it does not; the toast displays either way |
 | `probe-wave.js`, `probe-wave-real.js`, `probe-wave-user.js` | Three rungs for diagnosing dead waveforms: the real `startRecording()` with synthetic streams, with the real loopback and default microphone, and with the user's actual saved profile. Each reports context state, track counts, which analysers exist, and whether the drawn pixels move |
@@ -742,10 +853,18 @@ the doc cannot quietly drift away from the code.
 
 ## 14. Known gaps
 
-- The installer is not code-signed — SmartScreen warns on first install (§11).
-- macOS: no engine binary, and system audio plus auto-detection are
-  Windows-only.
+- Neither build is code-signed by an authority — SmartScreen warns on first
+  install on Windows (§11), Gatekeeper asks on first open on macOS. The macOS
+  build is ad-hoc signed under its own bundle id, which is not a trust
+  statement but is what makes the OS deliver its notifications at all.
+- macOS updates notify instead of installing themselves: Squirrel.Mac refuses
+  unsigned updates. Same certificate, same gap.
+- macOS system audio depends on the user granting Screen Recording. Refused,
+  the recording is the microphone alone — degraded, and said out loud, but not
+  what was asked for.
+- Apple Silicon only. An Intel or universal build needs a second engine compile
+  and doubles the artifact size.
 - No speaker diarisation. Attendees are typed by hand; they bias name spelling
   and help attribution, but the app does not know who said what.
 - No playback from the timestamps in the notes.
-- `renderer/app.js` is 1,597 lines in one module.
+- `renderer/app.js` is 2,647 lines in one module.

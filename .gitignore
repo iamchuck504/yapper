@@ -29,6 +29,14 @@ build/icon-v*/
 build/icon-preview.png
 build/whisper/
 
-# whisper.cpp binaries and models (downloaded by setup, never committed)
+# whisper.cpp binaries and models (downloaded by setup, never committed).
+# Without the trailing slash too: on a dev machine these are often symlinks to
+# an installed copy's engine, and a symlink is a file, not a directory.
 bin/
 models/
+bin
+models
+
+# compiled from mac/*.swift by mac/build-app.sh, per machine
+build/mic-probe
+build/system-audio

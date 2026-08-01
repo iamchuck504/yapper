@@ -151,6 +151,8 @@ app.whenReady().then(async () => {
   await click('#btn-speak');
   await new Promise(r => setTimeout(r, 300));
   await click('#btn-speak');            // and stop again
+  // El tema en detalle vive en build/test-theme.js; aquí sólo que el atajo de
+  // la esquina sigue llevando y trayendo.
   await click('#btn-theme');
   check('the light theme applies', await $("document.body.classList.contains('light')"), 'did not change');
   await click('#btn-theme');

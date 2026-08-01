@@ -26,28 +26,38 @@ app.whenReady().then(async () => {
 
   const $ = js => win.webContents.executeJavaScript(js);
 
-  check('the provider selector exists and has options',
-    (await $("document.getElementById('llm-provider').options.length")) >= 4,
-    'did not fill');
+  // The provider rows live inside the record view, and the app opens on Today.
+  // Measuring them while their own section is display:none reports 0×0 for
+  // everything, so "is it actually on screen" could never pass — it was
+  // measuring the closed view, not the notice.
+  // Y desplegadas: estos controles viven dentro de las opciones de reunión,
+  // que arrancan plegadas. Medir "se ve en pantalla" con el pliegue cerrado
+  // vuelve a dar 0×0 por una razón distinta.
+  await $(`showView('record'); setOptionsOpen(true)`);
+  await new Promise(r => setTimeout(r, 300));
 
-  check('starts on Claude Code',
+  check('el selector de proveedor existe y tiene opciones',
+    (await $("document.getElementById('llm-provider').options.length")) >= 4,
+    'no se llenó');
+
+  check('arranca en Claude Code',
     (await $("document.getElementById('llm-provider').value")) === 'claude-cli',
     await $("document.getElementById('llm-provider').value"));
 
-  check('with Claude Code it asks for no key',
+  check('con Claude Code no pide key',
     await $("document.getElementById('llm-key-row').classList.contains('hidden')"),
-    'the key row is visible');
+    'la fila de key está visible');
 
   // --- the free option someone without a Claude subscription can actually use ---
   const providers = await $('window.yapper.getLlmSettings().then(s => s.providers)');
   const free = providers.filter(p => p.free);
-  check('offers at least one free option', free.length >= 1,
+  check('ofrece al menos una opción gratis', free.length >= 1,
     providers.map(p => p.id).join(', '));
-  check('the free option says where to get the key',
+  check('la opción gratis dice dónde sacar la key',
     free.every(p => p.keyUrl), free.map(p => `${p.id}:${p.keyUrl}`).join(', '));
-  check('the free option warns about privacy',
+  check('la opción gratis advierte sobre privacidad',
     free.every(p => p.privacy), free.map(p => `${p.id}:${p.privacy}`).join(', '));
-  check('there is a local option with no key and no cost',
+  check('hay una opción local sin key ni costo',
     providers.some(p => p.id === 'ollama' && !p.needsKey),
     providers.map(p => `${p.id}${p.needsKey ? '(key)' : ''}`).join(', '));
 
@@ -57,9 +67,9 @@ app.whenReady().then(async () => {
     s.dispatchEvent(new Event('change'));
   })()`);
   await new Promise(r => setTimeout(r, 400));
-  check('picking the free one reveals the link to get the key',
+  check('al elegir la gratis aparece el enlace para sacar la key',
     !(await $("document.getElementById('llm-key-link').classList.contains('hidden')")),
-    'the link does not appear');
+    'el enlace no aparece');
   // Checking the row is not enough: the text inside it kept its own hidden
   // class, so the row opened and the warning was never actually on screen.
   const privacy = await $(`(() => {
@@ -69,15 +79,15 @@ app.whenReady().then(async () => {
       hidden: el.classList.contains('hidden'),
       rowHidden: document.getElementById('llm-privacy-row').classList.contains('hidden') };
   })()`);
-  check('the privacy notice row is revealed', !privacy.rowHidden, 'is still hidden');
-  check('the privacy notice is genuinely visible on screen',
+  check('la fila del aviso de privacidad se destapa', !privacy.rowHidden, 'sigue oculta');
+  check('el aviso de privacidad se ve de verdad en pantalla',
     privacy.visible && !privacy.hidden && privacy.text.length > 20, JSON.stringify(privacy));
-  check('and it says the free plan uses your data',
+  check('y dice que el plan gratis usa tus datos',
     /train|improve its models/i.test(privacy.text), privacy.text);
-  check('the link points at an allowed URL',
+  check('el enlace apunta a una URL permitida',
     (await $("document.getElementById('llm-key-link').dataset.url")).startsWith('https://'),
     await $("document.getElementById('llm-key-link').dataset.url"));
-  check('suggests a default model',
+  check('sugiere un modelo por defecto',
     !!(await $("document.getElementById('llm-model').placeholder")), 'sin sugerencia');
 
   // Picking a provider is not being set up. Saying nothing here means finding
@@ -88,13 +98,26 @@ app.whenReady().then(async () => {
     return { text: el.textContent, kind: el.dataset.kind, bad: el.classList.contains('bad'),
       visible: r.width > 0 && r.height > 0 };
   })()`);
-  check('warns immediately that the key is missing',
+  check('avisa en el momento que falta la key',
     nokey.visible && nokey.kind === 'needs-key' && /Paste a key/.test(nokey.text),
     JSON.stringify(nokey));
-  check('and marks it as action needed, not informational', nokey.bad, JSON.stringify(nokey));
-  check('the main process rejects URLs the app does not offer',
+  check('y lo marca como pendiente, no como informativo', nokey.bad, JSON.stringify(nokey));
+
+  // Ese aviso vive dentro de las opciones, y las opciones se pliegan. Plegado,
+  // el aviso queda fuera de pantalla y se vuelve a caer en lo mismo: enterarse
+  // al final de la primera reunión. La línea del pliegue lo lleva.
+  const folded = await $(`(() => {
+    setOptionsOpen(false);
+    const f = document.getElementById('opts-flag');
+    const r = f && f.getBoundingClientRect();
+    return { text: f ? f.textContent : '', visible: !!r && r.width > 0 && r.height > 0 };
+  })()`);
+  check('plegado, el aviso de key pendiente sigue a la vista',
+    folded.visible && /key/i.test(folded.text), JSON.stringify(folded));
+  await $('setOptionsOpen(true)');
+  check('el proceso principal rechaza URLs que no ofrece la app',
     (await $("window.yapper.openExternal('https://example.com/evil')")) === false,
-    'opened it');
+    'la abrió');
 
   // switch to OpenRouter and type a key, exactly as a user would
   await $(`(() => {
@@ -104,10 +127,10 @@ app.whenReady().then(async () => {
   })()`);
   await new Promise(r => setTimeout(r, 400));
 
-  check('picking OpenRouter reveals the key row',
+  check('al elegir OpenRouter aparece la fila de key',
     !(await $("document.getElementById('llm-key-row').classList.contains('hidden')")),
-    'is still hidden');
-  check('suggests the provider default model',
+    'sigue oculta');
+  check('sugiere el modelo por defecto del proveedor',
     !!(await $("document.getElementById('llm-model').placeholder")),
     'sin placeholder');
 
@@ -119,24 +142,31 @@ app.whenReady().then(async () => {
   await new Promise(r => setTimeout(r, 600));
 
   const after = await $('window.yapper.getLlmSettings()');
-  check('the provider was saved', after.provider === 'openrouter', after.provider);
-  check('says there is a key stored', after.hasKey === true, JSON.stringify(after));
-  check('does NOT return the key to the renderer',
+  check('el proveedor quedó guardado', after.provider === 'openrouter', after.provider);
+  check('dice que hay una key guardada', after.hasKey === true, JSON.stringify(after));
+  check('NO devuelve la key al renderer',
     !JSON.stringify(after).includes(KEY), JSON.stringify(after).slice(0, 120));
-  check('the key field is cleared after saving',
-    (await $("document.getElementById('llm-key').value")) === '', 'text was left on screen');
+  check('el campo de key se vacía tras guardar',
+    (await $("document.getElementById('llm-key').value")) === '', 'quedó texto en pantalla');
 
-  check('the "key missing" warning goes away once it is saved',
+  check('el aviso de "falta la key" desaparece al guardarla',
     (await $("document.getElementById('llm-status').dataset.kind")) !== 'needs-key',
     await $("document.getElementById('llm-status').textContent"));
+  check('y con él la marca del pliegue',
+    (await $(`(() => {
+      setOptionsOpen(false);
+      const r = document.getElementById('opts-flag').getBoundingClientRect();
+      return r.width === 0 && r.height === 0;
+    })()`)),
+    'la marca de key pendiente se quedó');
 
   const raw = fs.readFileSync(path.join(USER_DATA, 'settings.json'), 'utf8');
-  check('the key is NOT readable in settings.json', !raw.includes(KEY), raw.slice(0, 200));
-  check('was marked as encrypted', /"enc":\s*true/.test(raw), raw.slice(0, 200));
+  check('la key NO está legible en settings.json', !raw.includes(KEY), raw.slice(0, 200));
+  check('quedó marcada como cifrada', /"enc":\s*true/.test(raw), raw.slice(0, 200));
 
   // the preflight has to notice that notes are now possible
   const env = await $('window.yapper.checkEnvironment()');
-  check('the startup check sees that notes can now be generated',
+  check('el chequeo de arranque ve que ya se pueden generar notas',
     env.notes && env.notes.ok === true, JSON.stringify(env.notes));
 
   console.log(fails ? `\n${fails} fallos` : '\nPASS');

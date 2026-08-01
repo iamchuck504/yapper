@@ -4,11 +4,12 @@
 // the size and the time.
 const { app, BrowserWindow } = require('electron');
 const path = require('path');
+const os = require("os");
 const fs = require('fs');
 const engine = require('../engine');
 
 app.whenReady().then(async () => {
-  const src = process.env.WAV || path.join(process.env.TEMP, 'yapper-60s.wav');
+  const src = process.env.WAV || path.join(os.tmpdir(), 'yapper-60s.wav');
   const minute = fs.readFileSync(src).subarray(engine.WAV_HEADER);
   const MIN = Number(process.env.MINUTES || 10);
 

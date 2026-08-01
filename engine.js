@@ -162,6 +162,25 @@ function tierConfig(name) {
   return TIERS[name] || TIERS.modest;
 }
 
+/**
+ * Can transcription run ahead of the meeting on this tier?
+ *
+ * Only where it would not fight the live transcript over the model. The two
+ * share one server and asking it for a different model restarts it — a model
+ * reload, hundreds of megabytes off disk, every time they alternate. On
+ * `steady`, where live runs `base` and the final pass runs `small`, that is a
+ * reload every few seconds: the live transcript collapses and the machine
+ * spends the meeting loading models instead of transcribing.
+ *
+ * `fast` wants the same model for both, and `modest` has no live transcript to
+ * interrupt, so both get the head start. `steady` waits until the end, which
+ * is what it did before any of this existed.
+ */
+function canGetAhead(name) {
+  const t = tierConfig(name);
+  return !t.live || t.liveModel === t.finalModel;
+}
+
 // Eleven seconds of a public-domain JFK speech, the sample that ships with
 // whisper.cpp. It has to be real speech: most of a pass is the decoder emitting
 // tokens, so a synthetic tone measures 25 ms where actual talking measures 185,
@@ -189,19 +208,26 @@ async function calibrate({ passes = 3 } = {}) {
   const times = [];
   for (let i = 0; i < passes; i++) {
     const t = Date.now();
-    await transcribeWav(wav, { language: 'en' });
+    // Through the queue like everything else. Calibration used to reach the
+    // server directly, which was harmless while it only ran at startup — but
+    // it reruns whenever the engine's binary flavour changes, and that can now
+    // happen mid-session, when the background half of the first-run download
+    // finishes.
+    await serialize(() => transcribeWav(wav, { language: 'en' }));
     times.push(Date.now() - t);
   }
   await stop();
 
   times.sort((a, b) => a - b);
   const msPerPass = times[Math.floor(times.length / 2)];
+  setPace(msPerPass);
   return { tier: tierFromBenchmark(msPerPass), msPerPass };
 }
 
 // ---------------------------------------------------------------- server
 
 let proc = null;
+let reaped = false;       // orphan sweep: once per run, see start()
 let port = 0;
 let ready = null;
 let loadedModel = null;
@@ -229,12 +255,55 @@ function waitForPort(p, timeoutMs = 90000) {
 }
 
 /** Start (or reuse) the server for a given model. */
+/**
+ * Kill whisper-servers left over from a run that died without cleaning up.
+ *
+ * The server is a child process, and a child outlives a parent that is killed
+ * rather than closed — a crash, a Force Quit, a `kill -9`. It keeps its model
+ * resident the whole time, which is hundreds of megabytes each, and they stack
+ * up: measured at 802 MB across four of them after an afternoon of testing.
+ *
+ * Only called when this process has no server of its own, so anything matching
+ * our own binary path is by definition abandoned. The app is single-instance,
+ * so there is no sibling whose server this could be.
+ */
+function reapOrphans() {
+  const exe = serverPath();
+  try {
+    if (process.platform === 'win32') {
+      const r = spawnSync('taskkill', ['/F', '/IM', path.basename(exe)], { windowsHide: true });
+      return r.status === 0 ? 1 : 0;
+    }
+    const found = spawnSync('pgrep', ['-f', exe], { encoding: 'utf8' });
+    const pids = String(found.stdout || '').split('\n')
+      .map(s => Number(s.trim())).filter(pid => pid && pid !== process.pid);
+    for (const pid of pids) {
+      try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+    }
+    return pids.length;
+  } catch {
+    return 0;                 // best effort: never block a recording over this
+  }
+}
+
 async function start(model, { threads } = {}) {
   if (proc && loadedModel === model) return ready;
+  const hadServer = !!proc;
   await stop();
 
   if (!isInstalled()) throw new Error('whisper.cpp is not installed for this platform');
   if (!hasModel(model)) throw new Error(`model ${model} is missing`);
+
+  // Once per run, and only before the first server exists. Orphans belong to
+  // *previous* executions, so one sweep finds all of them — and repeating it
+  // would be actively harmful: two transcriptions starting at the same moment
+  // both see `proc` as null while the first is still in stop(), and the second
+  // sweep would kill the server the first had just spawned.
+  if (!hadServer && !reaped) {
+    reaped = true;
+    const killed = reapOrphans();
+    if (killed) console.log(`[engine] cleaned up ${killed} whisper-server(s) from a previous run`);
+  }
 
   port = freePort();
   const args = [
@@ -278,6 +347,7 @@ async function stop() {
   const p = proc;
   proc = null;
   loadedModel = null;
+  answeredOnce = false;      // the next server is cold again
   try { p.kill(); } catch { /* already gone */ }
   await new Promise(r => setTimeout(r, 120));
 }
@@ -286,7 +356,66 @@ async function stop() {
  * Transcribe a WAV buffer (16 kHz mono PCM) through the running server.
  * Returns whisper.cpp's verbose JSON so callers can use segment timestamps.
  */
-function transcribeWav(wavBuffer, { language = 'auto', prompt = '' } = {}) {
+// A request that never answers is what this path is most exposed to:
+// whisper-server accepts an /inference and then wedges — sockets open, no CPU,
+// no reply, ever. Twice in one day, and both times the app waited forever with
+// "Transcribing…" on screen, because nothing here had a deadline. The lock
+// that caused those is fixed; a server can still wedge for reasons of its own,
+// and the app must not wait out the heat death of the universe for it.
+//
+// The budget is proportional to the audio — a 10-second live window and a
+// two-minute final window are not the same wait — with a floor for short ones.
+// Four times real time is about a thirteen-fold margin over the slowest
+// machine the tier table admits, so nothing healthy trips it.
+let testDeadlineMs = 0;      // see __setDeadline in the exports
+
+// What this machine measured at calibration: milliseconds for one pass over a
+// 10-second window with CALIBRATION_MODEL. main.js hands it over from settings
+// at startup, and calibrate() sets it when it reruns.
+let measuredPace = 0;
+function setPace(ms) { measuredPace = Number(ms) > 0 ? Number(ms) : 0; }
+
+// `small` costs roughly two and a half times `base` on the same audio —
+// measured across both anchor machines in the tier table.
+const SMALL_VS_BASE = 2.5;
+
+// Enough for a cold model load, which is the one legitimately slow moment in a
+// run — and it is only the first request after a server starts that pays it.
+// Charging it to every window would keep the deadline a third wider than it
+// needs to be for the whole of a long meeting.
+const STARTUP_ALLOWANCE_MS = 12000;
+let answeredOnce = false;
+
+// Eight times the measured cost. Wide enough that thermal throttling, a busy
+// GPU or a laptop on battery never trip it; narrow enough to be useful, which
+// the first version of this was not.
+const PACE_MARGIN = 8;
+
+/**
+ * How long to wait for one request before calling the server dead.
+ *
+ * The first version gave every request four times real time, which sounded
+ * cautious and was useless: a two-minute window takes about three seconds on a
+ * calibrated machine, and it was being handed eight minutes. A wedge is meant
+ * to cost seconds.
+ *
+ * So the budget comes from what this machine actually measured rather than
+ * from the length of the audio alone. With no measurement yet — a first run,
+ * before calibration — it falls back to the old proportional guess, since a
+ * loose deadline still beats none.
+ */
+function deadlineFor(wavBuffer, model) {
+  if (testDeadlineMs) return testDeadlineMs;
+  const seconds = Math.max(0, (wavBuffer.length - WAV_HEADER) / BYTES_PER_SEC);
+  if (!measuredPace) return Math.max(60000, Math.round(seconds * 4000));
+
+  const perTenSeconds = measuredPace * (model === CALIBRATION_MODEL ? 1 : SMALL_VS_BASE);
+  const expected = (seconds / 10) * perTenSeconds;
+  const cold = answeredOnce ? 0 : STARTUP_ALLOWANCE_MS;
+  return Math.round(cold + expected * PACE_MARGIN);
+}
+
+function transcribeWav(wavBuffer, { language = 'auto', prompt = '', model = null } = {}) {
   return new Promise((resolve, reject) => {
     if (!proc) return reject(new Error('whisper-server is not running'));
     const boundary = '----yapper' + Date.now().toString(16);
@@ -304,6 +433,11 @@ function transcribeWav(wavBuffer, { language = 'auto', prompt = '' } = {}) {
       + `\r\n--${boundary}--\r\n`);
     const body = Buffer.concat([head, wavBuffer, tail]);
 
+    let timer = null;
+    const done = fn => (...args) => { clearTimeout(timer); fn(...args); };
+    const ok = done(resolve);
+    const fail = done(reject);
+
     const req = http.request({
       host: '127.0.0.1', port, path: '/inference', method: 'POST',
       headers: {
@@ -315,11 +449,23 @@ function transcribeWav(wavBuffer, { language = 'auto', prompt = '' } = {}) {
       res.setEncoding('utf8');
       res.on('data', c => { out += c; });
       res.on('end', () => {
-        try { resolve(JSON.parse(out)); }
-        catch { reject(new Error(`whisper-server replied with: ${out.slice(0, 200)}`)); }
+        answeredOnce = true;
+        try { ok(JSON.parse(out)); }
+        catch { fail(new Error(`whisper-server replied with: ${out.slice(0, 200)}`)); }
       });
     });
-    req.on('error', reject);
+    req.on('error', fail);
+
+    const budget = deadlineFor(wavBuffer, model || loadedModel);
+    timer = setTimeout(() => {
+      // A server that did not answer this one will not answer the next either,
+      // so it goes. Every caller's recovery path starts a fresh one — the
+      // file transcription retries the window outright, and the live loop
+      // takes its model back on its next pass.
+      req.destroy(new Error(`whisper-server timed out after ${Math.round(budget / 1000)}s`));
+      stop().catch(() => { /* it is already gone, which is the goal */ });
+    }, budget);
+
     req.write(body);
     req.end();
   });
@@ -420,6 +566,108 @@ function fmtStamp(sec) {
  * onProgress({ done, total }) is called after each window.
  * Returns lines of "[hh:mm:ss] text".
  */
+/**
+ * Transcription that runs *while* the meeting does.
+ *
+ * The wait at the end of a long meeting is almost all transcription — 50
+ * seconds for 36 minutes here — and none of that work needs the meeting to be
+ * over. Windows are independent, the audio for minute 5 is final while minute
+ * 50 is still being spoken, and the machine is nearly idle: the live loop uses
+ * about a sixth of a fast Mac. So the windows are done as the audio arrives,
+ * and stopping leaves only the tail.
+ *
+ * The rule that makes the result *identical* rather than merely similar: a
+ * window is only taken early when there is a full window plus its overlap of
+ * audio after it. That guarantees it is not the last window, which is the one
+ * fact the segment-dropping depends on — and "not last now" stays true, since
+ * recordings only grow.
+ *
+ * Each window goes through the queue on its own, so the live transcript
+ * interleaves between them rather than waiting behind the lot. In steady state
+ * this costs live about 2% of its passes: one 2.6-second window per 120
+ * seconds of meeting.
+ */
+/**
+ * What a run of windows was produced under. A head start is only reusable by a
+ * final pass that would have made the same windows the same way — mix a `base`
+ * head start into a `small` pass and the transcript is silently half one and
+ * half the other, which is worse than either and invisible. Not reachable
+ * today, since every tier finishes with `small`, but it is one edit to the
+ * tier table away and nothing would have complained.
+ */
+function fingerprintOf(o) {
+  return [o.model, o.language, o.prompt, o.windowSec, o.overlapSec].join('\u0000');
+}
+
+function progressive(file, opts = {}) {
+  const o = {
+    language: 'auto', model: undefined, prompt: '', windowSec: 120, overlapSec: 2, ...opts
+  };
+  const lines = [];
+  let at = 0;
+  let working = null;      // the promise of the pass currently running
+  let cancelled = false;
+
+  return {
+    get consumedSec() { return at; },
+    get windows() { return lines.length ? at / o.windowSec : 0; },
+    /** What transcribeFile needs to finish the job. */
+    snapshot() { return { at, lines: lines.slice(), fingerprint: fingerprintOf(o) }; },
+
+    /**
+     * Take whatever windows are now safe. Resolves when it runs out of them,
+     * and never throws: this is work brought forward, so failing it should
+     * cost time at the end, not the meeting.
+     */
+    advance() {
+      if (working || cancelled || !fs.existsSync(file)) return working || Promise.resolve();
+      const run = (async () => {
+        try {
+          while (!cancelled) {
+            const available = audioSecondsIn(file);
+            if (available < at + o.windowSec + o.overlapSec) return;
+            await start(o.model);
+            const fd = fs.openSync(file, 'r');
+            try {
+              const done = await serialize(() =>
+                transcribeWindow(fd, at, o.windowSec, false, o));
+              lines.push(...done);
+              at += o.windowSec;
+            } finally {
+              fs.closeSync(fd);
+            }
+          }
+        } catch (err) {
+          console.log('[transcribe] the head start stalled, will finish at the end:', err.message);
+        }
+      })();
+      working = run;
+      // Cleared out here, not in the body's `finally`. When there is nothing to
+      // do the body returns before its first await — so its finally ran before
+      // `working = run` had happened, and the flag stayed set on a promise that
+      // was already settled. Nothing advanced again after that.
+      const clear = () => { if (working === run) working = null; };
+      run.then(clear, clear);
+      return run;
+    },
+
+    /**
+     * Stop getting ahead, and resolve once the window in flight has landed.
+     *
+     * Both halves matter at the moment someone presses stop. Left running, a
+     * head start with a backlog keeps feeding windows into the same queue the
+     * final pass needs — so the wait this was built to remove comes back,
+     * behind work nobody is waiting for. And snapshotting while a window is
+     * still in flight would leave that window out, so the final pass would do
+     * it a second time.
+     */
+    async settle() {
+      cancelled = true;
+      if (working) await working.catch(() => { });
+    }
+  };
+}
+
 function transcribeFile(file, opts = {}) {
   // One server, one job at a time. Two of these at once used to fight over it:
   // the second one's start() killed the first one's server mid-request, and the
@@ -428,28 +676,76 @@ function transcribeFile(file, opts = {}) {
   return serialize(() => transcribeFileNow(file, opts));
 }
 
+// ---------------------------------------------------------------- one server
+//
+// whisper-server decodes one request at a time, and a second /inference sent
+// while the first is in flight does not queue — it wedges. Seen on a real
+// 24-minute meeting: two sockets ESTABLISHED from the app, both idle, the
+// server burning 1 second of CPU across five minutes and never answering
+// anything again. The recording survived because it was already on disk, but
+// the transcript never arrived and the app sat there looking slow.
+//
+// It got there through a check-then-act race. `busy()` said false, the live
+// loop went on to await a model switch and build its window, and a full-file
+// transcription started in that gap. Both then had a request in flight.
+//
+// So the claim is taken here, synchronously, and there are two ways to take
+// it. `serialize` waits its turn — for work that must not be dropped.
+// `tryExclusive` refuses instead of waiting, which is what the live loop
+// wants: a window decoded thirty seconds late is not a live transcript.
+
 let jobs = Promise.resolve();
-let running = 0;
+let running = 0;      // 1 while a request is actually in flight
+let claimed = 0;      // queued *or* in flight, counted the instant work is asked for
 
 function serialize(fn) {
+  claimed++;
   // runs whether or not the previous job succeeded
   const start = () => { running++; return fn(); };
-  const done = v => { running--; return v; };
-  const failed = e => { running--; throw e; };
+  const done = v => { running--; claimed--; return v; };
+  const failed = e => { running--; claimed--; throw e; };
   const run = jobs.then(start, start).then(done, failed);
   jobs = run.then(() => {}, () => {});
   return run;
 }
 
 /**
- * True while a full-file transcription holds the server. The live loop checks
- * this and steps aside: both want the same single server, and a transcription of
- * another meeting started mid-recording used to kill the live transcript
- * outright — "whisper-server is not running", over and over, and it never came
- * back.
+ * Run `fn` only if the server is free this instant; otherwise return null
+ * without waiting. The check and the claim are one synchronous step, which is
+ * the whole point — `busy()` was two, and the gap between them is where the
+ * wedged server came from.
+ *
+ * null means "not now, try later". A real inference always resolves an object.
+ */
+async function tryExclusive(fn) {
+  if (claimed > 0) return null;
+  claimed++;
+  running++;
+  const run = (async () => {
+    try {
+      return await fn();
+    } finally {
+      running--;
+      claimed--;
+    }
+  })();
+  // And it joins the queue. Claiming alone was not enough: `serialize` waits
+  // its turn on `jobs`, which knew nothing about a try-claim, so a live pass
+  // already in flight left the queue looking empty and the next full-file
+  // transcription started straight into it. Two requests, and the server
+  // wedges — the same failure this was written to prevent, reached from the
+  // other direction. The first version of the test only drove one order.
+  jobs = jobs.then(() => run, () => run).then(() => { }, () => { });
+  return run;
+}
+
+/**
+ * True while anything holds the server, queued or running. The live loop reads
+ * it to bail out early and cheaply — but it is an optimisation now, not the
+ * guard. `tryExclusive` is the guard.
  */
 function busy() {
-  return running > 0;
+  return claimed > 0;
 }
 
 /** Which model the running server has loaded, if any. */
@@ -457,52 +753,89 @@ function loaded() {
   return proc ? loadedModel : null;
 }
 
+/**
+ * One window, transcribed and turned into stamped lines.
+ *
+ * Shared by the pass that runs after a meeting and the one that runs during
+ * it, because the two must agree exactly. The subtle part is the last
+ * argument: a window drops any segment that begins inside its overlap, since
+ * the next window owns that audio — unless there is no next window, in which
+ * case dropping it would lose the end of the meeting.
+ */
+async function transcribeWindow(fd, at, len, isLast, o) {
+  const from = Math.floor(at * BYTES_PER_SEC);
+  const size = Math.ceil((len + (isLast ? 0 : o.overlapSec)) * BYTES_PER_SEC);
+  const pcm = Buffer.alloc(size);
+  const read = fs.readSync(fd, pcm, 0, size, WAV_HEADER + from);
+  const wav = wavFromPcm(pcm.subarray(0, read));
+
+  let res;
+  try {
+    res = await transcribeWav(wav, { language: o.language, prompt: o.prompt, model: o.model });
+  } catch (err) {
+    // The server can be killed under us — antivirus, an out-of-memory kill,
+    // the user ending the task. One retry with a fresh one costs a few
+    // seconds; failing outright costs the whole transcript.
+    if (!/ECONNRESET|ECONNREFUSED|socket hang up|not running|timed out/i.test(err.message)) throw err;
+    await stop();
+    await start(o.model);
+    res = await transcribeWav(wav, { language: o.language, prompt: o.prompt, model: o.model })
+      .catch(() => { throw new Error('The transcriber stopped unexpectedly. Try again.'); });
+  }
+
+  const out = [];
+  for (const seg of res.segments || []) {
+    const startSec = typeof seg.start === 'number'
+      ? seg.start
+      : parseOffset(seg.offsets && seg.offsets.from);
+    if (startSec >= len && !isLast) continue;
+    const text = (seg.text || '').trim();
+    if (text) out.push(`[${fmtStamp(at + startSec)}] ${text}`);
+  }
+  return out;
+}
+
+function audioSecondsIn(file) {
+  return Math.max(0, fs.statSync(file).size - WAV_HEADER) / BYTES_PER_SEC;
+}
+
 async function transcribeFileNow(file, { language = 'auto', model, prompt = '', windowSec = 120,
-  overlapSec = 2, onProgress } = {}) {
+  overlapSec = 2, onProgress, from = null } = {}) {
   if (!fs.existsSync(file)) {
     throw new Error('The recording for that meeting is no longer there.');
   }
   repairWav(file);
-  const total = Math.max(0, fs.statSync(file).size - WAV_HEADER);
-  const totalSec = total / BYTES_PER_SEC;
+  const totalSec = audioSecondsIn(file);
   if (totalSec < 0.5) return [];
 
   await start(model);
 
-  const lines = [];
+  const o = { language, model, prompt, windowSec, overlapSec };
+
+  // `from` is a run that was already under way while the meeting was still
+  // going: its windows are finished and identical to what this pass would have
+  // produced for them, so only the tail is left. Two things have to hold for
+  // that to be true, and both are cheaper to check than to debug — a head
+  // start made under different settings would splice two different
+  // transcriptions together, and one reaching past the end of the file would
+  // contribute lines for audio that is no longer there. Either way it is
+  // dropped and the file is done in full, which is only slower.
+  let usable = from;
+  if (from && from.fingerprint !== fingerprintOf(o)) {
+    console.log('[transcribe] the head start was made under other settings; doing the file in full');
+    usable = null;
+  } else if (from && from.at > totalSec) {
+    console.log('[transcribe] the head start runs past the end of the recording; doing the file in full');
+    usable = null;
+  }
+
+  const lines = usable ? usable.lines.slice() : [];
+  let at = usable ? usable.at : 0;
   const fd = fs.openSync(file, 'r');
   try {
-    let at = 0;                       // seconds consumed so far
     while (at < totalSec) {
       const len = Math.min(windowSec, totalSec - at);
-      const from = Math.floor(at * BYTES_PER_SEC);
-      const size = Math.ceil(Math.min(len + overlapSec, totalSec - at) * BYTES_PER_SEC);
-      const pcm = Buffer.alloc(size);
-      const read = fs.readSync(fd, pcm, 0, size, WAV_HEADER + from);
-
-      let res;
-      try {
-        res = await transcribeWav(wavFromPcm(pcm.subarray(0, read)), { language, prompt });
-      } catch (err) {
-        // The server can be killed under us — antivirus, an out-of-memory kill,
-        // the user ending the task. One retry with a fresh one costs a few
-        // seconds; failing outright costs the whole transcript.
-        if (!/ECONNRESET|ECONNREFUSED|socket hang up|not running/i.test(err.message)) throw err;
-        await stop();
-        await start(model);
-        res = await transcribeWav(wavFromPcm(pcm.subarray(0, read)), { language, prompt })
-          .catch(() => { throw new Error('The transcriber stopped unexpectedly. Try again.'); });
-      }
-      for (const seg of res.segments || []) {
-        const startSec = typeof seg.start === 'number'
-          ? seg.start
-          : parseOffset(seg.offsets && seg.offsets.from);
-        // drop anything that begins inside the overlap: the next window owns it
-        if (startSec >= len && at + len < totalSec) continue;
-        const text = (seg.text || '').trim();
-        if (text) lines.push(`[${fmtStamp(at + startSec)}] ${text}`);
-      }
-
+      lines.push(...await transcribeWindow(fd, at, len, at + len >= totalSec, o));
       at += len;
       if (onProgress) onProgress({ done: Math.min(at, totalSec), total: totalSec });
     }
@@ -639,9 +972,17 @@ function deduplicate(lines) {
 module.exports = {
   platformKey, binDir, serverPath, isInstalled, setHome, setCalibrationWav,
   modelPath, hasModel,
-  TIERS, tierConfig, guessTier, tierFromBenchmark, hasNvidiaGpu, isAppleSilicon,
+  TIERS, tierConfig, canGetAhead, guessTier, tierFromBenchmark, hasNvidiaGpu, isAppleSilicon,
   CALIBRATION_MODEL, calibrate,
-  start, stop, busy, loaded, transcribeWav, transcribeFile,
-  deduplicate, undoStutter,
-  wavFromPcm, openWav, finishWav, repairWav, WAV_HEADER, BYTES_PER_SEC
+  start, stop, busy, serialize, tryExclusive, loaded, transcribeWav, transcribeFile,
+  deduplicate, undoStutter, deadlineFor, setPace, progressive,
+  wavFromPcm, openWav, finishWav, repairWav, WAV_HEADER, BYTES_PER_SEC,
+
+  // Test seam, and the only one in this file. A wedged server — the failure
+  // that cost a meeting its transcript twice in one day — cannot be summoned
+  // from a real whisper: it has to be played by a socket that accepts a
+  // request and says nothing. This points the client at that socket, and
+  // shortens the deadline so proving a timeout does not take a real minute.
+  __pointAtServer(p, aPort) { proc = p; port = aPort; loadedModel = p ? 'test' : null; },
+  __setDeadline(ms) { testDeadlineMs = ms; }
 };

@@ -394,7 +394,11 @@ body.light #btn-theme .icon-sun { display: none; }
 body.light #btn-theme .icon-moon { display: block; }
 
 /* ============ Main ============ */
-#content { flex: 1; overflow-y: auto; padding: 36px 44px 60px; }
+/* The right gutter clears the theme button, which is fixed to the window and
+   floats over whatever is under it. On a narrow window the column reaches the
+   edge, and the first thing at the top — the action-items bar — ended up
+   underneath it. 16 (its offset) + 32 (its width) + air. */
+#content { flex: 1; overflow-y: auto; padding: 36px 62px 60px 44px; }
 #view-record, #view-meeting {
   max-width: 800px;
   margin: 0 auto;
@@ -432,15 +436,32 @@ body.light #btn-theme .icon-moon { display: block; }
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  padding: 16px 18px;
+  padding: 4px 20px 8px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
   margin-bottom: 22px;
   box-shadow: var(--shadow-1);
 }
+/* Three questions, not one list: what the notes should be, how the recording
+   is made, and what happens while it runs. Packed one on top of another they
+   were a wall nobody read to the end of. */
+.opt-group {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px 0;
+  border-top: 1px solid var(--rule);
+}
+.opt-group:first-child { border-top: none; }
+.opt-group-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
 .opt-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.opt-label { width: 96px; min-width: 96px; font-size: 12.5px; font-weight: 500; color: var(--text-2); }
+.opt-label { width: 110px; min-width: 110px; font-size: 12.5px; font-weight: 500; color: var(--text-2); }
 
 .seg {
   display: inline-flex;
@@ -535,7 +556,8 @@ body.light #btn-theme .icon-moon { display: block; }
 
 /* ---- Meeting detected prompt ---- */
 /* Floats over whatever view is open, bottom-right, clear of the theme button. */
-#meeting-prompt {
+#meeting-prompt,
+#screen-prompt {
   position: fixed;
   right: 20px;
   bottom: 20px;
@@ -560,12 +582,43 @@ body.light #btn-theme .icon-moon { display: block; }
 }
 .mp-text { flex: 1; display: flex; flex-direction: column; gap: 1px; }
 .mp-text strong { font-size: 13.5px; font-weight: 650; }
-#mp-app { font-size: 12px; color: var(--text-3); }
-#meeting-prompt .btn-primary { height: 32px; padding: 0 14px; }
-#meeting-prompt .btn-ghost { height: 32px; }
+#mp-app, #sp-detail { font-size: 12px; color: var(--text-3); }
+#meeting-prompt .btn-primary,
+#screen-prompt .btn-primary { height: 32px; padding: 0 14px; }
+#meeting-prompt .btn-ghost,
+#screen-prompt .btn-ghost { height: 32px; }
+
+/* Three buttons and a sentence explaining why reopening is not optional do not
+   fit the meeting prompt's single row — laid out as a block, the actions sit
+   under the text instead of squeezing it. */
+#screen-prompt {
+  max-width: 440px;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 12px;
+  align-items: start;
+}
+#screen-prompt .mp-dot { margin-top: 6px; }
+#screen-prompt .sp-actions {
+  grid-column: 2;
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+/* Quitting mid-recording would discard the meeting, so the button says why it
+   is unavailable instead of vanishing and leaving a dead end. */
+#screen-prompt .btn-ghost[disabled] { opacity: 0.45; cursor: not-allowed; }
 
 /* ---- Record zone ---- */
-.mic-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+/* The block had no spacing of its own, so the microphone picker sat flush
+   against the two buttons above it and read as part of them. */
+#rec-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+.mic-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .mic-row label { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--text-2); }
 #mic-select {
   flex: 1;
@@ -1507,3 +1560,101 @@ details summary:hover { color: var(--text); border-color: var(--border-2); }
 }
 
 .hidden { display: none !important; }
+
+/* The sidebar's "New meeting" button is also the way back to a recording in
+   progress — the only way, once another view is open. Reading "New meeting"
+   mid-meeting hid both that a recording was running and that this was the door
+   back to its controls, which is exactly how it was found: in a real meeting,
+   with no visible way to stop. Recording, it becomes the indicator. */
+.new-btn .rec-pip { display: none; }
+.new-btn.recording .new-plus { display: none; }
+.new-btn.recording .rec-pip {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--rec);
+  flex-shrink: 0;
+  animation: blink 1.4s ease-in-out infinite;
+}
+.new-btn.recording {
+  font-variant-numeric: tabular-nums;   /* the clock must not jitter each second */
+}
+
+/* ---- Recording takes the top of the view ---- */
+/* The options card is a page of settings, and while a meeting is running it is
+   a page of settings nobody can change — it was pushing the clock, the meters
+   and the stop button below the fold. Recording, the controls move up and the
+   card folds into one line that says what was chosen. */
+.opts-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 14px;
+  padding: 11px 12px 11px 14px;
+  /* Raised and bordered like every other control here. Transparent on a
+     transparent view, it read as a heading with a stray arrow, and the
+     settings behind it went unfound. */
+  background: var(--surface-2);
+  color: var(--text-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.opts-toggle:hover { background: var(--surface-4); border-color: var(--text-3); }
+.opts-toggle:hover .opts-more { background: var(--accent-soft); color: var(--accent-text); }
+.opts-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.opts-toggle .opts-ico { color: var(--text-3); flex: none; }
+.opts-toggle .opts-label { color: var(--text); font-weight: 550; }
+.opts-toggle .opts-sum { color: var(--text-3); }
+.opts-toggle .opts-sum:not(:empty)::before { content: '— '; }
+/* The word says what the arrow only hints at. */
+.opts-toggle .opts-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 4px 8px 4px 10px;
+  /* surface-3 is surface-2 in the dark theme — the pill would vanish into the
+     row it sits on. */
+  background: var(--surface-4);
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 550;
+}
+.opts-toggle .chev { transition: transform 140ms ease; }
+.opts-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .opts-toggle .chev { transition: none; } }
+.opts-toggle .opts-flag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-risk) 18%, transparent);
+  color: var(--c-risk);
+  font-size: 12px;
+  font-weight: 600;
+}
+.options-card.collapsed { display: none; }
+
+/* Start and Import are unusable mid-meeting; the microphone picker is not, and
+   stays. */
+#view-record.is-recording .rec-actions { display: none; }
+/* The meters get the room they never had. 120 px of canvas is not a level
+   anyone can read — and it was 120 px because there was nowhere else for it to
+   go. Stacked one per row now, each filling the width of the panel. */
+/* Sharing the row with the clock and three buttons left the meters 306 px of
+   a 1250 px panel. They wrap onto their own line instead, one per row, each
+   filling it. */
+#view-record.is-recording .rec-status-row { flex-wrap: wrap; row-gap: 12px; }
+#view-record.is-recording #levels {
+  flex: 1 0 100%;
+  order: 1;                 /* after the clock and the buttons, so it wraps */
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+#view-record.is-recording .level { width: 100%; }
+#view-record.is-recording .viz { flex: 1; width: auto; min-width: 0; height: 34px; }

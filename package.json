@@ -1,11 +1,11 @@
 {
   "name": "yapper",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "description": "Records meetings, transcribes them on-device with Whisper, and writes structured notes with the model you choose",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node build/test-llm.js && node build/test-keystore.js && node build/test-live-logic.js && node build/test-dedup.js && node build/test-actions.js && node build/test-library.js && node build/test-search.js && node build/test-digest.js && node build/test-provision.js && node build/test-bounds.js && node build/test-meetings.js && node build/test-section-coverage.js && node build/test-ipc-wiring.js && node build/test-docs.js",
+    "test": "node build/test-llm.js && node build/test-keystore.js && node build/test-single-flight.js && node build/test-wedged-server.js && node build/test-progressive.js && node build/test-live-logic.js && node build/test-dedup.js && node build/test-actions.js && node build/test-library.js && node build/test-search.js && node build/test-digest.js && node build/test-provision.js && node build/test-bounds.js && node build/test-meetings.js && node build/test-meeting-detect.js && node build/test-platform-parity.js && node build/test-sysaudio.js && node build/test-audio-orphans.js && node build/test-section-coverage.js && node build/test-ipc-wiring.js && node build/test-docs.js",
     "dist": "electron-builder --win",
     "release": "node build/release.js"
   },
@@ -35,13 +35,21 @@
       "search.js",
       "digest.js",
       "provision.js",
+      "meetings.js",
+      "sysaudio.js",
       "preload.js",
       "renderer/**/*",
       "!renderer/.pdf-export.html",
-      "build/calibration.wav"
+      "build/yapper-tray-Template.png",
+      "build/yapper-tray-Template@2x.png",
+      "build/calibration.wav",
+      "build/mic-probe",
+      "build/system-audio"
     ],
     "asarUnpack": [
-      "build/calibration.wav"
+      "build/calibration.wav",
+      "build/mic-probe",
+      "build/system-audio"
     ],
     "win": {
       "target": [
@@ -69,10 +77,18 @@
           ]
         }
       ],
-      "icon": "build/yapper-icon.png",
+      "icon": "build/yapper-icon-dark.png",
       "category": "public.app-category.productivity",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "minimumSystemVersion": "13.0",
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Yapper records meetings with your microphone and transcribes them on this Mac."
+        "NSCameraUsageDescription": null,
+        "NSBluetoothAlwaysUsageDescription": null,
+        "NSBluetoothPeripheralUsageDescription": null,
+        "NSMicrophoneUsageDescription": "Yapper records meetings with your microphone and transcribes them on this Mac.",
+        "NSAudioCaptureUsageDescription": "Yapper records the other side of your calls \u2014 the audio your Mac is playing \u2014 and transcribes it on this Mac.",
+        "NSScreenCaptureUsageDescription": "Only used on macOS 13, where capturing system audio has no other route. No screen content is ever read: the video side is reduced to 2x2 pixels and discarded."
       }
     },
     "nsis": {

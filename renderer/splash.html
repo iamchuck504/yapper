@@ -87,6 +87,18 @@
     .rule::after { animation: none; opacity: 1; }
     .dots::after { animation: none; content: '…'; }
   }
+
+  /* Main puts this class on for a light theme, the same way it writes the boot
+     status: the page has no preload and the CSP allows no inline script. A dark
+     card handing over to a light window is the flash the window's own
+     background colour exists to avoid — the splash has to agree with what
+     opens behind it. */
+  body.light .card { background: #FBFAF8; border-color: #E9E5DD; box-shadow: 0 18px 50px rgba(26, 24, 21, 0.18); }
+  body.light .wm { color: #1A1815; }
+  body.light .wm i { color: #A66A1E; }
+  body.light .rule { background: #E4E0D8; }
+  body.light .rule::after { background: #A66A1E; }
+  body.light #status { color: #918D83; }
 </style>
 </head>
 <body>

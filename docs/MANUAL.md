@@ -1,6 +1,6 @@
 # Yapper — user manual and honest assessment
 
-Yapper records meetings on Windows, transcribes them **on the machine** with
+Yapper records meetings on Windows and macOS, transcribes them **on the machine** with
 whisper.cpp, and writes structured notes with an LLM the user chooses. Nothing
 is uploaded to record or transcribe; every meeting is a plain folder of files
 the user can open. The architecture is local-first rather than cloud, and this
@@ -11,6 +11,12 @@ For internals — module map, IPC surface, measured performance, the reasoning
 behind each decision — see [ARCHITECTURE.md](../ARCHITECTURE.md). This document
 is about using it and judging it.
 
+If you only want to get it running, the step-by-step guides are shorter and
+newer: **[Installing on Windows](INSTALL-WINDOWS.md)**, **[Installing on
+macOS](INSTALL-MACOS.md)**, and **[what every feature does](FEATURES.md)**. This
+document keeps the honest assessment — what works, what is missing, and how it
+compares to another meeting-notes app in both directions.
+
 ---
 
 ## 1. Install and first run
@@ -18,24 +24,56 @@ is about using it and judging it.
 **For users: an installer.**
 
 > Download: **https://github.com/iamchuck504/yapper-releases/releases/latest**
-> (the code repo stays private; that public repo hosts only installers and the
-> update feed)
+> (an installers-only repo: the code lives here, the releases live there)
 
-`Yapper-Setup-<version>.exe` (~83 MB) installs
-per-user — no admin rights — creates the shortcuts, and on first launch the app
-downloads the transcription engine itself, with progress on screen: ~650 MB on
-a CPU-only machine, ~1.3 GB when an NVIDIA GPU is detected (the CUDA build).
-Recording stays disabled until that lands. Installed copies then **keep
-themselves updated** from the release feed: checked at launch and every four
-hours, downloaded in the background, applied on quit — or immediately via the
-"Update ready — restart" pill in the sidebar. The whole loop is exercised by
-`build/e2e-update.ps1`, which installs a 0.1.0, serves it a 0.1.1, and checks
-that what is on disk afterwards is 0.1.1.
+**Windows** — `Yapper-Setup-<version>.exe` (~83 MB) installs per-user, no admin
+rights, creates the shortcuts. Installed copies **keep themselves updated** from
+the release feed: checked at launch and every four hours, downloaded in the
+background, applied on quit — or immediately via the "Update ready — restart"
+pill in the sidebar. The whole loop is exercised by `build/e2e-update.ps1`,
+which installs a 0.1.0, serves it a 0.1.1, and checks that what is on disk
+afterwards is 0.1.1.
 
-Two honest caveats. The installer is **not code-signed** — no certificate — so
-SmartScreen shows "Windows protected your PC" and the user has to click
-*More info → Run anyway* once. And the update feed lives on GitHub Releases,
-so the machine needs to reach github.com.
+**macOS** — `Yapper-<version>-arm64.dmg` (~95 MB), Apple Silicon, macOS 13 or
+newer. Three differences from the Windows path, all of them consequences of
+having no Apple Developer certificate:
+
+- **The first open is blocked — unless it is installed with curl.** The build
+  is signed ad-hoc, so Gatekeeper refuses the dmg, and since macOS 15 the old
+  right-click → Open shortcut no longer clears that. What triggers the block is
+  `com.apple.quarantine`, which a *browser* attaches to a download and curl
+  does not, so the one-line installer sidesteps it entirely:
+  `curl -fsSL .../install.sh | bash`. It verifies the download against the
+  sha512 in the release manifest, which catches a corrupt or tampered file but
+  is not a signature and does not pretend to be. Taking the dmg instead means
+  *Open Anyway* in System Settings → Privacy & Security, or
+  `xattr -dr com.apple.quarantine /Applications/Yapper.app`.
+- **Updates notify rather than install themselves** — Squirrel.Mac refuses
+  unsigned updates, so the pill copies the one-line installer to the clipboard
+  instead of opening a page that ends in the dmg and the Gatekeeper detour all
+  over again. The engine is not re-downloaded, so an update costs ~95 MB rather
+  than another 650 MB, and meetings survive it. Permissions do **not**: an
+  ad-hoc signature changes identity with every build, so macOS treats each
+  update as a new app and asks again. A stable self-signed certificate would
+  fix that; a Developer ID one would fix all of it.
+- **A system-audio permission has to be granted** on the first recording, on
+  top of the microphone. It is what captures what the Mac is *playing* — the
+  other side of the call. On macOS 14.4+ that is **System Audio Recording
+  Only**, through a Core Audio process tap: it does what its name says and
+  reads nothing else. On macOS 13, where that permission does not exist, Yapper
+  falls back to ScreenCaptureKit and has to ask for Screen Recording instead;
+  nothing of the screen is read or kept there either, the capture running at
+  2×2 pixels once a second and discarded. Refused, Yapper records the
+  microphone alone and offers both the Settings pane and the reopen macOS
+  requires. Meeting auto-detection additionally needs macOS 14.4.
+
+On both, the installer ships the app and not the engine: **first launch
+downloads** whisper.cpp and its models with progress on screen — ~650 MB, or
+~1.3 GB on Windows when an NVIDIA GPU is detected (the CUDA build). Recording
+opens after the first ~160 MB of that, not at the end; the larger model
+arrives behind it and a meeting recorded meanwhile is transcribed as soon as
+it lands. An interrupted download resumes rather than restarting. The feed
+lives on GitHub Releases, so the machine needs to reach github.com.
 
 **For development: from source.**
 
@@ -43,8 +81,15 @@ so the machine needs to reach github.com.
 git clone https://github.com/iamchuck504/yapper
 cd yapper
 npm install          # electron + electron-builder + electron-updater
-.\setup.ps1          # downloads whisper.cpp + models next to the code
+.\setup.ps1          # Windows: downloads whisper.cpp + models next to the code
 npm start            # run;  npm run dist builds the installer
+```
+
+```bash
+git clone https://github.com/iamchuck504/yapper && cd yapper
+npm install
+bash mac/build-app.sh   # macOS: Swift helpers, engine, dmg — needs Command Line Tools, not Xcode
+npm start
 ```
 
 On first run the app plays an 11-second real-speech sample through the
@@ -64,7 +109,7 @@ records and transcribes — it just has no live text during the meeting.
 signed into one (no key, no per-meeting cost). Otherwise: Google Gemini (free
 tier, no card), OpenRouter, Ollama (fully local), the Anthropic API, or any
 OpenAI-compatible endpoint. Keys are sealed with the OS keystore (DPAPI on
-Windows) — the settings file never contains a readable key.
+Windows, Keychain on macOS) — the settings file never contains a readable key.
 
 ---
 
@@ -123,9 +168,10 @@ on a `fast` machine, worst measured 4.8 s).
 
 Yapper watches which app is using the microphone (Zoom, Teams, Slack, Discord,
 Webex, or a browser call) and offers to take notes — as this card over
-whichever view is open, and as a Windows notification for when Yapper is not
-the focused window. It never starts recording on its own, and the card
-deliberately does not switch views.
+whichever view is open, and as a system notification for when Yapper is not the
+focused window. On macOS that notification carries a real *Start recording*
+button; on Windows the whole toast is the click target. It never starts
+recording on its own, and the card deliberately does not switch views.
 
 Honest limits of this mechanism: it knows *an app is using the microphone*,
 not that a meeting exists. It cannot tell a Meet call from any other tab using
@@ -198,7 +244,7 @@ transcript, notes, title. Useful for phone recordings and voice memos.
 
 | Area | State |
 |---|---|
-| Record system audio + mic on Windows | Working (loopback capture, no bot) |
+| Record system audio + mic | Working on both (Windows loopback; macOS process-tap helper, needs System Audio Recording Only — ScreenCaptureKit and Screen Recording only as the macOS 13 fallback) |
 | Live transcript | Working on `fast`/`steady` machines; absent on `modest` |
 | Full transcription | Working, local, ~63× real time on a 4080 |
 | Notes in 7 styles + custom instructions | Working, provider-dependent |
@@ -211,11 +257,12 @@ transcript, notes, title. Useful for phone recordings and voice memos.
 | Meeting auto-detection + notification | Working, heuristic (mic usage) |
 | Audio auto-release after transcript | Working, with per-meeting keep toggle |
 | BYOK providers + OS-keystore key storage | Working (6 providers) |
-| Dark/light theme, read-aloud, start with Windows | Working |
+| Dark/light theme, read-aloud, start at login | Working |
 | Windows installer (per-user NSIS) | Working, unsigned |
+| macOS build (dmg + zip, arm64) | Working, ad-hoc signed, **not notarised** |
 | First-run engine download with progress | Working |
 | Auto-update from the release feed | Working, proven end to end (Windows; on macOS it notifies and links the download) |
-| macOS | Code-ready and build-scripted (`mac/`), **not yet run on a Mac**; mic-only capture, unsigned |
+| macOS | Working: Metal engine, system audio, meeting detection, notifications. Apple Silicon only, unsigned |
 | Mobile | **Missing** |
 | Speaker labels | **Missing** |
 | Calendar integration | **Missing** |
@@ -238,13 +285,17 @@ UI; several are deliberate trade-offs, marked as such.
    identity paperwork; without one, SmartScreen warns on first install and some
    corporate policies block unsigned executables outright. The auto-updater
    works unsigned, but signing is what "install without a scary screen" costs.
-2. **Windows-first; macOS is second-class.** The mac build is scripted
-   (`mac/`) but has not yet run on a Mac, and even built it captures the
-   **microphone only** — Electron's system-audio loopback is Windows-only, so
-   a headphone call records just this side. It is also unsigned (Gatekeeper
-   right-click-open), updates notify instead of self-installing, and meeting
-   auto-detection does not exist there. Full parity needs a ScreenCaptureKit
-   capture path and an Apple Developer account. No mobile.
+2. **macOS works, but is not signed.** Recording both sides, meeting detection,
+   notifications and the Metal engine all run there now — the first build was
+   done on an M4 Pro and the gaps that mattered were closed: system audio comes
+   from a ScreenCaptureKit helper rather than the Windows-only loopback, and
+   detection asks CoreAudio instead of the registry. What is left all traces
+   back to one missing thing, an Apple Developer certificate: Gatekeeper asks
+   on first open — though the one-line installer avoids that, since curl
+   attaches no quarantine — updates notify instead of self-installing, and
+   there is no notarised build to hand someone. System audio also depends on
+   the user granting System Audio Recording Only; refused, it records the
+   microphone alone and says so. Apple Silicon only. No mobile.
 3. **No speaker labels.** The transcript does not say who spoke. Typed
    participants improve name spelling only. (The mic and system channels are
    already separate internally, so "You:" vs "Them:" attribution is reachable —
@@ -274,7 +325,8 @@ UI; several are deliberate trade-offs, marked as such.
     out bad and the keep-toggle was off, there is no second chance at that
     audio. The transcript-quality bar is what makes this bet acceptable.
 11. **Windows notifications carry no buttons** (Electron limitation) — the
-    whole toast is the click target.
+    whole toast is the click target. macOS gets a real button, so the same
+    prompt reads better there.
 12. **Updates depend on the release feed being maintained.** Installed copies
     update themselves, but only from versions somebody actually published
     (`npm run release`); a development checkout still updates with `git pull`.
@@ -311,7 +363,7 @@ local capture client; Yapper is a local application, full stop.**
 | Notes LLM | User's choice: Claude CLI, Gemini free, OpenRouter, Ollama (local), Anthropic, any compatible | Managed (GPT-4o / Claude) |
 | Speaker separation | None | Two-speaker (you vs. others) |
 | Calendar | None | Integrated (meetings, titles, upcoming) |
-| Platforms | Windows | macOS, Windows, iOS |
+| Platforms | Windows, macOS (Apple Silicon) | macOS, Windows, iOS |
 | Sharing / teams | None | Links, workspaces, Notion/HubSpot/Slack/Zapier, API (Enterprise) |
 | Account | None | Required |
 | History limit | None — it is the user's disk | Free plan capped at 25 meetings |
@@ -383,8 +435,9 @@ Neutral estimates of shape, not commitments; ordered by leverage.
   starting", with titles and attendees prefilled.
 - **Semantic search** — a small local embedding model beside BM25, keeping the
   no-cloud promise while closing the synonym gap.
-- **macOS** — whisper.cpp Metal build, ScreenCaptureKit capture,
-  notarization; needs Apple hardware and a developer account.
+- **macOS notarization** — the Metal build and the ScreenCaptureKit capture are
+  done; what remains is the Apple Developer certificate, which is also what
+  unlocks self-installing updates there.
 - **True diarization** — heavier (tinydiarize / pyannote class models); the
   channel split above is the cheap first step.
 - **Renderer split** — mechanical refactor of the 2,500-line file into

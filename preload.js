@@ -15,6 +15,11 @@ function invoke(channel, ...args) {
 }
 
 contextBridge.exposeInMainWorld('yapper', {
+  // What the renderer is allowed to ask the machine for differs by platform:
+  // system audio exists on Windows and nowhere else, and asking for it anyway
+  // costs a Screen Recording permission on macOS in exchange for nothing.
+  platform: process.platform,
+
   recordingStart: participants => invoke('recording-start', participants),
   recordingChunk: buf => ipcRenderer.send('recording-chunk', buf),
   recordingFinish: (title, markers) => invoke('recording-finish', title, markers),
@@ -36,6 +41,11 @@ contextBridge.exposeInMainWorld('yapper', {
   generateTitle: folder => invoke('generate-title', folder),
   saveTextFile: opts => invoke('save-text-file', opts),
   setTheme: theme => ipcRenderer.send('set-theme', theme),
+  // Read here, synchronously, and only here: the theme has to be right on the
+  // first frame, so there is no round trip to wait for — and it kept it from
+  // living in localStorage as well, where the renderer's copy and the one main
+  // paints the window from could disagree. They did.
+  theme: ipcRenderer.sendSync('get-theme'),
   getOpenAtLogin: () => invoke('get-open-at-login'),
   getKeepAudio: () => invoke('get-keep-audio'),
   setKeepAudio: keep => invoke('set-keep-audio', keep),
@@ -43,6 +53,8 @@ contextBridge.exposeInMainWorld('yapper', {
   heldAudio: () => invoke('held-audio'),
   releaseHeldAudio: () => invoke('release-held-audio'),
   setOpenAtLogin: enabled => invoke('set-open-at-login', enabled),
+  getBubbleCorner: () => invoke('get-bubble-corner'),
+  setBubbleCorner: corner => invoke('set-bubble-corner', corner),
   listMeetings: () => invoke('list-meetings'),
   loadMeeting: folder => invoke('load-meeting', folder),
   deleteMeeting: folder => invoke('delete-meeting', folder),
@@ -52,6 +64,7 @@ contextBridge.exposeInMainWorld('yapper', {
   engineSetup: () => invoke('engine-setup'),
   onEngineSetup: cb => ipcRenderer.on('engine-setup-progress', (_e, p) => cb(p)),
   updateRestart: () => invoke('update-restart'),
+  openReleasesPage: () => invoke('open-releases-page'),
   onUpdateReady: cb => ipcRenderer.on('update-ready', (_e, info) => cb(info)),
   styleSections: () => invoke('style-sections'),
   getLlmSettings: () => invoke('get-llm-settings'),
@@ -86,5 +99,19 @@ contextBridge.exposeInMainWorld('yapper', {
   // meeting auto-detection
   setAutoDetect: enabled => ipcRenderer.send('autodetect-set', enabled),
   setRecordingState: recording => ipcRenderer.send('recording-state', recording),
-  onMeetingDetected: cb => ipcRenderer.on('meeting-detected', (_e, info) => cb(info))
+  onMeetingDetected: cb => ipcRenderer.on('meeting-detected', (_e, info) => cb(info)),
+
+  // macOS only: system audio is captured natively, so whether it worked is
+  // something only the main process knows.
+  onSystemAudioStatus: cb => ipcRenderer.on('system-audio-status', (_e, info) => cb(info)),
+
+  // macOS only: the two halves of granting Screen Recording that the user
+  // cannot reach from inside the app.
+  // macOS only: the system meter is drawn from what the main process mixed,
+  // because these samples never pass through this side.
+  onSystemWave: cb => ipcRenderer.on('system-wave', (_e, bytes) => cb(bytes)),
+  setSysGain: g => ipcRenderer.send('sys-gain', g),
+
+  openScreenSettings: which => invoke('open-screen-settings', which),
+  relaunchApp: () => invoke('relaunch-app')
 });

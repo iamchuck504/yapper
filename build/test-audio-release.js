@@ -4,6 +4,7 @@
 // asked to keep it, and never before the transcript is written.
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const { app, dialog } = require('electron');
 const { sandbox, logger, mainWindow, within } = require('./harness');
 
@@ -17,12 +18,26 @@ function check(name, ok, detail) {
   else { fails++; say(`FAIL  ${name}\n      ${detail}`); }
 }
 
+/**
+ * Enough speech to transcribe. It used to insist on a 60 s wav left in %TEMP%
+ * by another script — a Windows-only path, and a fixture that may simply not be
+ * there — so it now falls back to looping the calibration sample that ships
+ * with the app, which every checkout has on every platform.
+ */
+function sourcePcm(seconds) {
+  const named = process.env.WAV || path.join(os.tmpdir(), 'yapper-60s.wav');
+  const src = fs.existsSync(named) ? named : path.join(__dirname, 'calibration.wav');
+  const pcm = fs.readFileSync(src).subarray(engine.WAV_HEADER);
+  const want = engine.BYTES_PER_SEC * seconds;
+  if (pcm.length >= want) return pcm.subarray(0, want);
+  const copies = Math.ceil(want / pcm.length);
+  return Buffer.concat(Array.from({ length: copies }, () => pcm)).subarray(0, want);
+}
+
 function seed(name, seconds = 20) {
-  const src = process.env.WAV || path.join(process.env.TEMP, 'yapper-60s.wav');
   const folder = path.join(ROOT, 'Meetings', name);
   fs.mkdirSync(folder, { recursive: true });
-  const pcm = fs.readFileSync(src).subarray(engine.WAV_HEADER,
-    engine.WAV_HEADER + engine.BYTES_PER_SEC * seconds);
+  const pcm = sourcePcm(seconds);
   fs.writeFileSync(path.join(folder, 'recording.wav'), engine.wavFromPcm(pcm));
   return folder;
 }

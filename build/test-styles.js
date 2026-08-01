@@ -3,11 +3,12 @@
 // against the same real transcript and its output compared with the sections it
 // promised, including the colour each heading gets in the UI.
 const path = require('path');
+const os = require("os");
 const fs = require('fs');
 const { app } = require('electron');
 const { mainWindow } = require('./harness');
 
-const REAL_MEETINGS = path.join(process.env.USERPROFILE, 'Documents', 'Meetings');
+const REAL_MEETINGS = path.join(os.homedir(), 'Documents', 'Meetings');
 
 // A previous run that was killed keeps a lock on its Chromium cache, and then
 // wiping the folder throws EPERM *during app load* — before anything is

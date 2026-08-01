@@ -2,6 +2,7 @@
 // sidebar with hundreds of entries. All of it is real — a two-hour meeting is a
 // Tuesday, and names have accents in them.
 const path = require('path');
+const os = require("os");
 const fs = require('fs');
 const { app, dialog } = require('electron');
 const { sandbox, logger, mainWindow, within } = require('./harness');
@@ -35,16 +36,16 @@ app.whenReady().then(async () => {
   const $ = js => win.webContents.executeJavaScript(js, true);
 
   // ---- 1. the clock past an hour ----
-  say('--- 1. the timer in long meetings ---');
+  say('--- 1. el cronómetro en reuniones largas ---');
   const stamps = await $(`[0, 59000, 60000, 3599000, 3600000, 7261000, 36000000, 359999000]
     .map(ms => stamp(ms))`);
   say(`  ${JSON.stringify(stamps)}`);
-  check('under a minute', stamps[0] === '00:00', stamps[0]);
-  check('just before the hour', stamps[3] === '59:59', stamps[3]);
-  check('crossing the hour mark adds the field', stamps[4] === '01:00:00', stamps[4]);
-  check('two hours and a minute', stamps[5] === '02:01:01', stamps[5]);
+  check('menos de un minuto', stamps[0] === '00:00', stamps[0]);
+  check('justo antes de la hora', stamps[3] === '59:59', stamps[3]);
+  check('al cruzar la hora añade el campo', stamps[4] === '01:00:00', stamps[4]);
+  check('dos horas y un minuto', stamps[5] === '02:01:01', stamps[5]);
   check('diez horas', stamps[6] === '10:00:00', stamps[6]);
-  check('a hundred hours does not overflow', /^\d{2,3}:\d\d:\d\d$/.test(stamps[7]), stamps[7]);
+  check('cien horas no se desborda', /^\d{2,3}:\d\d:\d\d$/.test(stamps[7]), stamps[7]);
 
   // splitStamp is handed a heading with the "## " already stripped by
   // parseSections, so that is what it gets here too
@@ -54,13 +55,13 @@ app.whenReady().then(async () => {
   say(`  ${JSON.stringify(parsed)}`);
   check('lee mm:ss', parsed[0].at === '24:05' && parsed[0].title === 'Decisions', JSON.stringify(parsed[0]));
   check('lee h:mm:ss', parsed[1].at === '1:24:05', JSON.stringify(parsed[1]));
-  check('reads hh:mm:ss from a long meeting', parsed[2].at === '01:24:05', JSON.stringify(parsed[2]));
-  check('with no timestamp it invents none', parsed[3].at === '' && parsed[3].title === 'No stamp here',
+  check('lee hh:mm:ss de una reunión larga', parsed[2].at === '01:24:05', JSON.stringify(parsed[2]));
+  check('sin marca no inventa una', parsed[3].at === '' && parsed[3].title === 'No stamp here',
     JSON.stringify(parsed[3]));
 
   // ---- 2. a long meeting, transcribed for real ----
-  say('\n--- 2. a genuinely long meeting ---');
-  const src = process.env.WAV || path.join(process.env.TEMP, 'yapper-60s.wav');
+  say('\n--- 2. una reunión larga de verdad ---');
+  const src = process.env.WAV || path.join(os.tmpdir(), 'yapper-60s.wav');
   const minute = fs.readFileSync(src).subarray(engine.WAV_HEADER);
   const LONG_MIN = Number(process.env.MINUTES || 75);
   const long = meeting('2026-07-29_1900', {});
@@ -72,8 +73,8 @@ app.whenReady().then(async () => {
   fs.closeSync(out);
   const bytes = fs.statSync(path.join(long, 'recording.wav')).size;
   say(`  ${LONG_MIN} min, ${(bytes / 1024 / 1024).toFixed(0)} MB`);
-  check('the header repairs itself in a file that size',
-    engine.repairWav(path.join(long, 'recording.wav')) === true, 'no repair was needed');
+  check('la cabecera se repara sola en un archivo así',
+    engine.repairWav(path.join(long, 'recording.wav')) === true, 'no hizo falta repararla');
 
   const before = process.memoryUsage().rss;
   const t0 = Date.now();
@@ -82,33 +83,33 @@ app.whenReady().then(async () => {
     'transcribir 75 min', 600000).catch(e => 'colgado:' + e.message);
   const took = (Date.now() - t0) / 1000;
   const grew = (process.memoryUsage().rss - before) / 1024 / 1024;
-  say(`  ${took.toFixed(0)} s (${(LONG_MIN * 60 / took).toFixed(0)}x realtime), memory +${grew.toFixed(0)} MB`);
-  check('transcribes a meeting longer than an hour', typeof tr === 'number' && tr > 1000, String(tr).slice(0, 120));
-  check('memory does not blow up', grew < 400, `grew by ${grew.toFixed(0)} MB`);
+  say(`  ${took.toFixed(0)} s (${(LONG_MIN * 60 / took).toFixed(0)}x tiempo real), memoria +${grew.toFixed(0)} MB`);
+  check('transcribe una reunión de más de una hora', typeof tr === 'number' && tr > 1000, String(tr).slice(0, 120));
+  check('la memoria no explota', grew < 400, `creció ${grew.toFixed(0)} MB`);
 
   const text = fs.readFileSync(path.join(long, 'transcript.txt'), 'utf8');
   const last = text.trim().split('\n').pop();
-  say(`  last line: ${last.slice(0, 70)}`);
-  check('the timestamps go past an hour', /^\[0[1-9]:/.test(last), last.slice(0, 40));
-  check('the timestamps are in order',
+  say(`  última línea: ${last.slice(0, 70)}`);
+  check('las marcas pasan de una hora', /^\[0[1-9]:/.test(last), last.slice(0, 40));
+  check('las marcas van en orden',
     (() => {
       const secs = [...text.matchAll(/^\[(\d+):(\d\d):(\d\d)\]/gm)]
         .map(m => +m[1] * 3600 + +m[2] * 60 + +m[3]);
       return secs.every((s, i) => i === 0 || s >= secs[i - 1]);
-    })(), 'some timestamp goes backwards');
+    })(), 'alguna marca va hacia atrás');
 
   // ---- 3. awkward text ----
-  say('\n--- 3. awkward text ---');
+  say('\n--- 3. texto incómodo ---');
   const odd = meeting('2026-07-29_1901', {
-    'title.txt': 'Review with Maya Ürsula & Chuck — "the 100%" <urgent> #1',
+    'title.txt': 'Reunión con Maya & Chuck — "el 100%" <urgente> #1',
     'participants.txt': 'Maya Ürsula, Chuck O\'Brien, 田中さん',
-    'transcript.txt': '[00:00:01] We talked about 50% and *this* and _that_.\n[00:00:09] 田中さん said yes. 🎉',
-    'notes.md': '## Summary [00:01]\nWent well — 100% agreement.\n\n## Action items [00:09]\n- Maya Ürsula: review *the report*\n'
+    'transcript.txt': '[00:00:01] Hablamos del 50% y de *esto* y de _aquello_.\n[00:00:09] 田中さん dijo que sí. 🎉',
+    'notes.md': '## Summary [00:01]\nSalió bien — el 100% de acuerdo.\n\n## Action items [00:09]\n- Maya Ürsula: revisar *el informe*\n'
   });
   const loaded = await $(`window.yapper.loadMeeting(${JSON.stringify(odd)})`);
-  check('reads a title with accents, quotes and symbols',
+  check('lee un título con acentos, comillas y símbolos',
     loaded.title.includes('Maya') && loaded.title.includes('100%'), loaded.title);
-  check('reads participants with non-Latin characters',
+  check('lee participantes con caracteres no latinos',
     loaded.participants.includes('田中'), loaded.participants);
 
   await $(`(async () => {
@@ -120,30 +121,30 @@ app.whenReady().then(async () => {
   const shown = await $(`({
     title: document.getElementById('result-title').textContent,
     notes: document.getElementById('notes').textContent,
-    escaped: document.getElementById('notes').innerHTML.includes('<urgent>')
+    escaped: document.getElementById('notes').innerHTML.includes('<urgente>')
   })`);
-  check('the title is shown verbatim', shown.title.includes('<urgent>'), shown.title);
-  check('does not interpret the text as HTML', !shown.escaped, 'injected raw tags into the DOM');
-  check('the notes keep the emoji and the accents',
+  check('el título se muestra tal cual', shown.title.includes('<urgente>'), shown.title);
+  check('no interpreta el texto como HTML', !shown.escaped, 'metió etiquetas crudas en el DOM');
+  check('las notas mantienen el emoji y los acentos',
     shown.notes.includes('Ürsula'), shown.notes.slice(0, 80));
 
   const exp = await $(`runExport('md')`);
-  check('exports a title with forbidden filename characters',
+  check('exporta un título con caracteres de archivo prohibidos',
     !!exp && fs.existsSync(exp), String(exp));
   if (exp && fs.existsSync(exp)) {
-    check('the export preserves the text',
-      fs.readFileSync(exp, 'utf8').includes('Ürsula'), 'something was lost');
+    check('lo exportado conserva el texto',
+      fs.readFileSync(exp, 'utf8').includes('Ürsula'), 'se perdió algo');
   }
 
   // ---- 4. empty and absurd ----
-  say('\n--- 4. empties and absurdities ---');
+  say('\n--- 4. vacíos y absurdos ---');
   const empty = meeting('2026-07-29_1902', { 'recording.wav': '' });
   fs.writeFileSync(path.join(empty, 'recording.wav'), engine.wavFromPcm(Buffer.alloc(0)));
   const r4 = await within(
     $(`window.yapper.transcribe(${JSON.stringify(empty)}).then(t => 'ok:' + t.length, e => 'err:' + e.message)`),
-    'transcribing an empty wav', 60000).catch(e => 'colgado:' + e.message);
-  say(`  empty wav: ${String(r4).slice(0, 90)}`);
-  check('an empty wav neither hangs nor blows up ugly', !String(r4).startsWith('colgado'), String(r4));
+    'transcribir un wav vacío', 60000).catch(e => 'colgado:' + e.message);
+  say(`  wav vacío: ${String(r4).slice(0, 90)}`);
+  check('un wav vacío no cuelga ni revienta feo', !String(r4).startsWith('colgado'), String(r4));
 
   const noHead = meeting('2026-07-29_1903', { 'notes.md': 'Just a paragraph, no headings at all.' });
   await $(`(async () => {
@@ -152,12 +153,12 @@ app.whenReady().then(async () => {
     openMeetingView('Sin secciones', d.summary, d.transcript, false, '');
   })()`);
   await new Promise(r => setTimeout(r, 300));
-  check('notes with no sections still render',
+  check('notas sin secciones se pintan igual',
     (await $("document.getElementById('notes').textContent")).includes('Just a paragraph'),
     await $("document.getElementById('notes').textContent"));
 
   // ---- 5. many meetings in the sidebar ----
-  say('\n--- 5. the sidebar with many meetings ---');
+  say('\n--- 5. la barra lateral con muchas reuniones ---');
   for (let i = 0; i < 300; i++) {
     const d = String(i % 28 + 1).padStart(2, '0');
     const m = String(i % 12 + 1).padStart(2, '0');
@@ -169,21 +170,21 @@ app.whenReady().then(async () => {
   await new Promise(r => setTimeout(r, 600));
   const rows = await $("document.querySelectorAll('#meeting-list .m-item').length");
   say(`  ${rows} filas en ${Date.now() - t5} ms`);
-  check('lists hundreds of meetings', rows >= 300, `${rows} filas`);
-  check('and it does not take forever', Date.now() - t5 < 8000, `${Date.now() - t5} ms`);
+  check('lista cientos de reuniones', rows >= 300, `${rows} filas`);
+  check('y no tarda una eternidad', Date.now() - t5 < 8000, `${Date.now() - t5} ms`);
 
   const t6 = Date.now();
   await $(`(() => { const s = document.getElementById('search'); s.value = 'number 42';
     s.dispatchEvent(new Event('input')); })()`);
   await new Promise(r => setTimeout(r, 300));
   const found = await $("document.querySelectorAll('#meeting-list .m-item').length");
-  check('search is still instant', Date.now() - t6 < 2000, `${Date.now() - t6} ms`);
-  check('and it finds the meeting', found >= 1 && found <= 3, `${found} resultados`);
+  check('la búsqueda sigue siendo instantánea', Date.now() - t6 < 2000, `${Date.now() - t6} ms`);
+  check('y encuentra la reunión', found >= 1 && found <= 3, `${found} resultados`);
 
   // ---- 6. the live loop over a long session ----
   // Its rolling buffer is the one thing in the app that could grow without
   // bound, and a two-hour meeting is where that would show.
-  say('\n--- 6. live in a long session ---');
+  say('\n--- 6. el vivo en una sesión larga ---');
   const live = require('../live');
   const tier = engine.tierConfig('fast');
   let confirmed = 0, errors = 0;
@@ -192,7 +193,7 @@ app.whenReady().then(async () => {
     maxHoldSec: tier.maxHoldSec, language: 'en',
     onLine: o => { if (o.error) errors++; else if (o.commit) confirmed += o.commit.split(/\s+/).length; }
   });
-  check('live starts', started === true, String(started));
+  check('el vivo arranca', started === true, String(started));
 
   if (started) {
     // feed 20 minutes of audio as fast as it will take it
@@ -209,17 +210,17 @@ app.whenReady().then(async () => {
     await new Promise(r => setTimeout(r, 15000));
     const rssAfter = process.memoryUsage().rss;
     const grewLive = (rssAfter - rssBefore) / 1024 / 1024;
-    say(`  ${MINUTES} min pushed in at once: +${grewLive.toFixed(0)} MB, ${confirmed} words, ${errors} errors`);
+    say(`  ${MINUTES} min metidos de golpe: +${grewLive.toFixed(0)} MB, ${confirmed} palabras, ${errors} errores`);
     // The window is 12 s, so once the audio stops arriving there is only ever
     // 12 s of speech left to confirm — around 30-40 words. What is being checked
     // is that it caught up to the present at all: before the buffer was capped
     // it tried to decode all 20 minutes at once and confirmed nothing.
-    check('the live buffer does not grow without bound', grewLive < 60, `grew by ${grewLive.toFixed(0)} MB`);
-    check('catches up and confirms the current window', confirmed >= 20, `${confirmed} palabras`);
-    check('with no errors along the way', errors === 0, `${errors} errores`);
+    check('el búfer del vivo no crece sin límite', grewLive < 60, `creció ${grewLive.toFixed(0)} MB`);
+    check('se pone al día y confirma la ventana actual', confirmed >= 20, `${confirmed} palabras`);
+    check('sin errores por el camino', errors === 0, `${errors} errores`);
     await live.stop();
     await engine.stop();
-    check('stops cleanly', true, '');
+    check('se detiene limpio', true, '');
   }
 
   say(fails ? `\n${fails} fallos` : '\nPASS');

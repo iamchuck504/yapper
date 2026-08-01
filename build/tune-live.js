@@ -3,10 +3,11 @@
 // reports what each one costs and how much it manages to confirm.
 const fs = require('fs');
 const path = require('path');
+const os = require("os");
 const engine = require('../engine');
 const live = require('../live');
 
-const WAV = process.env.WAV || path.join(process.env.TEMP, 'yapper-60s.wav');
+const WAV = process.env.WAV || path.join(os.tmpdir(), 'yapper-60s.wav');
 const PLAY_SEC = Number(process.env.SECS || 45);
 const CHUNK_MS = 200;
 

@@ -7,6 +7,72 @@ const viewSearch = $('view-search');
 const btnRecord = $('btn-record');
 const btnStop = $('btn-stop');
 const btnNew = $('btn-new');
+const btnNewLabel = $('btn-new-label');
+
+// ---------- the options fold away ----------
+// The card is a page of settings sitting between the reader and the button
+// they came for. Recording and importing are the first thing in the view now,
+// and the settings live behind one line that says what is currently chosen —
+// open it when you want to change something, which is not most meetings.
+const viewRecordEl = $('view-record');
+const optionsCardEl = $('options-card');
+const optsToggleEl = $('opts-toggle');
+
+/** "General · Concise" — what the folded card is currently set to. */
+function chosenOptions() {
+  const picked = sel => {
+    const b = document.querySelector(`${sel} .seg-btn.active`);
+    return b ? b.textContent.trim() : null;
+  };
+  return [picked('#style-pills'), picked('#detail-seg')].filter(Boolean).join(' · ');
+}
+
+function paintOptsToggle() {
+  const open = !optionsCardEl.classList.contains('collapsed');
+  const what = chosenOptions();
+  $('opts-sum').textContent = what;
+  // "Show" / "Hide" spelled out beside the chevron: the chevron alone was read
+  // as decoration on a label, and the settings behind it were never found.
+  $('opts-more-text').textContent = open ? 'Hide' : 'Show';
+  // Something in there is unfinished — today only a provider without its key.
+  // Folded, that warning is off screen, and the first time it is noticed is at
+  // the end of the first meeting, which is what it exists to prevent.
+  // Looked up rather than closed over: this runs once during module
+  // evaluation, before the settings elements have been bound.
+  const llm = document.getElementById('llm-status');
+  $('opts-flag').classList.toggle('hidden', open || !llm || llm.dataset.kind !== 'needs-key');
+  optsToggleEl.setAttribute('aria-expanded', String(open));
+}
+
+function setOptionsOpen(open) {
+  optionsCardEl.classList.toggle('collapsed', !open);
+  paintOptsToggle();
+}
+
+optsToggleEl.addEventListener('click', () =>
+  setOptionsOpen(optionsCardEl.classList.contains('collapsed')));
+
+// Folded, every launch. It used to remember having been opened, which meant
+// the view could still open on the wall of settings instead of on the button
+// people came for — the whole point of the fold.
+setOptionsOpen(false);
+localStorage.removeItem('yapper-options-open');
+
+function layoutForRecording(on) {
+  viewRecordEl.classList.toggle('is-recording', on);
+  // Nothing in there can be changed mid-meeting, so it folds and stays folded
+  // until the recording ends.
+  if (on) setOptionsOpen(false);
+  paintOptsToggle();
+}
+
+/** The sidebar button doubles as the recording indicator and the way back. */
+function markRecordingInSidebar(on) {
+  layoutForRecording(on);
+  btnNew.classList.toggle('recording', on);
+  btnNew.title = on ? 'Recording — click to go back to the controls' : '';
+  if (!on) btnNewLabel.textContent = 'New meeting';
+}
 const btnRegen = $('btn-regen');
 const btnCopy = $('btn-copy');
 const btnOpenFolder = $('btn-open-folder');
@@ -39,6 +105,67 @@ let noiseReduction = localStorage.getItem('yapper-noise') || 'standard';
 
 const numOr = (v, d) => (isNaN(parseFloat(v)) ? d : parseFloat(v));
 let gainSys = numOr(localStorage.getItem('yapper-gain-sys'), 1);
+
+// macOS: the system waveform's samples are captured and mixed in the main
+// process, so they arrive over IPC — but drawing them as they arrive tied the
+// animation to the delivery rate, about eighteen packets a second, and it read
+// as robotic beside a microphone meter running off a live analyser every
+// frame.
+//
+// So the packets fill a ring, and the drawing walks that ring on its own
+// clock: 256 points per second of audio, advanced by however long the last
+// frame took. Between packets it keeps moving through samples it already has,
+// which is what makes it look like sound rather than like a slideshow. It
+// deliberately reads a little behind the newest sample, because a trace that
+// stalls waiting for the next packet is exactly the stutter being removed.
+const SYS_WAVE_POINTS = 160;    // one screenful: 10 ms, like the mic's analyser
+const SYS_WAVE_RATE = 16000;
+const SYS_RING = 8192;          // half a second of slack
+const SYS_LAG = 1600;           // 100 ms, against a late packet
+
+const sysRing = new Uint8Array(SYS_RING).fill(128);
+let sysWritten = 0;                 // points ever received
+let sysCursor = 0;                  // points already drawn past
+let sysFrameAt = 0;
+
+if (window.yapper.platform === 'darwin') {
+  window.yapper.onSystemWave(bytes => {
+    // Packets keep arriving for a moment after stopping — the helper is asked
+    // to stop from here and takes a beat to hear it. Without this, the ring is
+    // emptied on stop and then refilled by that tail, and the next meeting
+    // opens on the previous one's audio.
+    if (!recording || !bytes || !bytes.length) return;
+    for (let i = 0; i < bytes.length; i++) sysRing[(sysWritten + i) % SYS_RING] = bytes[i];
+    sysWritten += bytes.length;
+  });
+}
+
+function resetSysWave() {
+  sysRing.fill(128);
+  sysWritten = 0;
+  sysCursor = 0;
+  sysFrameAt = 0;
+}
+
+/** The next screenful, walked at the rate the audio was recorded. */
+function sysWaveInto(target) {
+  const now = performance.now();
+  const dt = sysFrameAt ? Math.min(0.25, (now - sysFrameAt) / 1000) : 0;
+  sysFrameAt = now;
+  sysCursor += dt * SYS_WAVE_RATE;
+
+  // Never past what has arrived, and never so far behind that the trace is
+  // showing old news — a long stall is caught up rather than crawled through.
+  const newest = sysWritten - SYS_WAVE_POINTS - SYS_LAG;
+  if (sysCursor > newest) sysCursor = newest;
+  if (sysCursor < newest - SYS_WAVE_RATE) sysCursor = newest;
+  if (sysCursor < 0) sysCursor = 0;
+
+  const start = Math.floor(sysCursor);
+  for (let i = 0; i < target.length; i++) {
+    target[i] = sysWritten > 0 ? sysRing[(start + i) % SYS_RING] : 128;
+  }
+}
 let gainMic = numOr(localStorage.getItem('yapper-gain-mic'), 1);
 const micStreams = new Map(); // deviceId|'default' -> MediaStream
 const micNodes = new Map();   // deviceId|'default' -> MediaStreamAudioSourceNode
@@ -68,18 +195,49 @@ const liveTranscriptEl = $('live-transcript');
 // ---------- theme (persisted) ----------
 
 const btnTheme = $('btn-theme');
-let theme = localStorage.getItem('yapper-theme') || 'dark';
+const themeSeg = $('theme-seg');
+// The preference, which may be "auto" — not the colour it resolves to. Dark
+// unless someone chose otherwise. Main resolves the same three values before
+// the stylesheet lands, for the window background and the splash, so the
+// defaults have to agree or a launch opens on a flash of the other one.
+const THEMES = ['auto', 'light', 'dark'];
+let theme = THEMES.includes(window.yapper.theme) ? window.yapper.theme : 'dark';
+// It used to live here too, and the two copies drifted apart: settings said
+// auto while this said light, so the window opened one colour and the page
+// painted the other. Settings is the only copy now.
+localStorage.removeItem('yapper-theme');
+
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+const resolvedTheme = () =>
+  theme === 'auto' ? (systemDark.matches ? 'dark' : 'light') : theme;
 
 function applyTheme() {
-  document.body.classList.toggle('light', theme === 'light');
-  window.yapper.bubbleState({ theme });   // keep the floating bubble in sync
-  window.yapper.setTheme(theme);          // so the next launch paints the right bg
+  const showing = resolvedTheme();
+  document.body.classList.toggle('light', showing === 'light');
+  document.querySelectorAll('#theme-seg .seg-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.theme === theme));
+  // The bubble is told what to paint; main is told what was chosen, so that
+  // "auto" is still "auto" the next time the app opens.
+  window.yapper.bubbleState({ theme: showing });
+  window.yapper.setTheme(theme);
 }
 
-btnTheme.addEventListener('click', () => {
-  theme = theme === 'dark' ? 'light' : 'dark';
-  localStorage.setItem('yapper-theme', theme);
-  applyTheme();
+function setTheme(next) {
+  theme = THEMES.includes(next) ? next : 'dark';
+  applyTheme();       // which is what tells main, the only place it is kept
+}
+
+// On auto, the system can change under a running app — at sunset, or when
+// someone flips it in System Settings. Following it is the whole point.
+systemDark.addEventListener('change', () => { if (theme === 'auto') applyTheme(); });
+
+// The button beside the title is the quick way, and it commits to a side:
+// flipping "auto" would otherwise land on whatever the system already was.
+btnTheme.addEventListener('click', () => setTheme(resolvedTheme() === 'dark' ? 'light' : 'dark'));
+
+themeSeg.addEventListener('click', e => {
+  const b = e.target.closest('.seg-btn');
+  if (b) setTheme(b.dataset.theme);
 });
 
 applyTheme();
@@ -118,6 +276,10 @@ function syncOptionControls() {
   customInput.value = options.custom || '';
   regenStyle.value = options.style;
   regenDetail.value = options.detail;
+  // The folded line summarises these. Without this it kept whatever was chosen
+  // the last time the fold was opened or closed — a summary that says
+  // "General · Concise" over a meeting set to Minutes is worse than none.
+  paintOptsToggle();
 }
 
 document.querySelectorAll('#style-pills .seg-btn').forEach(p =>
@@ -134,6 +296,9 @@ customInput.addEventListener('change', saveOptions);
 const bubbleToggle = $('opt-bubble');
 const autoDetectToggle = $('opt-autodetect');
 const startupToggle = $('opt-startup');
+// The switch does the same thing on both platforms, but "Start with Windows"
+// on a Mac reads like a setting that belongs to some other computer.
+if (window.yapper.platform === 'darwin') $('startup-label').textContent = 'Start at login';
 let bubbleEnabled = localStorage.getItem('yapper-bubble') !== 'off';
 let autoDetectEnabled = localStorage.getItem('yapper-autodetect') !== 'off';   // on by default
 
@@ -265,6 +430,7 @@ function setLlmStatus(text, kind = '') {
   llmStatus.textContent = text;
   llmStatus.dataset.kind = kind;
   llmStatus.classList.toggle('bad', kind === 'needs-key' || kind === 'error');
+  paintOptsToggle();     // folded, the toggle line is where this has to show
 }
 
 async function saveLlm() {
@@ -343,6 +509,54 @@ $('btn-llm-test').addEventListener('click', async () => {
 // ---------- meeting detection prompt ----------
 
 const meetingPrompt = $('meeting-prompt');
+
+// On macOS the other side of the call is captured natively, outside this
+// process, so its failures have to be reported from there. The one worth acting
+// on is the permission: without Screen Recording the recording is half a
+// conversation, and the user is the only one who can fix that.
+const screenPrompt = $('screen-prompt');
+let missingPane = 'screen';       // which Settings pane the button should open
+
+window.yapper.onSystemAudioStatus(info => {
+  if (info.ok) return;
+
+  // The permission case gets buttons rather than a sentence. It used to say
+  // "then record again", which does not work: macOS does not apply the grant
+  // to a process that was already running, so following the instruction to the
+  // letter produced another one-sided recording and no explanation.
+  if (info.reason === 'permission' || info.reason === 'helper') {
+    // Which permission depends on the route the helper took. Naming the wrong
+    // one sends the user to a page that does not contain the switch.
+    missingPane = info.which === 'audio' ? 'audio' : 'screen';
+    $('sp-detail').textContent = missingPane === 'audio'
+      ? 'Allow Yapper under System Audio Recording Only to capture the other '
+        + 'side of the call. macOS applies it only after Yapper is reopened.'
+      : 'Allow Yapper under Screen Recording to capture the other side of the '
+        + 'call. macOS applies it only after Yapper is reopened.';
+    $('sp-relaunch').disabled = recording;
+    $('sp-relaunch').title = recording
+      ? 'Stop the recording first — reopening now would discard it.'
+      : '';
+    screenPrompt.classList.remove('hidden');
+    return;
+  }
+
+  // 'stopped' is the one that arrives mid-recording: capture was working and
+  // died. Said differently on purpose — the rest of this meeting is one-sided,
+  // and finding that out afterwards is worse than being interrupted now.
+  setStatus(statusEl,
+    info.reason === 'stopped'
+      ? 'System audio stopped partway through — from here only your microphone is being recorded.'
+      : 'Only your microphone is being recorded: system audio could not be started.',
+    true);
+});
+
+$('sp-settings').addEventListener('click', () => window.yapper.openScreenSettings(missingPane));
+$('sp-dismiss').addEventListener('click', () => screenPrompt.classList.add('hidden'));
+$('sp-relaunch').addEventListener('click', async () => {
+  if (recording) return;                 // the disabled state already says why
+  await window.yapper.relaunchApp();
+});
 
 window.yapper.onMeetingDetected(info => {
   if (recording) return;
@@ -663,6 +877,9 @@ gainSysSlider.addEventListener('input', () => {
   gainSysVal.textContent = gainSys.toFixed(1) + '×';
   localStorage.setItem('yapper-gain-sys', gainSys);
   if (sysGainNode) sysGainNode.gain.value = gainSys;
+  // On macOS there is no gain node here to turn: the mixing happens in the
+  // main process, so the slider has to reach it or it moves nothing.
+  if (window.yapper.platform === 'darwin') window.yapper.setSysGain(gainSys);
 });
 
 gainMicSlider.addEventListener('input', () => {
@@ -874,15 +1091,46 @@ function drawWave(m) {
   ctx.lineWidth = 2.4;
   ctx.lineJoin = 'round';
   ctx.beginPath();
+  // Two problems pull in opposite directions here, and this draws for both.
+  //
+  // At true scale a voice sits around 8% of an int16 — a line with a tremor in
+  // it, indistinguishable from a dead input, which is how "the waveforms don't
+  // work" was meant. Normalising to a rolling peak fixes that and breaks the
+  // gain sliders: turn one up, the signal grows, the peak grows with it, the
+  // scale shrinks by exactly as much, and the trace never moves. A meter that
+  // normalises away the thing its own slider controls is worse than a quiet
+  // one. A fixed boost fixes the sliders and puts the first problem back, since
+  // whatever multiplier suits a quiet microphone saturates a loud call.
+  //
+  // So: normalised for visibility, then multiplied by the gain the user chose.
+  // The shape is always readable whatever the source level, turning the gain up
+  // grows the trace until it flattens against the edges — which is what
+  // clipping looks like everywhere else, and the honest signal that the
+  // recording is too hot — and turning it down visibly shrinks it.
+  let peak = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const d = Math.abs(buf[i] - 128);
+    if (d > peak) peak = d;
+  }
+  // Decays rather than resets, so the scale does not jump between frames, and
+  // floored so silence is not stretched into a convincing signal — a worse lie
+  // than a flat line, and one that would hide the very failure the silence
+  // warning exists to catch.
+  m.peak = Math.max(peak, (m.peak || 0) * 0.92, VIZ_FLOOR);
+  const scale = (mid * 0.92) / m.peak * (m.gainOf ? m.gainOf() : 1);
+
   const step = w / buf.length;
   let x = 0;
   for (let i = 0; i < buf.length; i++) {
-    const y = mid + ((buf[i] - 128) / 128) * mid * 0.92;
+    const y = mid + Math.max(-mid * 0.98, Math.min(mid * 0.98, (buf[i] - 128) * scale));
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     x += step;
   }
   ctx.stroke();
 }
+
+// About 6% of full scale: below this the input is silence or its noise floor.
+const VIZ_FLOOR = 8;
 
 /** Peak deviation in a viz's current buffer, 0..1 — what the bubble's bars show. */
 function levelOf(m) {
@@ -981,6 +1229,7 @@ $('ep-stop').addEventListener('click', () => { clearEndedPrompt(); stopAndProces
  */
 async function abortRecording(err) {
   recording = false;
+  markRecordingInSidebar(false);
   try { await stopLivePreview(); } catch { /* it may never have started */ }
   stopPcmTap();
   cleanupCapture();          // also tells main the recording is over
@@ -997,10 +1246,19 @@ async function startRecording() {
   // is open. The timer and the stop button have to be the thing on screen.
   showView('record');
   try {
-    // main.js answers this with Windows system-audio loopback (video must be requested even if unused)
-    const sys = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
-    sys.getVideoTracks().forEach(t => (t.enabled = false));
-    sysStream = sys;
+    // main.js answers this with Windows system-audio loopback (video must be
+    // requested even if unused). Not on macOS: Electron's loopback is
+    // Windows-only, and asking there would trigger a Screen Recording
+    // permission prompt — and, if it were refused, reject and take the whole
+    // recording down with it. The microphone alone is what a Mac can offer,
+    // so it asks for exactly that.
+    const sys = window.yapper.platform === 'darwin'
+      ? null
+      : await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    if (sys) {
+      sys.getVideoTracks().forEach(t => (t.enabled = false));
+      sysStream = sys;
+    }
 
     audioCtx = new AudioContext();
     dest = audioCtx.createMediaStreamDestination();
@@ -1024,17 +1282,33 @@ async function startRecording() {
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 512;
       sourceNode.connect(analyser);
-      return { analyser, canvas, ctx: canvas.getContext('2d'), color, buf: new Uint8Array(analyser.fftSize) };
+      return { analyser, canvas, ctx: canvas.getContext('2d'), color,
+        buf: new Uint8Array(analyser.fftSize), gainOf: () => (canvas === vizSys ? gainSys : gainMic) };
     };
 
     analysers = { sys: null, mic: null };
-    if (sys.getAudioTracks().length) {
+    if (sys && sys.getAudioTracks().length) {
       const sysSrc = audioCtx.createMediaStreamSource(sys);
       sysGainNode = audioCtx.createGain();
       sysGainNode.gain.value = gainSys;
       sysSrc.connect(sysGainNode);
       sysGainNode.connect(dest);
       analysers.sys = makeViz(sysGainNode, vizSys, colSys);
+    } else if (window.yapper.platform === 'darwin') {
+      window.yapper.setSysGain(gainSys);      // the stored preference, applied
+      resetSysWave();
+      // No stream to hang an analyser on: on macOS these samples are captured
+      // and mixed in the main process and never reach this side. The meter is
+      // fed from there instead, through something shaped like an analyser so
+      // drawWave and levelOf do not have to know the difference.
+      analysers.sys = {
+        analyser: { getByteTimeDomainData: sysWaveInto },
+        canvas: vizSys,
+        ctx: vizSys.getContext('2d'),
+        color: colSys,
+        buf: new Uint8Array(SYS_WAVE_POINTS),
+        gainOf: () => gainSys
+      };
     }
     analysers.mic = makeViz(micBus, vizMic, colMic);
 
@@ -1087,6 +1361,7 @@ async function startRecording() {
     currentFolder = await window.yapper.recordingStart(recParticipants());
     paused = false;     // the tap reads this on its very first block
     recording = true;
+    markRecordingInSidebar(true);
 
     startPcmTap();      // the single audio source: file and live share it
     startLivePreview();
@@ -1095,10 +1370,17 @@ async function startRecording() {
     recLive.classList.remove('hidden');
     pipelineEl.classList.add('hidden');
     statusEl.classList.add('hidden');
-    if (micNodes.size === 0 && !sys.getAudioTracks().length) {
+    const sysAudio = !!(sys && sys.getAudioTracks().length);
+    if (micNodes.size === 0 && !sysAudio) {
       setStatus(statusEl, 'Warning: no audio source could be captured.');
-    } else if (!sys.getAudioTracks().length) {
-      setStatus(statusEl, 'Warning: system audio could not be captured; only the mic is being recorded.');
+    } else if (!sysAudio) {
+      // On macOS system audio does not come through the renderer at all: the
+      // native helper captures it and main.js mixes it in. So silence here is
+      // the normal case, and the only thing worth saying is when that helper
+      // could not start — which arrives separately, on 'system-audio-status'.
+      if (window.yapper.platform !== 'darwin') {
+        setStatus(statusEl, 'Warning: system audio could not be captured; only the mic is being recorded.');
+      }
     } else if (micNodes.size === 0) {
       setStatus(statusEl, 'Warning: no microphone could be captured; only system audio is being recorded.');
     }
@@ -1120,6 +1402,7 @@ async function startRecording() {
     timerInterval = setInterval(() => {
       const text = stamp(elapsed());
       timerEl.textContent = text;
+      btnNewLabel.textContent = `Recording — ${text}`;
       window.yapper.bubbleState({ timer: text });
     }, 500);
   } catch (err) {
@@ -1155,6 +1438,12 @@ function cleanupCapture() {
 async function stopAndProcess() {
   if (!recording) return;
   recording = false;                 // no further samples reach the file
+  markRecordingInSidebar(false);
+  // If the Screen Recording prompt is up, its reopen button was held back
+  // while a meeting was in the air. Nothing is at stake now.
+  const relaunch = $('sp-relaunch');
+  if (relaunch) { relaunch.disabled = false; relaunch.title = ''; }
+  resetSysWave();                    // flat, not frozen on the last peak
   await stopLivePreview();
   stopPcmTap();
   cleanupCapture();
@@ -2039,6 +2328,31 @@ btnImport.addEventListener('click', async () => {
   }
 });
 
+// Where the capsule appears each recording. It never remembered being dragged,
+// so the corner it starts in is the corner it lives in — and the bottom right
+// is wrong as often as it is right, since that is where a video call puts its
+// own controls.
+const cornerSeg = $('corner-seg');
+
+async function initBubbleCorner() {
+  const current = await window.yapper.getBubbleCorner().catch(() => 'bottom-right');
+  paintCorner(current);
+}
+
+function paintCorner(corner) {
+  cornerSeg.querySelectorAll('.seg-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.corner === corner));
+}
+
+cornerSeg.addEventListener('click', e => {
+  const btn = e.target.closest('.seg-btn');
+  if (!btn) return;
+  paintCorner(btn.dataset.corner);
+  window.yapper.setBubbleCorner(btn.dataset.corner);
+});
+
+initBubbleCorner();
+
 btnNew.addEventListener('click', () => {
   stopSpeak();
   currentFolder = null;
@@ -2570,17 +2884,40 @@ refreshReminders();
 })();
 
 /**
- * The one-time engine download, narrated in the status area. Recording stays
- * disabled while it runs — there is nothing to record into yet — and the
- * environment is re-checked afterwards, which is when calibration happens.
+ * The one-time engine download, narrated in the status area.
+ *
+ * It resolves at the *usable* milestone, not the complete one: the engine and
+ * the first model are enough to record, and the larger model keeps arriving
+ * afterwards. So the narration has two halves — a blocking one, and a quieter
+ * one that has to stay visible, because a transcript that waits for a download
+ * nobody mentioned reads as the app being stuck.
  */
 async function provisionEngine() {
   btnRecord.disabled = true;
   btnImport.disabled = true;
+  let usable = false;
   window.yapper.onEngineSetup(p => {
-    if (!p || p.error) return;         // the invoke result carries the failure
+    if (!p) return;
+    if (p.error) {
+      // Before the app opened, the invoke result carries this and the caller
+      // reports it. After — the background half failing is the only way anyone
+      // hears about it, and leaving "still downloading" on screen for a
+      // download that has stopped is worse than saying nothing.
+      if (usable) {
+        setStatus(statusEl, 'The rest of the transcription engine could not be '
+          + 'downloaded. Recording works; the first transcript will retry it.', true);
+      }
+      return;
+    }
+    if (p.usable) usable = true;
+    if (/engine ready/i.test(p.label || '')) {
+      statusEl.classList.add('hidden'); // everything is down; nothing left to say
+      return;
+    }
     const pct = p.pct != null ? ` — ${Math.round(p.pct)}%` : '';
-    setStatus(statusEl, `Setting up transcription (one-time download, step ${p.step} of ${p.steps}):\n${p.label}${pct}`);
+    setStatus(statusEl, usable
+      ? `You can record now. Still downloading, so the first transcript may wait for it:\n${p.label}${pct}`
+      : `Setting up transcription (one-time download, step ${p.step} of ${p.steps}):\n${p.label}${pct}`);
   });
   setStatus(statusEl, 'Setting up transcription — a one-time download…');
   let ok = false;
@@ -2588,7 +2925,8 @@ async function provisionEngine() {
   btnRecord.disabled = false;
   btnImport.disabled = false;
   if (!ok) return null;
-  statusEl.classList.add('hidden');
+  // The status is left alone on purpose: the handler above hides it when the
+  // background half finishes, which is usually after this returns.
   return window.yapper.checkEnvironment();
 }
 
@@ -2607,10 +2945,21 @@ window.yapper.onUpdateReady(info => {
     : `Update ${info && info.version ? 'v' + info.version : ''} ready — restart`.replace('  ', ' ');
   b.classList.remove('hidden');
 });
-$('btn-update').addEventListener('click', () => {
+$('btn-update').addEventListener('click', async () => {
   if (recording && !updateIsManual) {
     setStatus(statusEl, 'Recording — the update will install when Yapper closes.');
     return;
   }
-  window.yapper.updateRestart();
+  const res = await window.yapper.updateRestart();
+
+  // macOS cannot apply an unsigned update to itself, so what comes back is the
+  // one command that does it. Putting it on the clipboard beats opening a page
+  // that ends in the dmg and the Gatekeeper detour all over again.
+  if (res && res.kind === 'command') {
+    let copied = false;
+    try { await navigator.clipboard.writeText(res.command); copied = true; } catch { /* below */ }
+    setStatus(statusEl, copied
+      ? `Update copied to your clipboard. Paste it in Terminal:\n\n${res.command}\n\nIt replaces Yapper and reopens it. Your meetings and the engine stay where they are.`
+      : `Run this in Terminal to update:\n\n${res.command}`);
+  }
 });

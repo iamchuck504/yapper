@@ -4,12 +4,13 @@
 //
 //   node_modules\electron\dist\electron.exe build\make-clips.js [seconds]
 const path = require('path');
+const os = require("os");
 const fs = require('fs');
 const { app, BrowserWindow } = require('electron');
 const engine = require('../engine');
 
-const REAL = path.join(process.env.USERPROFILE, 'Documents', 'Meetings');
-const OUT = path.join(process.env.TEMP, 'yapper-clips');
+const REAL = path.join(os.homedir(), 'Documents', 'Meetings');
+const OUT = path.join(os.tmpdir(), 'yapper-clips');
 const SECONDS = Number(process.argv[2] || process.env.SECONDS || 180);
 const HOW_MANY = Number(process.env.CLIPS || 6);
 

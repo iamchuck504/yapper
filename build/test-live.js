@@ -3,21 +3,37 @@
 // confirmed text never changes once printed, and it does not fall behind.
 const fs = require('fs');
 const path = require('path');
+const os = require("os");
 const engine = require('../engine');
 const live = require('../live');
 
-const MEETINGS = path.join(process.env.USERPROFILE, 'Documents', 'Meetings');
+const MEETINGS = path.join(os.homedir(), 'Documents', 'Meetings');
 const PLAY_SEC = Number(process.env.SECS || 60);
 const CHUNK_MS = 200;
 
+/**
+ * Speech to replay. The generated fixture comes first on purpose: reaching into
+ * the user's own meetings made this test depend on whatever happened to be
+ * recorded last — a silent take, or an aborted one, fails it while proving
+ * nothing — and it meant reading real meeting audio to run a test. Set
+ * `WAV=`, or `REAL=1` to go back to the newest recording on this machine.
+ */
 function pickRecording() {
   if (process.env.WAV) return process.env.WAV;
-  const dirs = fs.readdirSync(MEETINGS).sort().reverse();
-  for (const d of dirs) {
-    const w = path.join(MEETINGS, d, 'recording.wav');
-    if (fs.existsSync(w) && fs.statSync(w).size > engine.WAV_HEADER + engine.BYTES_PER_SEC * 30) return w;
+
+  const longEnough = w => fs.existsSync(w)
+    && fs.statSync(w).size > engine.WAV_HEADER + engine.BYTES_PER_SEC * 30;
+
+  if (process.env.REAL) {
+    for (const d of fs.readdirSync(MEETINGS).sort().reverse()) {
+      const w = path.join(MEETINGS, d, 'recording.wav');
+      if (longEnough(w)) return w;
+    }
   }
-  return null;
+
+  const fixture = path.join(os.tmpdir(), 'yapper-60s.wav');
+  if (!longEnough(fixture)) require('./make-fixtures').build(60);
+  return longEnough(fixture) ? fixture : null;
 }
 
 (async () => {

@@ -13,6 +13,9 @@
 const https = require('https');
 const http = require('http');
 const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const TIMEOUT_MS = 180000;
 
@@ -181,18 +184,61 @@ async function listModels(config) {
 
 // ---------------------------------------------------------------- claude cli
 
+/**
+ * Somewhere harmless for the CLI to work in.
+ *
+ * This is not housekeeping. A GUI app launched from the Dock inherits `/` as
+ * its working directory, a child process inherits that in turn, and the CLI
+ * reads its working directory for context when it starts. Pointed at the root
+ * of the disk it walks into everything macOS protects — and because it is
+ * Yapper's child, macOS attributes every one of those requests to Yapper. The
+ * symptom was a queue of permission dialogs at the end of a recording, asking
+ * for folders, then Photos, then Apple Music, from an app that wanted none of
+ * them and touches none of them.
+ *
+ * An empty directory of our own gives it nothing to find.
+ */
+function cliWorkDir() {
+  const dir = path.join(os.tmpdir(), 'yapper-cli');
+  try { fs.mkdirSync(dir, { recursive: true }); } catch { /* fall back below */ }
+  return fs.existsSync(dir) ? dir : os.tmpdir();
+}
+
 function runClaudeCli(config, { system, input }) {
   return new Promise((resolve, reject) => {
     const bin = config.claudePath || 'claude';
-    const proc = spawn(bin, ['-p', system, '--output-format', 'text'], { env: { ...process.env } });
+    const proc = spawn(bin, ['-p', system, '--output-format', 'text'],
+      { env: { ...process.env }, cwd: cliWorkDir() });
+
+    // The HTTP providers have had a deadline all along; this one did not, and
+    // it is the same class of failure one step later. A CLI that never returns
+    // — waiting on a login it cannot show, a network that went away — left the
+    // notes step hanging with nothing on screen to act on. Same budget as the
+    // others, and the process is killed rather than left behind.
+    let settled = false;
+    const finish = fn => (...args) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn(...args);
+    };
+    const timer = setTimeout(() => {
+      try { proc.kill(); } catch { /* already gone */ }
+      finish(reject)(new Error(
+        `Claude Code did not answer within ${Math.round(TIMEOUT_MS / 1000)}s. `
+        + 'It may be waiting to be signed in — run `claude` once in a terminal.'));
+    }, TIMEOUT_MS);
+
     let out = '', errOut = '';
     proc.stdout.on('data', d => { out += d.toString('utf8'); });
     proc.stderr.on('data', d => { errOut += d.toString('utf8'); });
-    proc.on('error', () => reject(new Error(
+    proc.on('error', () => finish(reject)(new Error(
       'Claude Code was not found. Install it from claude.com/code and sign in, or switch to an API key in Settings.')));
     proc.on('close', code => {
-      if (code !== 0) return reject(new Error(`Claude Code failed (exit ${code}): ${errOut.slice(-400)}`));
-      resolve(out);
+      if (code !== 0) {
+        return finish(reject)(new Error(`Claude Code failed (exit ${code}): ${errOut.slice(-400)}`));
+      }
+      finish(resolve)(out);
     });
     proc.stdin.write(input, 'utf8');
     proc.stdin.end();

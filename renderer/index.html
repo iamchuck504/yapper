@@ -12,9 +12,13 @@
       <span class="brand-name">Yapper<i>/</i></span>
     </div>
 
+    <!-- Also the way back to the recording view. Leaving it reading "New
+         meeting" mid-meeting hid both facts: that a recording was running, and
+         that this was the door back to the controls for it. -->
     <button id="btn-new" class="new-btn">
-      <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
-      New meeting
+      <svg class="new-plus" viewBox="0 0 16 16" width="14" height="14"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      <span class="rec-pip"></span>
+      <span id="btn-new-label">New meeting</span>
     </button>
 
     <button id="btn-home" class="nav-btn">
@@ -59,6 +63,22 @@
     <button id="mp-dismiss" class="btn-ghost">Dismiss</button>
   </div>
 
+  <!-- macOS: granting Screen Recording takes three steps and the app can do
+       two of them. Without the reopen the grant does not apply at all, which
+       is why it is a button and not a sentence. -->
+  <div id="screen-prompt" class="hidden">
+    <span class="mp-dot"></span>
+    <div class="mp-text">
+      <strong>Only your microphone is being recorded</strong>
+      <span id="sp-detail">Allow Yapper under Screen Recording to capture the other side of the call. macOS applies it only after Yapper is reopened.</span>
+    </div>
+    <div class="sp-actions">
+      <button id="sp-settings" class="btn-primary">Open Settings</button>
+      <button id="sp-relaunch" class="btn-ghost">Quit and reopen</button>
+      <button id="sp-dismiss" class="btn-ghost">Dismiss</button>
+    </div>
+  </div>
+
   <main id="content">
 
     <!-- ===== Record view ===== -->
@@ -69,99 +89,7 @@
         <p class="view-sub">Record live or import audio — transcribed on your machine, summarized by AI.</p>
       </div>
 
-      <input id="meeting-title" type="text" placeholder="Meeting title (optional)" autocomplete="off" spellcheck="false" />
-
-      <div class="options-card">
-        <div class="opt-row">
-          <span class="opt-label">Note style</span>
-          <div id="style-pills" class="seg">
-            <button class="seg-btn" data-style="general">General</button>
-            <button class="seg-btn" data-style="minutes">Minutes</button>
-            <button class="seg-btn" data-style="memo">Memo</button>
-            <button class="seg-btn" data-style="standup">Stand-up</button>
-            <button class="seg-btn" data-style="one_on_one">1:1</button>
-            <button class="seg-btn" data-style="client">Client call</button>
-            <button class="seg-btn" data-style="brainstorm">Brainstorm</button>
-          </div>
-        </div>
-        <div class="opt-row">
-          <span class="opt-label">Detail</span>
-          <div id="detail-seg" class="seg">
-            <button class="seg-btn" data-detail="concise">Concise</button>
-            <button class="seg-btn" data-detail="detailed">Detailed</button>
-          </div>
-        </div>
-        <div class="opt-row">
-          <span class="opt-label">Noise reduction</span>
-          <div id="noise-seg" class="seg">
-            <button class="seg-btn" data-noise="off">Off</button>
-            <button class="seg-btn" data-noise="standard">Standard</button>
-            <button class="seg-btn" data-noise="strong">Strong</button>
-          </div>
-          <span class="mic-hint">cleans up your mic — adjustable while recording</span>
-        </div>
-        <div class="opt-row">
-          <span class="opt-label">Participants</span>
-          <input id="participants-rec" class="text-input" type="text" placeholder="Attendee names, comma-separated — improves name spelling &amp; attribution" autocomplete="off" spellcheck="false" />
-        </div>
-        <div class="opt-row">
-          <span class="opt-label">Live</span>
-          <label class="switch"><input type="checkbox" id="opt-bubble" /><span class="track"></span>Floating bubble</label>
-          <label class="switch"><input type="checkbox" id="opt-autodetect" /><span class="track"></span>Auto-detect meetings</label>
-          <label class="switch"><input type="checkbox" id="opt-startup" /><span class="track"></span>Start with Windows</label>
-        </div>
-        <div class="opt-row">
-          <span class="opt-label">Audio</span>
-          <label class="switch"><input type="checkbox" id="opt-keep-audio" /><span class="track"></span>Keep this meeting's audio</label>
-          <span class="mic-hint">off by default — the transcript is what gets kept</span>
-          <span id="audio-held" class="mic-hint hidden"></span>
-          <button id="btn-free-audio" class="inline-action hidden">Free it up</button>
-        </div>
-        <div class="opt-row">
-          <span class="opt-label">Instructions</span>
-          <input id="custom-instructions" class="text-input" type="text" placeholder="Optional context, e.g. project, what to focus on" autocomplete="off" spellcheck="false" />
-        </div>
-        <div class="opt-row">
-          <span class="opt-label">Notes by</span>
-          <select id="llm-provider"></select>
-          <span id="llm-hint" class="mic-hint"></span>
-        </div>
-        <div class="opt-row llm-detail hidden" id="llm-privacy-row">
-          <span class="opt-label"></span>
-          <!-- the row above is what gets shown or hidden; this must not carry
-               its own hidden class or the warning never appears at all -->
-          <span id="llm-privacy" class="privacy-note"></span>
-        </div>
-        <div class="opt-row llm-detail hidden" id="llm-baseurl-row">
-          <span class="opt-label">Endpoint</span>
-          <input id="llm-baseurl" class="text-input" type="text" placeholder="https://your-gateway/v1" autocomplete="off" spellcheck="false" />
-        </div>
-        <div class="opt-row llm-detail hidden" id="llm-key-row">
-          <span class="opt-label">API key</span>
-          <input id="llm-key" class="text-input" type="password" placeholder="" autocomplete="off" spellcheck="false" />
-          <a id="llm-key-link" class="key-link hidden" href="#">Get a key</a>
-        </div>
-        <div class="opt-row llm-detail hidden" id="llm-model-row">
-          <span class="opt-label">Model</span>
-          <input id="llm-model" class="text-input" type="text" placeholder="model" autocomplete="off" spellcheck="false" />
-        </div>
-        <div class="opt-row llm-detail hidden" id="llm-test-row">
-          <span class="opt-label"></span>
-          <button id="btn-llm-test" class="inline-action">Test connection</button>
-          <span id="llm-status" class="mic-hint"></span>
-        </div>
-      </div>
-
       <div id="rec-zone">
-        <div class="mic-row">
-          <label for="mic-select">
-            <svg viewBox="0 0 16 16" width="13" height="13"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5M5.5 14.5h5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg>
-            Microphone
-          </label>
-          <select id="mic-select"></select>
-          <span class="mic-hint">switchable while recording</span>
-        </div>
-
         <div class="rec-actions">
           <button id="btn-record" class="record-btn">
             <svg viewBox="0 0 16 16" width="13" height="13"><circle cx="8" cy="8" r="5" fill="currentColor"/></svg>
@@ -171,6 +99,15 @@
             <svg viewBox="0 0 16 16" width="14" height="14"><path d="M8 2v8M5 7l3 3 3-3M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
             Import voice note
           </button>
+        </div>
+
+        <div class="mic-row">
+          <label for="mic-select">
+            <svg viewBox="0 0 16 16" width="13" height="13"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5M5.5 14.5h5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg>
+            Microphone
+          </label>
+          <select id="mic-select"></select>
+          <span class="mic-hint">switchable while recording</span>
         </div>
 
         <div id="rec-live" class="hidden">
@@ -222,6 +159,147 @@
             <pre id="live-transcript"></pre>
           </div>
         </div>
+      </div>
+
+      <input id="meeting-title" type="text" placeholder="Meeting title (optional)" autocomplete="off" spellcheck="false" />
+
+      <!-- The settings live behind this. They were a page between the reader
+           and the button they came for, and mid-meeting they are a page nobody
+           can change — it was pushing the stop button off screen. -->
+      <!-- Built here rather than in script so it reads as the control it is:
+           an empty bordered line with a small chevron was taken for a label. -->
+      <button id="opts-toggle" class="opts-toggle" aria-expanded="false">
+        <svg class="opts-ico" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <path d="M2 4.5h3.2M9 4.5h5M2 11.5h5M10.8 11.5h3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          <circle cx="7.1" cy="4.5" r="1.7" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <circle cx="8.9" cy="11.5" r="1.7" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        </svg>
+        <span class="opts-label">Meeting options</span>
+        <span id="opts-sum" class="opts-sum"></span>
+        <span id="opts-flag" class="opts-flag hidden">API key needed</span>
+        <span class="opts-more"><span id="opts-more-text">Show</span>
+          <svg class="chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+            <path d="M6 3.2L10.8 8 6 12.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+      </button>
+
+      <!-- Grouped, because fourteen rows in one stack is a wall: what belongs
+           to the notes, what belongs to the recording, and what happens while
+           it runs are three different questions. -->
+      <div id="options-card" class="options-card">
+       <div class="opt-group">
+        <div class="opt-group-title">Notes</div>
+        <div class="opt-row">
+          <span class="opt-label">Note style</span>
+          <div id="style-pills" class="seg">
+            <button class="seg-btn" data-style="general">General</button>
+            <button class="seg-btn" data-style="minutes">Minutes</button>
+            <button class="seg-btn" data-style="memo">Memo</button>
+            <button class="seg-btn" data-style="standup">Stand-up</button>
+            <button class="seg-btn" data-style="one_on_one">1:1</button>
+            <button class="seg-btn" data-style="client">Client call</button>
+            <button class="seg-btn" data-style="brainstorm">Brainstorm</button>
+          </div>
+        </div>
+        <div class="opt-row">
+          <span class="opt-label">Detail</span>
+          <div id="detail-seg" class="seg">
+            <button class="seg-btn" data-detail="concise">Concise</button>
+            <button class="seg-btn" data-detail="detailed">Detailed</button>
+          </div>
+        </div>
+        <div class="opt-row">
+          <span class="opt-label">Instructions</span>
+          <input id="custom-instructions" class="text-input" type="text" placeholder="Optional context, e.g. project, what to focus on" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="opt-row">
+          <span class="opt-label">Notes by</span>
+          <select id="llm-provider"></select>
+          <span id="llm-hint" class="mic-hint"></span>
+        </div>
+        <div class="opt-row llm-detail hidden" id="llm-privacy-row">
+          <span class="opt-label"></span>
+          <!-- the row above is what gets shown or hidden; this must not carry
+               its own hidden class or the warning never appears at all -->
+          <span id="llm-privacy" class="privacy-note"></span>
+        </div>
+        <div class="opt-row llm-detail hidden" id="llm-baseurl-row">
+          <span class="opt-label">Endpoint</span>
+          <input id="llm-baseurl" class="text-input" type="text" placeholder="https://your-gateway/v1" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="opt-row llm-detail hidden" id="llm-key-row">
+          <span class="opt-label">API key</span>
+          <input id="llm-key" class="text-input" type="password" placeholder="" autocomplete="off" spellcheck="false" />
+          <a id="llm-key-link" class="key-link hidden" href="#">Get a key</a>
+        </div>
+        <div class="opt-row llm-detail hidden" id="llm-model-row">
+          <span class="opt-label">Model</span>
+          <input id="llm-model" class="text-input" type="text" placeholder="model" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="opt-row llm-detail hidden" id="llm-test-row">
+          <span class="opt-label"></span>
+          <button id="btn-llm-test" class="inline-action">Test connection</button>
+          <span id="llm-status" class="mic-hint"></span>
+        </div>
+       </div>
+
+       <div class="opt-group">
+        <div class="opt-group-title">Recording</div>
+        <div class="opt-row">
+          <span class="opt-label">Noise reduction</span>
+          <div id="noise-seg" class="seg">
+            <button class="seg-btn" data-noise="off">Off</button>
+            <button class="seg-btn" data-noise="standard">Standard</button>
+            <button class="seg-btn" data-noise="strong">Strong</button>
+          </div>
+          <span class="mic-hint">cleans up your mic — adjustable while recording</span>
+        </div>
+        <div class="opt-row">
+          <span class="opt-label">Participants</span>
+          <input id="participants-rec" class="text-input" type="text" placeholder="Attendee names, comma-separated — improves name spelling &amp; attribution" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="opt-row">
+          <span class="opt-label">Audio</span>
+          <label class="switch"><input type="checkbox" id="opt-keep-audio" /><span class="track"></span>Keep this meeting's audio</label>
+          <span class="mic-hint">off by default — the transcript is what gets kept</span>
+          <span id="audio-held" class="mic-hint hidden"></span>
+          <button id="btn-free-audio" class="inline-action hidden">Free it up</button>
+        </div>
+       </div>
+
+       <div class="opt-group">
+        <div class="opt-group-title">While it runs</div>
+        <div class="opt-row">
+          <span class="opt-label">Live</span>
+          <label class="switch"><input type="checkbox" id="opt-bubble" /><span class="track"></span>Floating bubble</label>
+          <label class="switch"><input type="checkbox" id="opt-autodetect" /><span class="track"></span>Auto-detect meetings</label>
+          <label class="switch"><input type="checkbox" id="opt-startup" /><span class="track"></span><span id="startup-label">Start with Windows</span></label>
+        </div>
+        <div class="opt-row" id="bubble-corner-row">
+          <span class="opt-label">Bubble starts</span>
+          <div id="corner-seg" class="seg">
+            <button class="seg-btn" data-corner="top-left">Top left</button>
+            <button class="seg-btn" data-corner="top-right">Top right</button>
+            <button class="seg-btn" data-corner="bottom-left">Bottom left</button>
+            <button class="seg-btn" data-corner="bottom-right">Bottom right</button>
+          </div>
+          <span class="mic-hint">where it appears each recording — you can still drag it anywhere</span>
+        </div>
+       </div>
+
+       <div class="opt-group">
+        <div class="opt-group-title">App</div>
+        <div class="opt-row">
+          <span class="opt-label">Theme</span>
+          <div id="theme-seg" class="seg">
+            <button class="seg-btn" data-theme="auto">Auto</button>
+            <button class="seg-btn" data-theme="light">Light</button>
+            <button class="seg-btn" data-theme="dark">Dark</button>
+          </div>
+          <span class="mic-hint">Auto follows your system setting</span>
+        </div>
+       </div>
       </div>
 
       <div id="pipeline" class="hidden">

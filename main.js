@@ -1,5 +1,6 @@
 ﻿const { app, BrowserWindow, ipcMain, session, desktopCapturer, shell, dialog, screen,
-  Notification, globalShortcut, safeStorage } = require('electron');
+  Notification, globalShortcut, safeStorage, powerSaveBlocker,
+  Tray, Menu, nativeImage, systemPreferences, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -14,6 +15,7 @@ const actions = require('./actions');
 const search = require('./search');
 const digest = require('./digest');
 const provision = require('./provision');
+const sysaudio = require('./sysaudio');
 const { pathToFileURL } = require('url');
 
 const MEETINGS_DIR = path.join(app.getPath('documents'), 'Meetings');
@@ -91,15 +93,61 @@ function broadcast(channel, payload) {
 }
 
 // Small always-on-top window showing the live transcript while recording.
+// Where the capsule appears when a recording starts. It does not remember
+// being dragged — every meeting puts it back — so the corner it starts in is
+// the one it lives in for most people, and the bottom right is the wrong one
+// as often as it is the right one: it sits on exactly the strip of screen a
+// video call fills with its own controls.
+const BUBBLE_INSET = 24;   // gap from the edge when it first appears
+const BUBBLE_CORNERS = new Set(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
+
+// Top right by default. The bottom is where a video call puts its own
+// controls — the strip most likely to be covered exactly while it matters —
+// and the right keeps it clear of the window's own content. The notch sits at
+// the top of the *centre*, and the top corners stay out of its band anyway;
+// see NOTCH_SAFE_TOP.
+const DEFAULT_CORNER = 'top-right';
+
+// The work area already begins below the menu bar, and on a notched Mac the
+// menu bar is tall enough to contain the notch — so a window inside it cannot
+// reach one. Except with the menu bar set to hide automatically: the work area
+// then starts at the very top of the display, and a capsule placed there on a
+// 14" or 16" MacBook is cut in half by the notch. There is no notch API to
+// ask, so the top edge keeps a menu bar's worth of room whether or not one is
+// currently shown.
+const NOTCH_SAFE_TOP = 40;
+
+/** The corner the capsule is asked to live in, defaulted and validated once. */
+function bubbleCorner() {
+  const c = readSettings().bubbleCorner;
+  return BUBBLE_CORNERS.has(c) ? c : DEFAULT_CORNER;
+}
+
+function bubbleOrigin(w, h) {
+  // workArea, not workAreaSize: the latter is width and height with no origin,
+  // so "top" came out as y=24 in screen coordinates — underneath the menu bar
+  // on macOS, and underneath a top-docked taskbar on Windows. The work area
+  // knows where it actually begins.
+  const display = screen.getPrimaryDisplay();
+  const area = display.workArea;
+  const [vertical, horizontal] = bubbleCorner().split('-');
+  return {
+    x: horizontal === 'left' ? area.x + BUBBLE_INSET : area.x + area.width - w - BUBBLE_INSET,
+    y: vertical === 'top'
+      ? Math.max(area.y + BUBBLE_INSET, display.bounds.y + NOTCH_SAFE_TOP)
+      : area.y + area.height - h - BUBBLE_INSET
+  };
+}
+
 function createBubble() {
   if (bubble && !bubble.isDestroyed()) { bubble.showInactive(); return; }
-  const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const w = 470, h = 280;   // matches EXPANDED in bubble.js; it resizes itself if collapsed
+  const { x, y } = bubbleOrigin(w, h);
   bubble = new BrowserWindow({
     width: w,
     height: h,
-    x: width - w - 24,
-    y: height - h - 24,
+    x,
+    y,
     frame: false,
     transparent: true,
     resizable: false,
@@ -186,9 +234,17 @@ ipcMain.on('bubble-state', (_e, state) => {
 ipcMain.on('bubble-resize', (_e, size) => {
   if (!bubble || bubble.isDestroyed() || !size) return;
   const b = bubble.getBounds();
+  // A capsule that expands has to grow *away* from the nearest edges, or it
+  // walks off the screen. Which edges those are is decided by where the window
+  // actually sits, not by the corner it was born in: once it has been dragged,
+  // the setting says nothing about its surroundings, and anchoring to it made
+  // a capsule dropped in the middle of the screen jump 348 px sideways to open.
+  const area = screen.getDisplayMatching(b).workArea;
+  const horizontal = (b.x + b.width / 2) < (area.x + area.width / 2) ? 'left' : 'right';
+  const vertical = (b.y + b.height / 2) < (area.y + area.height / 2) ? 'top' : 'bottom';
   bubble.setBounds({
-    x: b.x + b.width - size.w,
-    y: b.y + b.height - size.h,
+    x: horizontal === 'left' ? b.x : b.x + b.width - size.w,
+    y: vertical === 'top' ? b.y : b.y + b.height - size.h,
     width: size.w,
     height: size.h
   });
@@ -202,13 +258,254 @@ ipcMain.on('bubble-pause', () => {
   if (win && !win.isDestroyed()) win.webContents.send('remote-pause');
 });
 ipcMain.on('bubble-focus-main', () => {
-  if (win && !win.isDestroyed()) { win.show(); win.focus(); }
+  showMainWindow();
 });
+
+function showMainWindow() {
+  if (win && !win.isDestroyed()) { win.show(); win.focus(); }
+  if (process.platform === 'darwin') app.focus({ steal: true });
+}
+
+// ---------- permissions, asked once and early ----------
+// macOS asks the first time something is used, which for a meeting recorder is
+// the worst possible moment: the call has started, the other side is talking,
+// and the app is putting dialogs on screen. Worse, the system-audio one is not
+// a yes/no — it needs the app reopened before it takes effect — so answering it
+// mid-meeting still leaves that meeting recorded one-sided.
+//
+// So they are asked at launch instead. The microphone has an API for it.
+// System audio does not: the permission is triggered by *creating* a tap, so
+// the helper is run for a moment and stopped. It captures nothing that is kept.
+//
+// Every launch, with no "already asked" flag. The first version kept one keyed
+// to the app version and it was wrong in the way that matters: macOS drops
+// these permissions when an app's *code identity* changes, which for an
+// ad-hoc signature is every single build. Six reinstalls later the permissions
+// were gone and the flag still said they had been asked for, so the app went
+// back to asking mid-meeting — the exact thing this exists to prevent. The
+// probe is cheap and it stops the moment the helper says it is capturing, so
+// a machine that has already granted it pays a few hundred milliseconds.
+
+const PERMISSION_PROBE_MS = 2500;
+
+async function primePermissions() {
+  if (process.platform !== 'darwin') return;
+
+  try {
+    if (systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
+      await systemPreferences.askForMediaAccess('microphone');
+    }
+  } catch (err) {
+    console.log('[permissions] could not ask for the microphone:', err.message);
+  }
+
+  const helper = helperPath('system-audio');
+  if (!fs.existsSync(helper)) return;
+
+  // Before spawning one of our own: a helper left by a run that died still
+  // holds a tap, and stacking another on top of it would prime nothing.
+  const orphans = sysaudio.reapOrphans(helper);
+  if (orphans) console.log(`[permissions] cleared ${orphans} helper(s) from a previous run`);
+
+  await new Promise(resolve => {
+    let proc;
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      try { proc.kill(); } catch { /* already gone */ }
+      resolve();
+    };
+    try {
+      proc = spawn(helper, []);
+    } catch (err) {
+      console.log('[permissions] could not start the audio helper:', err.message);
+      return resolve();
+    }
+    // Drained, not read: a helper whose stdout nobody empties blocks on it.
+    proc.stdout.on('data', () => { });
+    // "capturing" means the permission is already there — stop at once rather
+    // than hold a tap for two seconds to learn nothing.
+    proc.stderr.on('data', d => { if (/capturing/.test(String(d))) finish(); });
+    proc.on('error', finish);
+    proc.on('close', () => { settled = true; resolve(); });
+    setTimeout(finish, PERMISSION_PROBE_MS);
+  });
+}
+
+// ---------- the application menu ----------
+// Electron ships a default one and it is not this app's: it names itself from
+// package.json, so it read "yapper" in lower case; File offers only Close
+// Window; and View hands every user Reload and Toggle Developer Tools. A menu
+// bar that offers nothing the app does, and several things it should not, is
+// worse than the absence people notice.
+//
+// What it carries instead is what the menu bar is for on macOS: the two
+// actions that matter reachable by keyboard, the editing roles the text fields
+// need, and the developer items only where a developer is.
+
+function buildAppMenu() {
+  const recording = () => rendererRecording;
+  const send = channel => () => {
+    showMainWindow();
+    if (win && !win.isDestroyed()) win.webContents.send(channel);
+  };
+
+  return Menu.buildFromTemplate([
+    {
+      label: 'Yapper',
+      submenu: [
+        { role: 'about', label: 'About Yapper' },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide', label: 'Hide Yapper' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit', label: 'Quit Yapper' }
+      ]
+    },
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'New meeting',
+          accelerator: 'CmdOrCtrl+N',
+          enabled: !recording(),
+          click: send('start-recording')
+        },
+        {
+          label: 'Stop recording',
+          accelerator: 'CmdOrCtrl+.',
+          enabled: recording(),
+          click: send('remote-stop')
+        },
+        { type: 'separator' },
+        { role: 'close' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+        // Only where there is someone to use them. Shipping Reload and the
+        // developer tools to everyone is how a recording gets thrown away by
+        // a stray Cmd+R.
+        ...(app.isPackaged ? [] : [
+          { type: 'separator' },
+          { role: 'reload' },
+          { role: 'toggleDevTools' }
+        ])
+      ]
+    },
+    {
+      label: 'Window',
+      submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }]
+    },
+    {
+      label: 'Help',
+      submenu: [{
+        label: 'Yapper on GitHub',
+        click: () => shell.openExternal('https://github.com/iamchuck504/yapper')
+      }]
+    }
+  ]);
+}
+
+function refreshAppMenu() {
+  if (process.platform !== 'darwin') return;
+  Menu.setApplicationMenu(buildAppMenu());
+}
+
+// ---------- the menu bar ----------
+// The app spends a meeting behind the call it is recording, so what it most
+// needs is a way to start and stop without being found first. On macOS that is
+// the menu bar. It is also the only honest place to answer "is this recording
+// right now?" while the window is buried three spaces away — the floating
+// bubble answers it too, but the bubble can be closed and this cannot.
+//
+// The icon is a template image: black artwork carried by its alpha, which
+// macOS repaints for a light menu bar, a dark one, and the inverted state
+// while the menu is open. Handing it the amber tile would put a coloured
+// square up there that goes muddy in half of those. build/icon-tray.js writes
+// it from the same artwork the app icon comes from.
+
+let tray = null;
+
+function trayMenu() {
+  return Menu.buildFromTemplate([
+    rendererRecording
+      ? {
+        label: 'Stop recording',
+        click: () => { if (win && !win.isDestroyed()) win.webContents.send('remote-stop'); }
+      }
+      : {
+        label: 'New meeting',
+        click: () => {
+          showMainWindow();
+          if (win && !win.isDestroyed()) win.webContents.send('start-recording');
+        }
+      },
+    { type: 'separator' },
+    { label: 'Open Yapper', click: showMainWindow },
+    { type: 'separator' },
+    { label: 'Quit Yapper', click: () => app.quit() }
+  ]);
+}
+
+/** Keep the menu bar honest about what the app is doing. */
+function refreshTray() {
+  if (!tray || tray.isDestroyed()) return;
+  tray.setToolTip(rendererRecording ? 'Yapper — recording' : 'Yapper');
+  // A template image cannot carry colour, so the state is said with a dot
+  // beside it rather than by tinting the mark red and hoping.
+  tray.setTitle(rendererRecording ? ' ●' : '');
+  tray.setContextMenu(trayMenu());
+}
+
+function createTray() {
+  if (process.platform !== 'darwin' || tray) return;
+  const icon = nativeImage.createFromPath(
+    path.join(__dirname, 'build', 'yapper-tray-Template.png'));
+  if (icon.isEmpty()) {
+    // Not worth failing a launch over: everything the menu bar offers is
+    // reachable from the window.
+    return console.log('[tray] icon missing; no menu bar item this run');
+  }
+  icon.setTemplateImage(true);
+  tray = new Tray(icon);
+  refreshTray();
+}
+
+/**
+ * Dark or light, for painting something before the stylesheet lands.
+ *
+ * The preference is what the user chose — `auto` defers to the system, and
+ * anything unset is dark. Resolved here as well as in the renderer because the
+ * window and the splash are painted before any of that page runs.
+ */
+function darkNow() {
+  const pref = readSettings().theme;
+  if (pref === 'auto') return nativeTheme.shouldUseDarkColors;
+  return pref !== 'light';
+}
 
 function createWindow() {
   // The last theme is remembered so the window paints its own background colour
   // instead of flashing white before the stylesheet lands.
-  const dark = readSettings().theme !== 'light';
+  const dark = darkNow();
   win = new BrowserWindow({
     width: 1100,
     height: 760,
@@ -249,14 +546,39 @@ function settingsFile() {
 function readSettings() {
   try { return JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); } catch { return {}; }
 }
-function writeSettings(s) {
-  fs.writeFileSync(settingsFile(), JSON.stringify(s, null, 2), 'utf8');
+/**
+ * Merged onto whatever is on disk, not written over it.
+ *
+ * Callers read the file, change a field and write the whole object back, and
+ * two of them overlapping meant the slower one restored every field the other
+ * had just changed. It is not hypothetical: the first-run calibration reads at
+ * launch and writes seconds later, so a theme chosen in between was silently
+ * discarded — and the only symptom is a setting that did not stick.
+ */
+function writeSettings(s, drop = []) {
+  let onDisk = {};
+  try { onDisk = JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); } catch { /* first write */ }
+  const merged = { ...onDisk, ...s };
+  // Removing a key is the one thing a merge cannot express, and two callers do
+  // it on purpose: the legacy single key slot and an old keepAudio that must
+  // not linger. They say so rather than relying on absence.
+  for (const k of drop) delete merged[k];
+  fs.writeFileSync(settingsFile(), JSON.stringify(merged, null, 2), 'utf8');
 }
+const LEGACY_LLM_KEYS = ['llmKey', 'llmModel', 'llmBaseUrl'];
 
 // Start with Windows. Defaults to on, but only the first time — after that the
 // user's choice is what counts.
 function applyOpenAtLogin(enabled) {
-  if (process.platform === 'darwin' || process.platform === 'win32') {
+  // macOS registers the bundle, and works it out on its own. Handing it
+  // process.execPath registers Yapper.app/Contents/MacOS/Yapper — the binary
+  // inside, which is not what LaunchServices reopens at login, so the setting
+  // reads as on while nothing ever starts.
+  if (process.platform === 'darwin') {
+    app.setLoginItemSettings({ openAtLogin: enabled });
+    return;
+  }
+  if (process.platform === 'win32') {
     app.setLoginItemSettings({
       openAtLogin: enabled,
       path: process.execPath,
@@ -276,6 +598,24 @@ function initOpenAtLogin() {
 }
 
 ipcMain.handle('get-open-at-login', async () => readSettings().openAtLogin !== false);
+
+ipcMain.handle('get-bubble-corner', async () => bubbleCorner());
+
+ipcMain.handle('set-bubble-corner', async (_e, corner) => {
+  if (!BUBBLE_CORNERS.has(corner)) return false;
+  const s = readSettings();
+  s.bubbleCorner = corner;
+  writeSettings(s);
+  // Move the one on screen too, so the choice is answered now rather than at
+  // the start of some future meeting.
+  if (bubble && !bubble.isDestroyed()) {
+    const [w, h] = bubble.getSize();
+    const { x, y } = bubbleOrigin(w, h);
+    bubble.setPosition(x, y);
+    keepBubbleOnScreen();
+  }
+  return true;
+});
 
 // ---------- keep the shortcuts showing the current icon ----------
 // A .lnk stores its own copy of the icon path, so changing the app's icon does
@@ -371,7 +711,7 @@ ipcMain.handle('get-llm-settings', async () => {
   const s = readSettings();
   // migrate first, and persist it, so the old single slot does not linger in
   // the file where later code could read it by mistake
-  if (migrateLlmSettings(s)) writeSettings(s);
+  if (migrateLlmSettings(s)) writeSettings(s, LEGACY_LLM_KEYS);
   const provider = s.llmProvider || 'claude-cli';
   const slot = llmSlot(s, provider);
   return {
@@ -440,11 +780,22 @@ ipcMain.handle('test-llm', async (_e, override) => {
   }
 });
 
-// Remembered only so the next launch can paint the right window background.
+// The one place the preference is kept. The page used to hold its own copy in
+// localStorage, so a profile could carry "light" on one side and "auto" on the
+// other — main painting the window one colour and the page rendering the other.
+ipcMain.on('get-theme', e => {
+  const pref = readSettings().theme;
+  e.returnValue = ['auto', 'light', 'dark'].includes(pref) ? pref : 'dark';
+});
+
+// The preference itself, not the colour it resolves to today: `auto` has to
+// arrive here as `auto` or the next launch would paint whatever the system
+// happened to be the last time the app was open.
 ipcMain.on('set-theme', (_e, theme) => {
   const s = readSettings();
-  if (s.theme === theme) return;
-  s.theme = theme === 'light' ? 'light' : 'dark';
+  const pref = ['auto', 'light', 'dark'].includes(theme) ? theme : 'dark';
+  if (s.theme === pref) return;
+  s.theme = pref;
   writeSettings(s);
 });
 
@@ -503,6 +854,12 @@ async function bootWithSplash() {
     });
     splash.setMenuBarVisibility(false);
     await splash.loadFile(path.join(__dirname, 'renderer', 'splash.html'));
+    // Same theme as the window about to open behind it.
+    if (!darkNow()) {
+      await splash.webContents
+        .executeJavaScript(`document.body.classList.add('light')`)
+        .catch(() => { /* splash already gone */ });
+    }
     splash.show();
   } catch {
     splash = null;   // boot without it
@@ -561,6 +918,10 @@ async function bootWithSplash() {
     await envPromise;
     setStatus('Ready');
     handOff();
+    // After the hand-off: a permission dialog belongs over the app, not over
+    // the splash it would otherwise interrupt.
+    primePermissions().catch(err =>
+      console.log('[permissions] priming failed:', err.message));
   });
 
   // Safety net: never leave the app hidden behind a stuck splash.
@@ -580,6 +941,17 @@ app.whenReady().then(() => {
   screen.on('display-metrics-changed', keepBubbleOnScreen);
   screen.on('display-removed', keepBubbleOnScreen);
   initOpenAtLogin();
+  app.setName('Yapper');       // or the menu names itself from package.json
+  refreshAppMenu();
+  // Ask for the Dock tile outright rather than trusting LaunchServices to
+  // remember. Replacing the bundle in place leaves it holding the old record,
+  // and an ad-hoc signature changes identity with every build — so it keeps
+  // deciding this is an accessory app and giving it no tile, while
+  // `lsregister -f` fixes it only until the next update. Reported twice.
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.show().catch(() => { /* already showing */ });
+  }
+  createTray();
   bootWithSplash();
 });
 app.on('window-all-closed', () => app.quit());
@@ -628,7 +1000,65 @@ let recFd = null;
 let recFolder = null;
 let recBytes = 0;
 
+// macOS records both sides of a call the only way it can: a native helper
+// captures system audio and its samples are added to the microphone's here.
+// On Windows the renderer has already done this in its audio graph, so this
+// stays dormant and the chunks arrive mixed.
+const sysAudio = sysaudio.create({
+  probePath: helperPath('system-audio'),
+  onStatus: info => {
+    if (info.ok) {
+      console.log(`[audio] capturing system audio via ${info.via || 'screen'}`);
+      // The display block is taken when the recording starts, before the route
+      // is known, because guessing wrong the other way costs the far side of
+      // the meeting. A tap does not need it, so it is let go here.
+      if (info.via === 'tap') holdDisplayAwake(false);
+      return;
+    }
+    console.log(`[audio] system audio unavailable (${info.reason})`,
+      info.detail ? `— ${info.detail}` : '');
+    // The renderer says "recording the microphone only" if this never turns on.
+    broadcast('system-audio-status', info);
+  }
+});
+
+// The native mac helpers, wherever this copy is running from. They have to sit
+// outside the asar for the same reason calibration.wav does: this process can
+// read in there, but nothing can be executed from inside one.
+function helperPath(name) {
+  const p = path.join(__dirname, 'build', name);
+  return app.isPackaged ? p.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`) : p;
+}
+
+// A sleeping display costs ScreenCaptureKit its system audio: it lists no
+// displays while the screen is asleep, and a capture filter needs one even when
+// only the audio is wanted. A meeting where you mostly listen is exactly the
+// meeting where the screen dims — so the display is held awake for as long as
+// that route is in use, and released the moment the recording ends.
+//
+// A Core Audio process tap has no such requirement, so on macOS 14.4+ the
+// screen is left alone. Keeping a laptop's display lit through an hour of
+// listening was a real cost, paid only because of how the audio was reached.
+let displayAwake = null;
+
+function holdDisplayAwake(on) {
+  if (process.platform !== 'darwin') return;
+  try {
+    if (on) {
+      if (displayAwake === null) displayAwake = powerSaveBlocker.start('prevent-display-sleep');
+    } else if (displayAwake !== null) {
+      powerSaveBlocker.stop(displayAwake);
+      displayAwake = null;
+    }
+  } catch (err) {
+    console.log('[audio] could not hold the display awake:', err.message);
+  }
+}
+
 function closeRecFile() {
+  holdDisplayAwake(false);
+  stopSoloDrain();
+  sysAudio.stop();          // whether or not a file is open, stop capturing
   if (recFd === null) return;
   try { engine.finishWav(recFd, recBytes); } catch { /* disk gone */ }
   recFd = null;
@@ -640,11 +1070,90 @@ ipcMain.handle('recording-start', async (_e, participants) => {
   recBytes = 0;
   writeParticipants(recFolder, participants);
   recFd = engine.openWav(path.join(recFolder, 'recording.wav'));
+  // Deliberately not awaited. The helper is usually live in a few hundred
+  // milliseconds, but a machine that is refusing the permission takes seconds
+  // to say so, and blocking on that would mean pressing Record and watching
+  // nothing happen. Recording starts now; system audio joins the mix as soon
+  // as it arrives, so the cost of being wrong is a fraction of a second of
+  // one-sided audio rather than a delayed start.
+  if (process.platform === 'darwin') {
+    holdDisplayAwake(true);
+    lastMicChunkAt = Date.now();     // give the renderer its grace period
+    sysAudio.start();
+    startSoloDrain();
+  }
+  sysRemainder = 0;
+  startHeadStart(recFolder, participants);
   return recFolder;
 });
 
-ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
-  const buf = Buffer.from(arrayBuffer);
+// ---------- transcribing while the meeting runs ----------
+// The wait after a long meeting is almost all transcription, and none of it
+// needs the meeting to be over: windows are independent, and the audio for
+// minute 5 is final while minute 50 is still being spoken. So it is done as it
+// arrives, and stopping leaves only the tail — about three seconds instead of
+// fifty on a half-hour meeting.
+//
+// It is a head start, not a dependency. If it stalls, fails, or never runs,
+// `transcribe` does the whole file exactly as it always did.
+
+const HEAD_START_EVERY_MS = 15000;
+let headStart = null;          // { folder, run }
+let headStartTimer = null;
+
+function startHeadStart(folder, participants) {
+  stopHeadStart();
+  headStart = null;
+  const tierName = readSettings().tier || engine.guessTier();
+  const tier = engine.tierConfig(tierName);
+  if (!engine.isInstalled() || !engine.hasModel(tier.finalModel)) return;
+  // Not on a tier where getting ahead would restart the server out from under
+  // the live transcript on every window. See engine.canGetAhead.
+  if (!engine.canGetAhead(tierName)) {
+    console.log(`[transcribe] no head start on the ${tierName} tier: it would fight live over the model`);
+    return;
+  }
+  headStart = {
+    folder,
+    run: engine.progressive(path.join(folder, 'recording.wav'), {
+      model: tier.finalModel,
+      language: process.env.YAPPER_LANG || 'auto',
+      prompt: transcriptionHint(participants)
+    })
+  };
+  headStartTimer = setInterval(() => {
+    if (headStart) headStart.run.advance();
+  }, HEAD_START_EVERY_MS);
+}
+
+function stopHeadStart() {
+  if (headStartTimer) clearInterval(headStartTimer);
+  headStartTimer = null;
+  // Not awaited here: this runs from an IPC message the renderer does not wait
+  // on. `transcribe` awaits it below, which is where it matters.
+  if (headStart) headStart.settled = headStart.run.settle();
+}
+
+/** What is already done for this meeting, if anything. */
+async function headStartFor(folder) {
+  if (!headStart || headStart.folder !== folder) return null;
+  // Collecting it settles it, and settling is permanent — so a transcription
+  // of a meeting that is *still recording* would kill its head start for
+  // everything after. No call site does that today: `transcribe` is reached
+  // from stopping, from a past meeting, and from an import. It is one new call
+  // site away from happening, and the failure would be silent.
+  //
+  // `settled` is set by stopHeadStart and by nothing else, so it says "this
+  // recording has ended" in our own terms rather than reading a flag other
+  // code also writes.
+  if (!headStart.settled) return null;
+  // Let the window in flight land first, or the final pass redoes it.
+  await (headStart.settled || headStart.run.settle());
+  const snap = headStart.run.snapshot();
+  return snap.at > 0 ? snap : null;
+}
+
+function writeRecorded(buf) {
   if (recFd !== null) {
     try {
       fs.writeSync(recFd, buf, 0, buf.length, engine.WAV_HEADER + recBytes);
@@ -655,7 +1164,121 @@ ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
   }
   // the same samples feed the live transcript, so the renderer only sends once
   if (liveOn) live.write(buf);
+}
+
+let lastMicChunkAt = 0;
+
+ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
+  let buf = Buffer.from(arrayBuffer);
+  // Empty chunks still arrive when the audio graph is running but producing
+  // nothing, and counting those as "the microphone is driving" is what let a
+  // recording end up empty: the pace looked healthy, so the system audio was
+  // never written on its own, and the chunks themselves carried no samples.
+  if (buf.length) lastMicChunkAt = Date.now();
+  // The microphone sets the pace: take exactly as much system audio as the
+  // renderer just sent, so the mix stays aligned with the file's own clock.
+  let sys = sysAudio.take(buf.length);
+  if (sys) {
+    sys = applySysGain(sys);
+    sendSysWave(sys);
+    buf = sysaudio.mixPcm(buf, sys);
+  }
+  writeRecorded(buf);
 });
+
+// ---------- the system meter ----------
+// On Windows the loopback runs through the renderer's own audio graph, so an
+// analyser node draws that meter for free. On macOS the samples never reach
+// the renderer at all — they are captured natively and mixed here — so the
+// meter drew a flat line and its gain slider moved nothing. For the one source
+// a user most wants to confirm is arriving, that is worse than showing no
+// meter: it looks like silence rather than like an unanswered question.
+//
+// So the waveform is sent from here, already shaped the way drawWave reads it:
+// one byte per point, centred on 128.
+
+// Points of waveform per second of audio. The renderer holds these in a ring
+// and walks it on its own clock, so it draws every frame instead of once per
+// packet — sending finished frames at the rate audio chunks arrive looked
+// robotic next to a microphone meter reading a live analyser sixty times a
+// second, however overlapped the windows were. So what goes across is the new
+// samples, and the drawing rate stops depending on the delivery rate.
+const SYS_WAVE_RATE = 16000;   // every sample: the same kind of trace the
+                               // microphone's analyser draws, not an envelope
+const SAMPLES_PER_SEC = engine.BYTES_PER_SEC / 2;
+let sysGain = 1;
+let sysRemainder = 0;      // fractional points carried between chunks
+
+function applySysGain(pcm) {
+  if (sysGain === 1) return pcm;
+  const out = Buffer.from(pcm);
+  for (let i = 0; i + 1 < out.length; i += 2) {
+    // saturate rather than wrap, for the same reason mixPcm does: wrapping
+    // turns a loud moment into noise
+    const v = Math.round(out.readInt16LE(i) * sysGain);
+    out.writeInt16LE(v > 32767 ? 32767 : v < -32768 ? -32768 : v, i);
+  }
+  return out;
+}
+
+function sendSysWave(pcm) {
+  const samples = pcm.length >> 1;
+  if (!samples) return;
+
+  // How many points this chunk is worth, carrying the fraction so the trace
+  // advances at a steady rate rather than rounding a little away each time.
+  const exact = (samples / SAMPLES_PER_SEC) * SYS_WAVE_RATE + sysRemainder;
+  const n = Math.floor(exact);
+  sysRemainder = exact - n;
+  if (n <= 0) return;
+
+  const out = Buffer.alloc(n, 128);
+  const stride = samples / n;
+  for (let i = 0; i < n; i++) {
+    const v = pcm.readInt16LE(Math.min(samples - 1, Math.floor(i * stride)) * 2);
+    out[i] = 128 + Math.max(-128, Math.min(127, Math.round(v / 256)));
+  }
+  broadcast('system-wave', out);
+}
+
+ipcMain.on('sys-gain', (_e, g) => {
+  const n = Number(g);
+  sysGain = Number.isFinite(n) && n >= 0 && n <= 4 ? n : 1;
+});
+
+// The microphone setting the pace has a failure mode: no microphone, no pace,
+// and nothing written at all — including the system audio that was being
+// captured perfectly the whole time. A refused microphone permission or an
+// unplugged headset would produce an empty recording of a meeting the machine
+// could hear. So when the renderer goes quiet, the far side is written on its
+// own rather than piling up in a buffer nobody drains.
+const SILENT_MIC_MS = 1000;
+let soloTimer = null;
+let soloWrote = false;
+
+function startSoloDrain() {
+  soloWrote = false;
+  if (soloTimer || process.platform !== 'darwin') return;
+  soloTimer = setInterval(() => {
+    if (recFd === null || sysAudio.state !== 'capturing') return;
+    if (Date.now() - lastMicChunkAt < SILENT_MIC_MS) return;   // the mic is driving
+    let sys = sysAudio.take(engine.BYTES_PER_SEC / 2);          // half a second
+    if (sys && sys.some(b => b !== 0)) {
+      sys = applySysGain(sys);
+      sendSysWave(sys);
+      if (!soloWrote) {
+        soloWrote = true;
+        console.log('[audio] the microphone is silent — writing system audio on its own');
+      }
+      writeRecorded(sys);
+    }
+  }, 500);
+}
+
+function stopSoloDrain() {
+  if (soloTimer) clearInterval(soloTimer);
+  soloTimer = null;
+}
 
 ipcMain.handle('recording-finish', async (_e, title, markers) => {
   closeRecFile();
@@ -753,7 +1376,11 @@ function humanTranscribeError(err) {
   const m = String(err && err.message || err);
   if (/ENOENT|no longer there/i.test(m)) return 'The recording for that meeting is no longer there.';
   if (/model .* is missing|not installed/i.test(m)) {
-    return 'The transcription engine is not installed. Run setup.ps1 from the app folder.';
+    // setup.ps1 is a Windows script, and pointing a Mac user at it is a dead
+    // end: there the engine arrives through the first-run download instead.
+    return process.platform === 'darwin'
+      ? 'The transcription engine is not installed. Restart Yapper to download it again.'
+      : 'The transcription engine is not installed. Run setup.ps1 from the app folder.';
   }
   if (/ECONNRESET|ECONNREFUSED|socket hang up|did not start|not running/i.test(m)) {
     return 'The transcriber stopped unexpectedly. Try again.';
@@ -766,6 +1393,13 @@ function humanTranscribeError(err) {
 ipcMain.handle('transcribe', async (_e, folder) => {
   const wav = path.join(folder, 'recording.wav');
   if (!fs.existsSync(wav)) {
+    // Two transcriptions of the same meeting can be in flight at once — the
+    // button double-clicked, or a retry racing the first attempt. The winner
+    // writes the transcript and releases the audio, so the loser arrives to a
+    // folder with no wav and used to fail loudly at something that had in fact
+    // just succeeded. If the transcript is there, that is the answer.
+    const done = path.join(folder, 'transcript.txt');
+    if (fs.existsSync(done)) return fs.readFileSync(done, 'utf8');
     // the renderer converts old recordings before calling this, so reaching
     // here means the conversion did not happen or the folder is genuinely empty
     throw new Error('No recording found in this meeting folder.');
@@ -778,18 +1412,44 @@ ipcMain.handle('transcribe', async (_e, folder) => {
     if (win && !win.isDestroyed()) win.webContents.send('transcribe-progress', text);
   };
 
+  // On a machine that recorded during its first hour, `small` may still be
+  // arriving. Wait for it here rather than fall back to `base` — `small` is
+  // what ships precisely because `base` was not good enough on real meeting
+  // audio (ARCHITECTURE §8), and the recording is on disk going nowhere.
+  //
+  // Only for a download already in flight. A model missing with nothing
+  // running is a broken install, not a slow one: starting a fresh 490 MB fetch
+  // at the moment someone asked for a transcript would hide that behind a
+  // progress line instead of reporting it. Falling through lets engine.start()
+  // raise "model is missing", which says so plainly.
+  if (!engine.hasModel(tier.finalModel) && provisioning) {
+    send('\rFinishing the engine download…');
+    await ensureModel(tier.finalModel);
+  }
+
   let lines;
   try {
     lines = await engine.transcribeFile(wav, {
       model: tier.finalModel,
       language: process.env.YAPPER_LANG || 'auto',
       prompt: transcriptionHint(readParticipants(folder)),
+      // Whatever was transcribed while the meeting ran. Its windows are
+      // identical to the ones this pass would have produced for them, so only
+      // the tail is left — and if there is nothing, this is the same full pass
+      // it always was.
+      from: await headStartFor(folder),
       onProgress: ({ done, total }) => {
         send(`\rTranscribing… ${Math.round(done / total * 100)}%`);
       }
     });
   } catch (err) {
     if (!liveOn) await engine.stop();
+    // The same race as above, but lost later: both callers found the wav, the
+    // winner finished and released the audio, and this one was mid-read when
+    // it vanished. The check at the top cannot catch that — by then the file
+    // was still there. A finished transcript is the answer either way.
+    const done = path.join(folder, 'transcript.txt');
+    if (!fs.existsSync(wav) && fs.existsSync(done)) return fs.readFileSync(done, 'utf8');
     throw new Error(humanTranscribeError(err));
   }
   // Leave the server up while a recording is in progress: the live loop is using
@@ -798,8 +1458,16 @@ ipcMain.handle('transcribe', async (_e, folder) => {
 
   const transcript = lines.join('\n').trim();
   if (!transcript) throw new Error('The transcript came out empty. Was any audio recorded?');
-  fs.writeFileSync(path.join(folder, 'transcript.txt'), transcript, 'utf8');
-  releaseAudio(folder);
+  try {
+    fs.writeFileSync(path.join(folder, 'transcript.txt'), transcript, 'utf8');
+    releaseAudio(folder);
+  } catch (err) {
+    // Transcribing succeeded and saving did not — the folder was deleted while
+    // this ran, the disk filled, the drive went away. Raw, that surfaces as
+    // "ENOENT: no such file or directory, open '/Users/…'" in the app's status
+    // line, which tells the user nothing they can act on.
+    throw new Error(humanTranscribeError(err));
+  }
   send('\n');
   return transcript;
 });
@@ -851,7 +1519,7 @@ ipcMain.handle('set-keep-audio', async (_e, keep) => {
   keepThisOne = !!keep;
   // an older build persisted this as a setting; make sure that cannot linger
   const s = readSettings();
-  if (s.keepAudio !== undefined) { delete s.keepAudio; writeSettings(s); }
+  if (s.keepAudio !== undefined) writeSettings(s, ['keepAudio']);
   return keepThisOne;
 });
 
@@ -1125,6 +1793,10 @@ function checkEnvironment() {
 async function ensureTier() {
   const s = readSettings();
   const flavour = path.basename(engine.binDir());
+  // The measured pace decides how long a request may go unanswered before the
+  // server is called dead, so it has to survive a restart — otherwise every
+  // launch runs on the loose fallback deadline until something recalibrates.
+  if (s.tierMs) engine.setPace(s.tierMs);
   if (s.tier && s.tierFor === flavour) return s.tier;
   try {
     const res = await engine.calibrate();
@@ -1174,30 +1846,83 @@ ipcMain.handle('check-environment', async () => checkEnvironment());
 // renderer notices (check-environment says no whisper) and asks for this; the
 // download reports through its own channel and the environment is re-checked —
 // which is also what triggers calibration — once the engine lands.
+//
+// It opens on the *usable* milestone, not the complete one. The engine binary
+// and `base` are ~160 MB; `small` is another ~490 MB behind them. Waiting for
+// all of it before the first recording is possible costs a new user ten
+// minutes of nothing, and it buys nothing back: a meeting not recorded is gone
+// for good, while a transcript can always be produced afterwards from audio
+// already on disk. So recording opens early and `small` keeps arriving.
+//
+// Two promises, therefore. `provisioning` is the whole job; `usable` settles
+// the moment recording is possible, and never rejects on its own — if the run
+// dies before that point, the run's own result is the answer.
 
-let provisioning = null;
+let provisioning = null;      // the whole download, or null when none is running
+let usable = null;            // resolves when recording can start
 
+function engineUsable() {
+  return engine.isInstalled() && engine.hasModel(engine.CALIBRATION_MODEL);
+}
+
+function engineComplete() {
+  return engine.isInstalled() && engine.hasModel('base') && engine.hasModel('small');
+}
+
+/** Start the download if it is not already running. Returns the whole job. */
+function startProvisioning() {
+  if (provisioning) return provisioning;
+
+  let reachedUsable;
+  usable = new Promise(res => { reachedUsable = res; });
+
+  provisioning = provision.run({
+    home: engineHome(),
+    gpu: engine.hasNvidiaGpu(),
+    progress: p => {
+      broadcast('engine-setup-progress', p);
+      if (p.usable) {
+        envCache = null;      // recording is possible; re-check and calibrate
+        reachedUsable(true);
+      }
+    }
+  }).then(ok => {
+    provisioning = null;
+    if (ok) envCache = null;            // the next check measures the machine
+    reachedUsable(engineUsable());      // no-op if the milestone already fired
+    return ok;
+  }).catch(err => {
+    provisioning = null;
+    console.log('[provision] failed:', err.message);
+    broadcast('engine-setup-progress', { error: err.message });
+    reachedUsable(engineUsable());
+    return false;
+  });
+
+  return provisioning;
+}
+
+/** What the renderer waits on before it lets anyone press record. */
 function ensureEngine() {
-  if (engine.isInstalled() && engine.hasModel('base') && engine.hasModel('small')) {
+  if (engineUsable()) {
+    if (!engineComplete()) startProvisioning();   // finish `small` in the background
     return Promise.resolve(true);
   }
-  if (!provisioning) {
-    provisioning = provision.run({
-      home: engineHome(),
-      gpu: engine.hasNvidiaGpu(),
-      progress: p => broadcast('engine-setup-progress', p)
-    }).then(ok => {
-      provisioning = null;
-      if (ok) envCache = null;          // the next check measures the machine
-      return ok;
-    }).catch(err => {
-      provisioning = null;
-      console.log('[provision] failed:', err.message);
-      broadcast('engine-setup-progress', { error: err.message });
-      return false;
-    });
-  }
-  return provisioning;
+  const whole = startProvisioning();
+  return Promise.race([usable, whole]);
+}
+
+/**
+ * What transcription waits on: the download that is *already running*, not a
+ * new one. By the time a meeting ends the background half has usually
+ * finished; when it has not, this is where the wait happens — with the audio
+ * already safe on disk.
+ */
+async function ensureModel(name) {
+  if (engine.hasModel(name)) return true;
+  if (!provisioning) return false;    // nothing in flight; the caller reports it
+  await provisioning;
+  return engine.hasModel(name);
 }
 
 function engineHome() {
@@ -1245,24 +1970,50 @@ function setupAutoUpdate() {
 }
 
 async function checkMacUpdate() {
-  try {
-    const tmp = path.join(app.getPath('temp'), `yapper-feed-${process.pid}.yml`);
-    await provision.download(`${RELEASES_LATEST}/download/latest.yml`, tmp);
-    const m = fs.readFileSync(tmp, 'utf8').match(/^version:\s*(\S+)/m);
-    try { fs.unlinkSync(tmp); } catch { /* temp */ }
-    if (m && provision.newerVersion(m[1], app.getVersion())) {
-      macUpdateVersion = m[1];
-      broadcast('update-ready', { version: m[1], manual: true });
+  // latest-mac.yml first, and it matters which. electron-builder writes one
+  // manifest per platform: the Windows build produces latest.yml, the mac build
+  // latest-mac.yml. A release cut only on a Mac therefore leaves latest.yml at
+  // whatever version Windows last published, so reading only that one would
+  // announce nothing — or announce a version that has no dmg behind it.
+  for (const name of ['latest-mac.yml', 'latest.yml']) {
+    const tmp = path.join(app.getPath('temp'), `yapper-${name}-${process.pid}`);
+    try {
+      // A manifest is a few hundred bytes: nothing to resume, and a missing
+      // one is an answer rather than something to sit through retries for.
+      await provision.download(`${RELEASES_LATEST}/download/${name}`, tmp,
+        null, { retries: 0, resume: false });
+      const m = fs.readFileSync(tmp, 'utf8').match(/^version:\s*(\S+)/m);
+      try { fs.unlinkSync(tmp); } catch { /* temp */ }
+      if (!m) continue;
+      if (provision.newerVersion(m[1], app.getVersion())) {
+        macUpdateVersion = m[1];
+        broadcast('update-ready', { version: m[1], manual: true });
+      }
+      return;                     // the first manifest that parses is the answer
+    } catch (err) {
+      try { fs.unlinkSync(tmp); } catch { /* never existed */ }
+      console.log(`[update] ${name} unavailable:`, String(err.message).slice(0, 90));
     }
-  } catch (err) {
-    console.log('[update] mac check failed:', String(err.message).slice(0, 120));
   }
 }
 
+// The command that updates a Mac in one step. Sending someone to the releases
+// page instead means the dmg, which means the Gatekeeper detour again — every
+// version, forever, for a build that is never going to be signed until there
+// is a certificate. This is the same installer they arrived through.
+const MAC_INSTALL_CMD =
+  `curl -fsSL ${RELEASES_LATEST}/download/install.sh | bash`;
+
 ipcMain.handle('update-restart', async () => {
   if (updater) { updater.quitAndInstall(); return 'installing'; }
-  if (macUpdateVersion) { shell.openExternal(RELEASES_LATEST); return 'browser'; }
+  if (macUpdateVersion) return { kind: 'command', command: MAC_INSTALL_CMD };
   return 'none';
+});
+
+// The page is still one click away for anyone who would rather see it.
+ipcMain.handle('open-releases-page', async () => {
+  await shell.openExternal(RELEASES_LATEST);
+  return true;
 });
 
 ipcMain.handle('save-notes', async (_e, folder, md) => {
@@ -1443,6 +2194,37 @@ const ALLOWED_LINKS = new Set(llm.providerList().map(p => p.keyUrl).filter(Boole
 ipcMain.handle('open-external', async (_e, url) => {
   if (!ALLOWED_LINKS.has(url)) return false;
   await shell.openExternal(url);
+  return true;
+});
+
+// ---------- the Screen Recording dead end ----------
+// Telling someone to grant a permission is only useful if they can act on it.
+// macOS puts this one behind a settings pane the app cannot toggle, and then
+// refuses to apply the grant to a process that was already running — so the
+// honest instruction has three steps, two of which the app can just do.
+
+// Two doors, two panes. Sending someone to Screen Recording when what they
+// need is System Audio Recording Only is worse than saying nothing: the switch
+// they are looking for is not on that page at all.
+const SETTINGS_PANE = {
+  audio: 'x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture',
+  screen: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+};
+
+ipcMain.handle('open-screen-settings', async (_e, which) => {
+  if (process.platform !== 'darwin') return false;
+  await shell.openExternal(SETTINGS_PANE[which] || SETTINGS_PANE.screen);
+  return true;
+});
+
+ipcMain.handle('relaunch-app', async () => {
+  // The renderer disables the button mid-recording, but a relaunch that throws
+  // a meeting away is bad enough to check for twice. `rendererRecording` and
+  // not `liveOn`: the modest tier records with no live transcript at all, so
+  // `liveOn` is false through a perfectly real meeting.
+  if (rendererRecording) return false;
+  app.relaunch();
+  app.exit(0);
   return true;
 });
 
@@ -1714,19 +2496,7 @@ function previousWeekWith(list, from) {
 // every meeting: Zoom/Teams/Slack huddles natively, and Meet/Hangouts via the
 // browser. On Windows it lives in the CapabilityAccessManager consent store.
 
-const MEETING_APPS = {
-  'zoom.exe': 'Zoom',
-  'teams.exe': 'Microsoft Teams',
-  'ms-teams.exe': 'Microsoft Teams',
-  'slack.exe': 'Slack',
-  'discord.exe': 'Discord',
-  'webexmta.exe': 'Webex',
-  'webex.exe': 'Webex',
-  'chrome.exe': 'a Chrome call (Meet/Hangouts)',
-  'msedge.exe': 'an Edge call',
-  'brave.exe': 'a Brave call',
-  'firefox.exe': 'a Firefox call'
-};
+const { matchMeetingApp } = require('./meetings');
 
 const MIC_CONSENT_KEY =
   'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\microphone';
@@ -1768,6 +2538,40 @@ function micUsersWindows() {
   });
 }
 
+// macOS answers the same question through CoreAudio, via the small Swift probe
+// in mac/mic-probe.swift. It has to live outside the asar: this process could
+// read it in there, but it cannot be executed from inside one.
+function probePath() {
+  return helperPath('mic-probe');
+}
+
+/**
+ * Bundle ids capturing audio right now, or null when the question could not be
+ * asked. null is not "nobody": a probe that fails must never be read as the
+ * meeting having ended.
+ */
+function micUsersMac() {
+  return new Promise(resolve => {
+    const probe = probePath();
+    if (!fs.existsSync(probe)) return resolve(null);
+    let out = '';
+    let p;
+    try {
+      p = spawn(probe, []);
+    } catch {
+      return resolve(null);
+    }
+    p.stdout.on('data', d => { out += d.toString('utf8'); });
+    p.on('error', () => resolve(null));
+    p.on('close', code => {
+      if (code !== 0) return resolve(null);
+      resolve([...new Set(out.split('\n').map(l => l.trim()).filter(Boolean))]);
+    });
+  });
+}
+
+const micUsers = () => (process.platform === 'darwin' ? micUsersMac() : micUsersWindows());
+
 let meetingTimer = null;
 let meetingCurrent = null;
 let autoDetectOn = false;
@@ -1776,9 +2580,12 @@ let rendererRecording = false;
 let meetingGoneStreak = 0;
 
 async function pollMeetings() {
-  if (process.platform !== 'win32') return;
-  const users = await micUsersWindows();
-  const hit = users.find(exe => MEETING_APPS[exe]);
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return;
+  const users = await micUsers();
+  if (users === null) return;            // could not ask; say nothing
+  // The label, not the process: a call can move between helper processes
+  // without ever stopping, and that must not read as a second meeting.
+  const hit = matchMeetingApp(users);
 
   // While recording, watch for the opposite signal: the meeting app letting go
   // of the microphone. Two clear polls (~10 s) avoids reacting to a blip.
@@ -1795,9 +2602,9 @@ async function pollMeetings() {
   if (meetingCurrent === hit) return;
 
   meetingCurrent = hit;
-  const label = MEETING_APPS[hit];
-  if (win && !win.isDestroyed()) win.webContents.send('meeting-detected', { app: label });
-  notifyMeeting(label);
+  console.log(`[meetings] ${hit} is using the microphone — offering to record`);
+  if (win && !win.isDestroyed()) win.webContents.send('meeting-detected', { app: hit });
+  notifyMeeting(hit);
 }
 
 // A meeting starts while you are looking at Zoom, not at Yapper, so the offer
@@ -1826,6 +2633,12 @@ function notifyMeeting(label) {
   };
   n.on('click', start);
   n.on('action', start);
+  // Whether the OS actually put it on screen is not obvious from anywhere else:
+  // a notification that is refused fails silently, and the only symptom is a
+  // user saying the app never told them about a meeting.
+  n.on('show', () => console.log('[meetings] notification shown'));
+  n.on('failed', (_e, err) =>
+    console.log('[meetings] the OS refused the notification:', String(err).slice(0, 200)));
   n.show();
   return n;      // returned so a probe can watch whether the OS actually shows it
 }
@@ -1834,7 +2647,14 @@ function notifyMeeting(label) {
 module.exports = { notifyMeeting };
 
 function startMeetingWatch() {
-  if (meetingTimer || process.platform !== 'win32') return;
+  if (meetingTimer) return;
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return;
+  // No probe on disk means no detection — better silent than a timer that
+  // spawns a missing binary every five seconds.
+  if (process.platform === 'darwin' && !fs.existsSync(probePath())) {
+    console.log('[meetings] no mic probe built; auto-detection stays off');
+    return;
+  }
   meetingCurrent = null;
   meetingTimer = setInterval(pollMeetings, 5000);
 }
@@ -1852,6 +2672,11 @@ ipcMain.on('autodetect-set', (_e, enabled) => {
 
 ipcMain.on('recording-state', (_e, recording) => {
   rendererRecording = !!recording;
+  // No more audio is coming, so there is nothing left to get ahead of. The
+  // accumulated windows stay until `transcribe` collects them.
+  if (!recording) stopHeadStart();
+  refreshTray();               // the menu bar says start or stop, never both
+  refreshAppMenu();            // and so does File
   meetingGoneStreak = 0;
   // once a recording ends, allow the same app to trigger a fresh prompt later
   if (!rendererRecording) meetingCurrent = null;
@@ -1894,9 +2719,21 @@ ipcMain.handle('live-start', async (_e, participants) => {
   await liveStopInternal();
   const tier = engine.tierConfig(readSettings().tier || engine.guessTier());
   if (!tier.live) return false;
+
+  // The fast tier transcribes live with `small`, which can still be arriving
+  // during the first session. `base` is what the steady tier uses for exactly
+  // this job and it is strictly quicker, so the live transcript degrades to it
+  // rather than disappearing. The final pass still waits for `small`.
+  let liveModel = tier.liveModel;
+  if (!engine.hasModel(liveModel)) {
+    if (!engine.hasModel(engine.CALIBRATION_MODEL)) return false;
+    liveModel = engine.CALIBRATION_MODEL;
+    console.log(`[live] ${tier.liveModel} not downloaded yet; using ${liveModel}`);
+  }
+
   try {
     const ok = await live.start({
-      model: tier.liveModel,
+      model: liveModel,
       cadenceMs: tier.cadenceMs,
       windowSec: tier.windowSec,
       maxHoldSec: tier.maxHoldSec,

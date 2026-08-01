@@ -7,11 +7,12 @@
 // should leave behind is checked. What this does NOT cover is the Web Audio
 // graph itself — that needs a microphone and a person.
 const path = require('path');
+const os = require("os");
 const fs = require('fs');
 const { app, dialog } = require('electron');
 const { mainWindow } = require('./harness');
 
-const REAL = path.join(process.env.USERPROFILE, 'Documents', 'Meetings');
+const REAL = path.join(os.homedir(), 'Documents', 'Meetings');
 const BASE = path.join(app.getPath('temp'), 'yapper-cycle-test');
 let ROOT = BASE;
 try { fs.rmSync(BASE, { recursive: true, force: true }); } catch { ROOT = `${BASE}-${process.pid}`; }
@@ -35,7 +36,7 @@ function check(name, ok, detail) {
 // a minute of a real meeting, as raw samples — the same thing the tap sends
 const engine = require('../engine');
 function speech() {
-  const wav = process.env.WAV || path.join(process.env.TEMP, 'yapper-60s.wav');
+  const wav = process.env.WAV || path.join(os.tmpdir(), 'yapper-60s.wav');
   if (fs.existsSync(wav)) return fs.readFileSync(wav).subarray(engine.WAV_HEADER);
   for (const d of fs.readdirSync(REAL)) {
     const p = path.join(REAL, d, 'recording.wav');

@@ -11,6 +11,7 @@
 //
 //   node_modules\electron\dist\electron.exe build\tune-transcript.js
 const path = require('path');
+const os = require("os");
 const fs = require('fs');
 const { app } = require('electron');
 const { sandbox, logger } = require('./harness');
@@ -19,7 +20,7 @@ const ROOT = sandbox('tune-transcript');
 const say = logger(ROOT);
 const engine = require('../engine');
 
-const REAL = path.join(process.env.USERPROFILE, 'Documents', 'Meetings');
+const REAL = path.join(os.homedir(), 'Documents', 'Meetings');
 const SECONDS = Number(process.env.SECONDS || 180);
 
 /**
@@ -29,7 +30,7 @@ const SECONDS = Number(process.env.SECONDS || 180);
  */
 function samples() {
   const out = [];
-  const clips = path.join(process.env.TEMP, 'yapper-clips');
+  const clips = path.join(os.tmpdir(), 'yapper-clips');
   if (fs.existsSync(clips)) {
     for (const f of fs.readdirSync(clips)) {
       const p = path.join(clips, f);
@@ -45,7 +46,7 @@ function samples() {
       out.push({ name: d, wav });
     }
   }
-  const extra = path.join(process.env.TEMP, 'yapper-60s.wav');
+  const extra = path.join(os.tmpdir(), 'yapper-60s.wav');
   if (fs.existsSync(extra)) out.push({ name: 'yapper-60s', wav: extra });
   return out;
 }
