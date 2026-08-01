@@ -568,6 +568,18 @@ function fmtStamp(sec) {
  * this costs live about 2% of its passes: one 2.6-second window per 120
  * seconds of meeting.
  */
+/**
+ * What a run of windows was produced under. A head start is only reusable by a
+ * final pass that would have made the same windows the same way — mix a `base`
+ * head start into a `small` pass and the transcript is silently half one and
+ * half the other, which is worse than either and invisible. Not reachable
+ * today, since every tier finishes with `small`, but it is one edit to the
+ * tier table away and nothing would have complained.
+ */
+function fingerprintOf(o) {
+  return [o.model, o.language, o.prompt, o.windowSec, o.overlapSec].join('\u0000');
+}
+
 function progressive(file, opts = {}) {
   const o = {
     language: 'auto', model: undefined, prompt: '', windowSec: 120, overlapSec: 2, ...opts
@@ -581,7 +593,7 @@ function progressive(file, opts = {}) {
     get consumedSec() { return at; },
     get windows() { return lines.length ? at / o.windowSec : 0; },
     /** What transcribeFile needs to finish the job. */
-    snapshot() { return { at, lines: lines.slice() }; },
+    snapshot() { return { at, lines: lines.slice(), fingerprint: fingerprintOf(o) }; },
 
     /**
      * Take whatever windows are now safe. Resolves when it runs out of them,
@@ -775,16 +787,31 @@ async function transcribeFileNow(file, { language = 'auto', model, prompt = '', 
   }
   repairWav(file);
   const totalSec = audioSecondsIn(file);
-  if (totalSec < 0.5) return from ? deduplicate(from.lines.slice()) : [];
+  if (totalSec < 0.5) return [];
 
   await start(model);
 
   const o = { language, model, prompt, windowSec, overlapSec };
+
   // `from` is a run that was already under way while the meeting was still
-  // going: its windows are finished and identical to what this pass would
-  // have produced for them, so only the tail is left to do.
-  const lines = from ? from.lines.slice() : [];
-  let at = from ? from.at : 0;
+  // going: its windows are finished and identical to what this pass would have
+  // produced for them, so only the tail is left. Two things have to hold for
+  // that to be true, and both are cheaper to check than to debug — a head
+  // start made under different settings would splice two different
+  // transcriptions together, and one reaching past the end of the file would
+  // contribute lines for audio that is no longer there. Either way it is
+  // dropped and the file is done in full, which is only slower.
+  let usable = from;
+  if (from && from.fingerprint !== fingerprintOf(o)) {
+    console.log('[transcribe] the head start was made under other settings; doing the file in full');
+    usable = null;
+  } else if (from && from.at > totalSec) {
+    console.log('[transcribe] the head start runs past the end of the recording; doing the file in full');
+    usable = null;
+  }
+
+  const lines = usable ? usable.lines.slice() : [];
+  let at = usable ? usable.at : 0;
   const fd = fs.openSync(file, 'r');
   try {
     while (at < totalSec) {
