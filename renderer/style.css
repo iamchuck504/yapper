@@ -432,15 +432,32 @@ body.light #btn-theme .icon-moon { display: block; }
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  padding: 16px 18px;
+  padding: 4px 20px 8px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
   margin-bottom: 22px;
   box-shadow: var(--shadow-1);
 }
+/* Three questions, not one list: what the notes should be, how the recording
+   is made, and what happens while it runs. Packed one on top of another they
+   were a wall nobody read to the end of. */
+.opt-group {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px 0;
+  border-top: 1px solid var(--rule);
+}
+.opt-group:first-child { border-top: none; }
+.opt-group-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
 .opt-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.opt-label { width: 96px; min-width: 96px; font-size: 12.5px; font-weight: 500; color: var(--text-2); }
+.opt-label { width: 110px; min-width: 110px; font-size: 12.5px; font-weight: 500; color: var(--text-2); }
 
 .seg {
   display: inline-flex;

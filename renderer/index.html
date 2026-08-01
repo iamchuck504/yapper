@@ -184,7 +184,12 @@
         </span>
       </button>
 
+      <!-- Grouped, because fourteen rows in one stack is a wall: what belongs
+           to the notes, what belongs to the recording, and what happens while
+           it runs are three different questions. -->
       <div id="options-card" class="options-card">
+       <div class="opt-group">
+        <div class="opt-group-title">Notes</div>
         <div class="opt-row">
           <span class="opt-label">Note style</span>
           <div id="style-pills" class="seg">
@@ -203,42 +208,6 @@
             <button class="seg-btn" data-detail="concise">Concise</button>
             <button class="seg-btn" data-detail="detailed">Detailed</button>
           </div>
-        </div>
-        <div class="opt-row">
-          <span class="opt-label">Noise reduction</span>
-          <div id="noise-seg" class="seg">
-            <button class="seg-btn" data-noise="off">Off</button>
-            <button class="seg-btn" data-noise="standard">Standard</button>
-            <button class="seg-btn" data-noise="strong">Strong</button>
-          </div>
-          <span class="mic-hint">cleans up your mic — adjustable while recording</span>
-        </div>
-        <div class="opt-row">
-          <span class="opt-label">Participants</span>
-          <input id="participants-rec" class="text-input" type="text" placeholder="Attendee names, comma-separated — improves name spelling &amp; attribution" autocomplete="off" spellcheck="false" />
-        </div>
-        <div class="opt-row">
-          <span class="opt-label">Live</span>
-          <label class="switch"><input type="checkbox" id="opt-bubble" /><span class="track"></span>Floating bubble</label>
-          <label class="switch"><input type="checkbox" id="opt-autodetect" /><span class="track"></span>Auto-detect meetings</label>
-          <label class="switch"><input type="checkbox" id="opt-startup" /><span class="track"></span><span id="startup-label">Start with Windows</span></label>
-        </div>
-        <div class="opt-row" id="bubble-corner-row">
-          <span class="opt-label">Bubble starts</span>
-          <div id="corner-seg" class="seg">
-            <button class="seg-btn" data-corner="top-left">Top left</button>
-            <button class="seg-btn" data-corner="top-right">Top right</button>
-            <button class="seg-btn" data-corner="bottom-left">Bottom left</button>
-            <button class="seg-btn" data-corner="bottom-right">Bottom right</button>
-          </div>
-          <span class="mic-hint">where it appears each recording — you can still drag it anywhere</span>
-        </div>
-        <div class="opt-row">
-          <span class="opt-label">Audio</span>
-          <label class="switch"><input type="checkbox" id="opt-keep-audio" /><span class="track"></span>Keep this meeting's audio</label>
-          <span class="mic-hint">off by default — the transcript is what gets kept</span>
-          <span id="audio-held" class="mic-hint hidden"></span>
-          <button id="btn-free-audio" class="inline-action hidden">Free it up</button>
         </div>
         <div class="opt-row">
           <span class="opt-label">Instructions</span>
@@ -273,6 +242,51 @@
           <button id="btn-llm-test" class="inline-action">Test connection</button>
           <span id="llm-status" class="mic-hint"></span>
         </div>
+       </div>
+
+       <div class="opt-group">
+        <div class="opt-group-title">Recording</div>
+        <div class="opt-row">
+          <span class="opt-label">Noise reduction</span>
+          <div id="noise-seg" class="seg">
+            <button class="seg-btn" data-noise="off">Off</button>
+            <button class="seg-btn" data-noise="standard">Standard</button>
+            <button class="seg-btn" data-noise="strong">Strong</button>
+          </div>
+          <span class="mic-hint">cleans up your mic — adjustable while recording</span>
+        </div>
+        <div class="opt-row">
+          <span class="opt-label">Participants</span>
+          <input id="participants-rec" class="text-input" type="text" placeholder="Attendee names, comma-separated — improves name spelling &amp; attribution" autocomplete="off" spellcheck="false" />
+        </div>
+        <div class="opt-row">
+          <span class="opt-label">Audio</span>
+          <label class="switch"><input type="checkbox" id="opt-keep-audio" /><span class="track"></span>Keep this meeting's audio</label>
+          <span class="mic-hint">off by default — the transcript is what gets kept</span>
+          <span id="audio-held" class="mic-hint hidden"></span>
+          <button id="btn-free-audio" class="inline-action hidden">Free it up</button>
+        </div>
+       </div>
+
+       <div class="opt-group">
+        <div class="opt-group-title">While it runs</div>
+        <div class="opt-row">
+          <span class="opt-label">Live</span>
+          <label class="switch"><input type="checkbox" id="opt-bubble" /><span class="track"></span>Floating bubble</label>
+          <label class="switch"><input type="checkbox" id="opt-autodetect" /><span class="track"></span>Auto-detect meetings</label>
+          <label class="switch"><input type="checkbox" id="opt-startup" /><span class="track"></span><span id="startup-label">Start with Windows</span></label>
+        </div>
+        <div class="opt-row" id="bubble-corner-row">
+          <span class="opt-label">Bubble starts</span>
+          <div id="corner-seg" class="seg">
+            <button class="seg-btn" data-corner="top-left">Top left</button>
+            <button class="seg-btn" data-corner="top-right">Top right</button>
+            <button class="seg-btn" data-corner="bottom-left">Bottom left</button>
+            <button class="seg-btn" data-corner="bottom-right">Bottom right</button>
+          </div>
+          <span class="mic-hint">where it appears each recording — you can still drag it anywhere</span>
+        </div>
+       </div>
       </div>
 
       <div id="pipeline" class="hidden">

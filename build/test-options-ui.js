@@ -49,6 +49,11 @@ app.whenReady().then(async () => {
   check('lo que sí es preferencia se guarda',
     stored.includes('memo') && stored.includes('focus on the launch'), stored);
 
+  // Left open on purpose: the fold used to remember this and the next launch
+  // opened on the wall of settings again, which is the thing the fold exists
+  // to prevent.
+  await $(`setOptionsOpen(true)`);
+
   // reload: this is what a next launch looks like
   win.webContents.reload();
   await new Promise(r => win.webContents.once('did-finish-load', r));
@@ -60,6 +65,14 @@ app.whenReady().then(async () => {
   check('al reabrir, el estilo elegido sí se recuerda',
     (await $(`document.querySelector('#style-pills .seg-btn.active').dataset.style`)) === 'memo',
     await $(`document.querySelector('#style-pills .seg-btn.active').dataset.style`));
+  check('al reabrir, las opciones vuelven a estar plegadas',
+    await $(`document.getElementById('options-card').classList.contains('collapsed')`),
+    'abrieron solas');
+  // Y la línea plegada dice lo que hay debajo. Se pintaba sólo al abrir o
+  // cerrar el pliegue, así que arrancaba en blanco o con lo de la vez pasada.
+  check('y la línea plegada resume lo que se recordó',
+    /Memo/.test(await $(`document.getElementById('opts-sum').textContent`)),
+    await $(`document.getElementById('opts-sum').textContent`));
   check('al reabrir, las instrucciones sí se recuerdan',
     (await $(`document.getElementById('custom-instructions').value`)) === 'focus on the launch',
     await $(`document.getElementById('custom-instructions').value`));

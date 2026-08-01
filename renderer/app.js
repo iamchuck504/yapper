@@ -46,16 +46,17 @@ function paintOptsToggle() {
 
 function setOptionsOpen(open) {
   optionsCardEl.classList.toggle('collapsed', !open);
-  localStorage.setItem('yapper-options-open', open ? '1' : '0');
   paintOptsToggle();
 }
 
 optsToggleEl.addEventListener('click', () =>
   setOptionsOpen(optionsCardEl.classList.contains('collapsed')));
 
-// Folded to begin with, and it remembers being opened. Someone who lives in
-// these settings should not have to reopen them every launch.
-setOptionsOpen(localStorage.getItem('yapper-options-open') === '1');
+// Folded, every launch. It used to remember having been opened, which meant
+// the view could still open on the wall of settings instead of on the button
+// people came for — the whole point of the fold.
+setOptionsOpen(false);
+localStorage.removeItem('yapper-options-open');
 
 function layoutForRecording(on) {
   viewRecordEl.classList.toggle('is-recording', on);
