@@ -48,15 +48,61 @@ let noiseReduction = localStorage.getItem('yapper-noise') || 'standard';
 const numOr = (v, d) => (isNaN(parseFloat(v)) ? d : parseFloat(v));
 let gainSys = numOr(localStorage.getItem('yapper-gain-sys'), 1);
 
-// macOS: the system waveform arrives from the main process, since the samples
-// are captured and mixed there. Flat until something is playing, which is the
-// honest resting state rather than a meter that can never move.
-const SYS_WAVE_POINTS = 128;
-const sysWave = new Uint8Array(SYS_WAVE_POINTS).fill(128);
+// macOS: the system waveform's samples are captured and mixed in the main
+// process, so they arrive over IPC — but drawing them as they arrive tied the
+// animation to the delivery rate, about eighteen packets a second, and it read
+// as robotic beside a microphone meter running off a live analyser every
+// frame.
+//
+// So the packets fill a ring, and the drawing walks that ring on its own
+// clock: 256 points per second of audio, advanced by however long the last
+// frame took. Between packets it keeps moving through samples it already has,
+// which is what makes it look like sound rather than like a slideshow. It
+// deliberately reads a little behind the newest sample, because a trace that
+// stalls waiting for the next packet is exactly the stutter being removed.
+const SYS_WAVE_POINTS = 128;        // one screenful: half a second at 256/s
+const SYS_WAVE_RATE = 256;
+const SYS_RING = 4096;
+const SYS_LAG = 48;                 // ~190 ms of slack against a late packet
+
+const sysRing = new Uint8Array(SYS_RING).fill(128);
+let sysWritten = 0;                 // points ever received
+let sysCursor = 0;                  // points already drawn past
+let sysFrameAt = 0;
+
 if (window.yapper.platform === 'darwin') {
   window.yapper.onSystemWave(bytes => {
-    if (bytes && bytes.length === SYS_WAVE_POINTS) sysWave.set(bytes);
+    if (!bytes || !bytes.length) return;
+    for (let i = 0; i < bytes.length; i++) sysRing[(sysWritten + i) % SYS_RING] = bytes[i];
+    sysWritten += bytes.length;
   });
+}
+
+function resetSysWave() {
+  sysRing.fill(128);
+  sysWritten = 0;
+  sysCursor = 0;
+  sysFrameAt = 0;
+}
+
+/** The next screenful, walked at the rate the audio was recorded. */
+function sysWaveInto(target) {
+  const now = performance.now();
+  const dt = sysFrameAt ? Math.min(0.25, (now - sysFrameAt) / 1000) : 0;
+  sysFrameAt = now;
+  sysCursor += dt * SYS_WAVE_RATE;
+
+  // Never past what has arrived, and never so far behind that the trace is
+  // showing old news — a long stall is caught up rather than crawled through.
+  const newest = sysWritten - SYS_WAVE_POINTS - SYS_LAG;
+  if (sysCursor > newest) sysCursor = newest;
+  if (sysCursor < newest - SYS_WAVE_RATE) sysCursor = newest;
+  if (sysCursor < 0) sysCursor = 0;
+
+  const start = Math.floor(sysCursor);
+  for (let i = 0; i < target.length; i++) {
+    target[i] = sysWritten > 0 ? sysRing[(start + i) % SYS_RING] : 128;
+  }
 }
 let gainMic = numOr(localStorage.getItem('yapper-gain-mic'), 1);
 const micStreams = new Map(); // deviceId|'default' -> MediaStream
@@ -1142,12 +1188,13 @@ async function startRecording() {
       analysers.sys = makeViz(sysGainNode, vizSys, colSys);
     } else if (window.yapper.platform === 'darwin') {
       window.yapper.setSysGain(gainSys);      // the stored preference, applied
+      resetSysWave();
       // No stream to hang an analyser on: on macOS these samples are captured
       // and mixed in the main process and never reach this side. The meter is
       // fed from there instead, through something shaped like an analyser so
       // drawWave and levelOf do not have to know the difference.
       analysers.sys = {
-        analyser: { getByteTimeDomainData: t => t.set(sysWave) },
+        analyser: { getByteTimeDomainData: sysWaveInto },
         canvas: vizSys,
         ctx: vizSys.getContext('2d'),
         color: colSys,
@@ -1287,7 +1334,7 @@ async function stopAndProcess() {
   // while a meeting was in the air. Nothing is at stake now.
   const relaunch = $('sp-relaunch');
   if (relaunch) { relaunch.disabled = false; relaunch.title = ''; }
-  sysWave.fill(128);                 // flat, not frozen on the last peak
+  resetSysWave();                    // flat, not frozen on the last peak
   await stopLivePreview();
   stopPcmTap();
   cleanupCapture();
