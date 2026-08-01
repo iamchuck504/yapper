@@ -893,11 +893,16 @@ function startHeadStart(folder, participants) {
 function stopHeadStart() {
   if (headStartTimer) clearInterval(headStartTimer);
   headStartTimer = null;
+  // Not awaited here: this runs from an IPC message the renderer does not wait
+  // on. `transcribe` awaits it below, which is where it matters.
+  if (headStart) headStart.settled = headStart.run.settle();
 }
 
 /** What is already done for this meeting, if anything. */
-function headStartFor(folder) {
+async function headStartFor(folder) {
   if (!headStart || headStart.folder !== folder) return null;
+  // Let the window in flight land first, or the final pass redoes it.
+  await (headStart.settled || headStart.run.settle());
   const snap = headStart.run.snapshot();
   return snap.at > 0 ? snap : null;
 }
@@ -1174,7 +1179,7 @@ ipcMain.handle('transcribe', async (_e, folder) => {
       // identical to the ones this pass would have produced for them, so only
       // the tail is left — and if there is nothing, this is the same full pass
       // it always was.
-      from: headStartFor(folder),
+      from: await headStartFor(folder),
       onProgress: ({ done, total }) => {
         send(`\rTranscribing… ${Math.round(done / total * 100)}%`);
       }

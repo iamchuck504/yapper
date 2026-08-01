@@ -88,6 +88,23 @@ function growingCopy(dest, pcm, seconds) {
       console.log('  --- incremental ---\n' + progressive.join('\n').slice(0, 400));
     }
 
+    // ---- parar tiene que parar de verdad ----
+    // Sin esto, un adelanto con retraso sigue metiendo ventanas en la misma
+    // cola que necesita la pasada final — y la espera que esto vino a quitar
+    // vuelve, detrás de trabajo que ya no le sirve a nadie.
+    const r2 = engine.progressive(live, opts);
+    growingCopy(live, pcm, totalSec);
+    const inFlight = r2.advance();          // sin await: queda una en vuelo
+    await r2.settle();                      // resuelve cuando aterriza
+    const afterSettle = r2.consumedSec;
+    await inFlight.catch(() => { });
+    check('settle() espera a la ventana en vuelo', r2.consumedSec, afterSettle);
+
+    const before = r2.consumedSec;
+    growingCopy(live, pcm, totalSec);
+    await r2.advance();
+    check('y despues de settle ya no adelanta mas', r2.consumedSec, before);
+
     // ---- and it still works when nothing was done early ----
     const cold = await engine.transcribeFile(live, opts);
     check('sin adelanto, el resultado es el mismo', cold.join('\n') === atEnd.join('\n'));
