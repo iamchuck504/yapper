@@ -101,11 +101,12 @@ function broadcast(channel, payload) {
 const BUBBLE_INSET = 24;   // gap from the edge when it first appears
 const BUBBLE_CORNERS = new Set(['top-left', 'top-right', 'bottom-left', 'bottom-right']);
 
-// Bottom left by default, and the reasons are the two edges to stay off. The
-// bottom right is where a video call puts its own controls, which is the strip
-// most likely to be covered while it matters. The top is where the notch is on
-// the MacBooks that have one.
-const DEFAULT_CORNER = 'bottom-left';
+// Top right by default. The bottom is where a video call puts its own
+// controls — the strip most likely to be covered exactly while it matters —
+// and the right keeps it clear of the window's own content. The notch sits at
+// the top of the *centre*, and the top corners stay out of its band anyway;
+// see NOTCH_SAFE_TOP.
+const DEFAULT_CORNER = 'top-right';
 
 // The work area already begins below the menu bar, and on a notched Mac the
 // menu bar is tall enough to contain the notch — so a window inside it cannot
@@ -233,12 +234,14 @@ ipcMain.on('bubble-state', (_e, state) => {
 ipcMain.on('bubble-resize', (_e, size) => {
   if (!bubble || bubble.isDestroyed() || !size) return;
   const b = bubble.getBounds();
-  // A capsule that expands has to grow *away* from its corner, or it walks off
-  // the screen. Anchoring the bottom-right was right while the bottom right
-  // was the only corner it could live in; with a choice, that anchor drags it
-  // out of any of the other three — collapsing from 470×280 to 122×50 moved it
-  // 348 px right and 230 px down, out of the top-left it was asked for.
-  const [vertical, horizontal] = bubbleCorner().split('-');
+  // A capsule that expands has to grow *away* from the nearest edges, or it
+  // walks off the screen. Which edges those are is decided by where the window
+  // actually sits, not by the corner it was born in: once it has been dragged,
+  // the setting says nothing about its surroundings, and anchoring to it made
+  // a capsule dropped in the middle of the screen jump 348 px sideways to open.
+  const area = screen.getDisplayMatching(b).workArea;
+  const horizontal = (b.x + b.width / 2) < (area.x + area.width / 2) ? 'left' : 'right';
+  const vertical = (b.y + b.height / 2) < (area.y + area.height / 2) ? 'top' : 'bottom';
   bubble.setBounds({
     x: horizontal === 'left' ? b.x : b.x + b.width - size.w,
     y: vertical === 'top' ? b.y : b.y + b.height - size.h,

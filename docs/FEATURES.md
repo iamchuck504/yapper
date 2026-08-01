@@ -76,13 +76,17 @@ stop, open the main window. Leave and it shrinks back. The **pin** keeps it open
 It is draggable, follows the light/dark theme, and cannot be dragged off-screen
 or stranded by unplugging a monitor. Toggle: **Floating bubble**.
 
-**Where it appears** is set with **Bubble starts** — any of the four corners.
-It does not remember being dragged, so whatever corner it starts in is the one
-it lives in for the meeting; the default is the bottom left, since the bottom
-right is the strip a video call fills with its own controls. Changing it moves
-the capsule already on screen rather than waiting for the next recording. On a
-MacBook with a notch, the top corners keep clear of it even with the menu bar
-set to hide.
+**Where it appears** is set with **Bubble starts** — any of the four corners,
+top right by default: the bottom is the strip a video call fills with its own
+controls. Changing it moves the capsule already on screen rather than waiting
+for the next recording. On a MacBook with a notch, the top corners keep clear
+of it even with the menu bar set to hide.
+
+**Drag it anywhere.** The whole capsule is a handle — the controls and the
+transcript are the only parts that are not — and it opens away from whichever
+edges it is nearest, so one dropped in the middle of the screen does not jump
+sideways to expand. It does not remember being dragged between meetings; the
+corner above is where each one starts.
 
 ### The menu bar (macOS)
 

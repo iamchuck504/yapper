@@ -49,14 +49,14 @@ app.whenReady().then(async () => {
     // which is exactly what the first version of this got wrong.
     const work = screen.getPrimaryDisplay().workArea;
 
-    check('el default está a la izquierda, lejos de los controles de la llamada',
-      await $('window.yapper.getBubbleCorner()'), 'bottom-left');
+    check('el default es arriba a la derecha, fuera de los controles de la llamada',
+      await $('window.yapper.getBubbleCorner()'), 'top-right');
 
     await $('window.yapper.bubbleShow()');
     await pause(1200);
     const b0 = bubbleWindow();
     check('la burbuja existe', !!b0);
-    check('y nace ahí', cornerOf(b0.getBounds(), work), 'bottom-left');
+    check('y nace ahí', cornerOf(b0.getBounds(), work), 'top-right');
 
     for (const corner of ['top-left', 'top-right', 'bottom-left', 'bottom-right']) {
       await $(`window.yapper.setBubbleCorner(${JSON.stringify(corner)})`);

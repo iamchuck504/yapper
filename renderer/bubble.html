@@ -70,13 +70,19 @@
     /* Resting, the whole thing is a capsule: the level and the clock, nothing
        else. Everything with a verb on it lives behind the hover. */
     body.pill #card { border-radius: 999px; }
+    /* The whole capsule is a handle. Only the header used to be, which is all
+       there is while it rests as a pill — but opened, the transcript is most of
+       what is on screen, so grabbing the obvious part of it did nothing. The
+       controls opt out below, and so does the transcript, which has to stay
+       selectable. */
+    #card { -webkit-app-region: drag; }
+    #text { -webkit-app-region: no-drag; }
     header {
       display: flex;
       align-items: center;
       gap: 10px;
       padding: 10px 12px;
       border-bottom: 1px solid var(--border);
-      -webkit-app-region: drag;
       flex-shrink: 0;
     }
     body.pill header { border-bottom: none; padding: 9px 14px; }
