@@ -1,6 +1,6 @@
 {
   "name": "yapper",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Records meetings, transcribes them on-device with Whisper, and writes structured notes with the model you choose",
   "main": "main.js",
   "scripts": {
