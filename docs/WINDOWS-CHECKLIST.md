@@ -43,6 +43,25 @@ node build\make-fixtures.js       # builds the 10 s and 60 s clips from calibrat
 `test-live-vs-final.js` and `test-faults.js` both want them, and `test-faults`
 additionally wants the `small` model present.
 
+**Then the Electron suites**, which `npm test` does not run — they need a window,
+so they go one at a time with `npx electron build/test-<name>.js`. These are the
+ones that cover what changed since this list was written and are not macOS-only:
+
+```
+test-theme          Auto/Light/Dark, the default, and that the choice sticks
+test-options-ui     the fold: closed on every launch, and the summary under it
+test-actions-ui     …including the theme button clearing the content column
+test-smoke          every view, control and export, listening for renderer errors
+test-recording-signpost  the sidebar indicator and the way back
+test-record-cycle   record → transcribe → notes, end to end
+test-bubble-corner  the four corners, measured against the work area
+test-llm-ui         the provider rows now that they live inside the fold
+```
+
+`test-app-menu.js`, `test-permissions-early.js`, `test-sys-meter.js`,
+`test-tray.js`, `test-screen-prompt.js` and `test-audio-orphans.js` skip
+themselves off macOS — see §4 for what that leaves worth checking by hand.
+
 ---
 
 ## 2. Changed for Windows, biggest first
@@ -131,17 +150,81 @@ Windows renders the same code with different fonts and metrics.
   to the stop control from Action items or Search. Check it fits the sidebar
   width and that the clock does not make the button jitter each second — it is
   set to tabular numerals for that reason.
-- **The bubble's starting corner.** Four corners, default bottom left.
+- **The bubble's starting corner.** Four corners, **default top right** since
+  this list was written — the bottom right is the strip a video call fills with
+  its own controls.
   **This is the one with a real Windows-specific risk:** the position comes
   from the display's *work area*, and on Windows the taskbar can be on any
   edge. A taskbar docked left or top shifts the work area's origin, and the
   first version of this code got exactly that wrong on macOS by using
   `workAreaSize` (no origin) instead of `workArea`. Test all four corners with
   the taskbar moved to the top and to the left.
+  Two more things changed here and are worth the same taskbar treatment:
+  the whole capsule is a drag handle (`-webkit-app-region: drag`, with the
+  controls marked `no-drag`), and **expanding anchors to where the window
+  actually is**, not to the configured corner — a dragged capsule used to jump
+  348 px sideways to open. `build/test-bubble-corner.js` measures all of this
+  geometrically and runs on Windows.
 - **The System meter and its gain slider.** These already worked on Windows,
   where the loopback runs through the renderer's audio graph. The macOS fix is
   behind a `platform === 'darwin'` branch and the Windows path was not touched.
   **Confirm it still moves** — that is a regression check, not a new feature.
+  What *did* change for both is the drawing: the trace is normalised to a
+  rolling peak so a quiet source is still visible, and then multiplied by the
+  chosen gain so the slider has a visible effect again. On Windows both meters
+  are fed by analysers on the same clock, so the pacing problem that produced
+  the macOS ring buffer does not exist there — but the two meters should now
+  look like siblings rather than one smooth and one stuttering.
+
+---
+
+## 3b. The record view, rebuilt — all of it cross-platform
+
+Written and screenshotted on macOS at 1000, 1180 and 1440 px. Nothing here is
+behind a platform guard, so the risk on Windows is metrics: different default
+fonts, a scrollbar that takes width, and display scaling at 125 % or 150 %,
+which is where a layout tuned on a Retina Mac usually first shows a seam.
+
+- **Start recording and Import voice note are at the top of the view**, above
+  the microphone picker and the title. Everything else folds away behind one
+  line: `Meeting options — General · Concise`, with a sliders icon, the summary
+  of what is chosen, and a **Show / Hide** pill with a chevron that turns.
+  Folded on every launch, deliberately — it does not remember being open.
+- **The options are grouped**, not one stack of fourteen rows: **Notes**
+  (style, detail, instructions, provider and its key/model/endpoint rows),
+  **Recording** (noise reduction, participants, keep audio), **While it runs**
+  (bubble, auto-detect, start at login, starting corner) and **App** (theme).
+  Check the group captions and the hairlines survive at 125 % scaling, and that
+  the label column (110 px) still holds "Noise reduction" on one line.
+- **Recording state.** Start and Import disappear (they cannot be used
+  mid-meeting), the microphone picker stays, and the meters take a full-width
+  row of their own instead of sharing one with the clock and three buttons.
+- **The theme button clears the content column.** It is fixed to the window and
+  floats over whatever is under it; on a narrow window the action-items bar ran
+  underneath it. The right gutter now clears its 16 + 32 px.
+  `build/test-actions-ui.js` measures the two rectangles at 1000 px wide and
+  runs on Windows — **the Windows scrollbar takes width from the same gutter**,
+  so this is the check most likely to come back different.
+- **"Start at login"** reads *Start with Windows* there, from `#startup-label`.
+  Worth an eye now that it sits inside a group.
+
+### Theme: Auto, Light, Dark
+
+New, cross-platform, and the part with the most machinery behind it.
+
+- The control is under **Meeting options → App**. **Dark by default.**
+- **Auto follows the system setting and keeps following it** — the renderer
+  watches `prefers-color-scheme`, so a machine that switches at sunset takes
+  Yapper with it, without reopening. On Windows that is Settings → Personalisation → Colours, and it is worth flipping it with the app open.
+- What is stored is the **word chosen**, not the colour it resolved to. `main`
+  resolves it again — through `nativeTheme.shouldUseDarkColors` — for the
+  window background and for the splash card, both painted before the page
+  exists. **If those two disagree, the app opens on a flash of the wrong
+  theme**, which is exactly the bug this shape invites. On Windows, check the
+  first frame after a cold start under each of the three settings.
+- The button beside the title is still the shortcut and commits to a side
+  rather than flipping Auto.
+- `build/test-theme.js` covers all of it and runs on Windows.
 
 ---
 
@@ -156,11 +239,27 @@ Listed so no time is spent on them:
 - The menu bar item and `build/icon-tray.js`
 - The notch clearance on the top corners
 - The dropped `NSCamera`/`NSBluetooth` declarations — those are macOS keys
+- `app.dock.show()` and the LaunchServices staleness behind it
+- The permission priming at launch (`primePermissions`): the microphone through
+  `systemPreferences.askForMediaAccess`, system audio by briefly running the
+  helper, since creating a tap is the only thing that triggers that prompt
+- The system-audio ring buffer in the renderer and its `SYS_WAVE_*` constants —
+  the whole path exists because macOS mixes those samples in main; on Windows
+  an analyser draws that meter directly
 
-**One open question rather than a task:** the menu bar item is macOS-only.
-Windows has a system tray that could hold the same thing — start, stop, and
-whether a recording is running — and the same argument applies, since the app
-is behind the call either way. Not built, because it was not asked for.
+**Two open questions rather than tasks:**
+
+- The **menu bar item** is macOS-only. Windows has a system tray that could
+  hold the same thing — start, stop, and whether a recording is running — and
+  the same argument applies, since the app is behind the call either way. Not
+  built, because it was not asked for.
+- The **application menu** (`buildAppMenu`) is built on both platforms but
+  earns its keep on macOS, where the menu bar belongs to the frontmost app.
+  On Windows it is hidden (`autoHideMenuBar`), so what actually matters there
+  is that **Reload and Toggle Developer Tools stay out of packaged builds** —
+  a stray Ctrl+R during a meeting reloads the renderer with a recording in it.
+  `build/test-app-menu.js` asserts that, but it skips off macOS. Either drop
+  the skip or check by hand.
 
 ---
 
@@ -174,10 +273,16 @@ mac-only version would leave `latest.yml` off the newest release and Windows
 copies would stop seeing updates, silently. Cutting from Windows afterwards
 replaces those with real ones.
 
-Six changes are committed but unpublished, waiting on a reason to cut a
-version: the System meter, `llm.js` finally being tracked in git, the
-LaunchServices fix, the menu bar item, the recording indicator, and the bubble
-corner.
+**Nothing has been published since 0.1.4.** Eighteen changes are committed and
+unpublished, waiting on a reason to cut a version: the System meter, `llm.js`
+finally being tracked in git, the LaunchServices fix, the menu bar item, the
+recording indicator, the bubble corner and its dragging, the permission
+priming, the waveform drawing, the whole record-view rebuild, and the theme
+setting.
+
+Whoever cuts the next version should cut it **from Windows**, because that is
+where the untested surface is: a Windows-built installer that someone has
+actually run is worth more than another cross-build from the Mac.
 
 ---
 
@@ -192,3 +297,18 @@ corner.
   never been added, so any clone was missing the note providers and would fail
   at require time. Worth a glance at whether anything else escaped the same
   way; a check of the other modules came back clean.
+- **`writeSettings` used to replace the file** with whatever the caller had
+  read, so two overlapping writers each restored the other's old fields. The
+  first-run calibration reads at launch and writes seconds later, which meant a
+  setting chosen in between was silently dropped — found while writing the
+  theme, fixed by merging onto what is on disk. Two callers remove keys on
+  purpose and now say so explicitly (`writeSettings(s, ['keepAudio'])`).
+  **This one is worth knowing on Windows**, because the calibration window
+  there is longer: a CPU-only machine takes noticeably more time to measure its
+  tier, so the race was wider on Windows than on the Mac where it was found.
+- **The theme has one home now**, `settings.json`, read through the only
+  synchronous IPC channel in the bridge. The page used to keep its own copy in
+  `localStorage`, and on a real profile the two drifted: settings said `auto`,
+  the page said `light`, so with the system in dark mode the window opened dark
+  and the page rendered light. Any profile that has been through the older
+  builds carries that stale key; it is cleared on load.
