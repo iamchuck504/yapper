@@ -273,18 +273,23 @@ function showMainWindow() {
 // a yes/no — it needs the app reopened before it takes effect — so answering it
 // mid-meeting still leaves that meeting recorded one-sided.
 //
-// So they are asked at launch instead, once. The microphone has an API for it.
+// So they are asked at launch instead. The microphone has an API for it.
 // System audio does not: the permission is triggered by *creating* a tap, so
-// the helper is run for a moment and stopped. It captures nothing that is
-// kept — its output is dropped on the floor — and it only happens when this
-// build has not asked before.
+// the helper is run for a moment and stopped. It captures nothing that is kept.
+//
+// Every launch, with no "already asked" flag. The first version kept one keyed
+// to the app version and it was wrong in the way that matters: macOS drops
+// these permissions when an app's *code identity* changes, which for an
+// ad-hoc signature is every single build. Six reinstalls later the permissions
+// were gone and the flag still said they had been asked for, so the app went
+// back to asking mid-meeting — the exact thing this exists to prevent. The
+// probe is cheap and it stops the moment the helper says it is capturing, so
+// a machine that has already granted it pays a few hundred milliseconds.
 
 const PERMISSION_PROBE_MS = 2500;
 
 async function primePermissions() {
   if (process.platform !== 'darwin') return;
-  const s = readSettings();
-  if (s.permissionsAskedBy === app.getVersion()) return;
 
   try {
     if (systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
@@ -295,38 +300,37 @@ async function primePermissions() {
   }
 
   const helper = helperPath('system-audio');
-  if (fs.existsSync(helper)) {
-    // Before spawning one of our own: a helper left by a run that died still
-    // holds a tap, and stacking another on top of it would prime nothing and
-    // leave two.
-    const orphans = sysaudio.reapOrphans(helper);
-    if (orphans) console.log(`[permissions] cleared ${orphans} helper(s) from a previous run`);
-    await new Promise(resolve => {
-      let done = false;
-      const finish = () => { if (!done) { done = true; resolve(); } };
-      let proc;
-      try {
-        proc = spawn(helper, []);
-      } catch (err) {
-        console.log('[permissions] could not start the audio helper:', err.message);
-        return finish();
-      }
-      // Drained, not read: a helper whose stdout nobody empties blocks on it.
-      proc.stdout.on('data', () => { });
-      proc.stderr.on('data', () => { });
-      proc.on('error', finish);
-      proc.on('close', finish);
-      setTimeout(() => { try { proc.kill(); } catch { /* already gone */ } finish(); },
-        PERMISSION_PROBE_MS);
-    });
-  }
+  if (!fs.existsSync(helper)) return;
 
-  // Recorded even when the answer was no. Asking again every launch is
-  // nagging; the recording path still offers Settings and the reopen if the
-  // permission is missing when it matters.
-  const now = readSettings();
-  now.permissionsAskedBy = app.getVersion();
-  writeSettings(now);
+  // Before spawning one of our own: a helper left by a run that died still
+  // holds a tap, and stacking another on top of it would prime nothing.
+  const orphans = sysaudio.reapOrphans(helper);
+  if (orphans) console.log(`[permissions] cleared ${orphans} helper(s) from a previous run`);
+
+  await new Promise(resolve => {
+    let proc;
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      try { proc.kill(); } catch { /* already gone */ }
+      resolve();
+    };
+    try {
+      proc = spawn(helper, []);
+    } catch (err) {
+      console.log('[permissions] could not start the audio helper:', err.message);
+      return resolve();
+    }
+    // Drained, not read: a helper whose stdout nobody empties blocks on it.
+    proc.stdout.on('data', () => { });
+    // "capturing" means the permission is already there — stop at once rather
+    // than hold a tap for two seconds to learn nothing.
+    proc.stderr.on('data', d => { if (/capturing/.test(String(d))) finish(); });
+    proc.on('error', finish);
+    proc.on('close', () => { settled = true; resolve(); });
+    setTimeout(finish, PERMISSION_PROBE_MS);
+  });
 }
 
 // ---------- the application menu ----------
