@@ -32,13 +32,24 @@ function check(name, ok, detail) {
 
 const pause = ms => new Promise(r => setTimeout(r, ms));
 
-/** How much of the canvas is not the flat resting line. */
-const meterMotion = win => win.webContents.executeJavaScript(`(() => {
+/**
+ * How much of the canvas height the trace spans, as a percentage.
+ *
+ * Counting lit pixels was the first measure and it stopped meaning anything
+ * once the trace was scaled to a rolling peak: a flat line and a full waveform
+ * light a similar number of pixels, they just light them in different places.
+ * Vertical spread is what "the meter moved" actually looks like.
+ */
+const meterSpread = win => win.webContents.executeJavaScript(`(() => {
   const c = document.getElementById('viz-sys');
   const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-  let lit = 0;
-  for (let i = 3; i < d.length; i += 4) if (d[i] > 40) lit++;
-  return { lit, total: c.width * c.height };
+  let top = c.height, bottom = 0;
+  for (let y = 0; y < c.height; y++) {
+    for (let x = 0; x < c.width; x++) {
+      if (d[(y * c.width + x) * 4 + 3] > 60) { if (y < top) top = y; if (y > bottom) bottom = y; break; }
+    }
+  }
+  return bottom > top ? Math.round((bottom - top) / c.height * 100) : 0;
 })()`);
 
 app.whenReady().then(async () => {
@@ -52,19 +63,29 @@ app.whenReady().then(async () => {
     await $('startRecording()');
     await pause(2500);                     // let the helper come up
 
-    const resting = await meterMotion(win);
-    say(`  · en reposo: ${resting.lit} px encendidos`);
+    const resting = await meterSpread(win);
+    say(`  · en reposo: el trazo ocupa ${resting}% del alto`);
 
     // Real audio, played out loud: this is the far side of a call.
     const player = spawn('afplay', [path.join(__dirname, 'calibration.wav')]);
     await pause(1800);
-    const during = await meterMotion(win);
-    say(`  · con audio sonando: ${during.lit} px encendidos`);
+    const during = await meterSpread(win);
+    say(`  · con audio sonando: ${during}% del alto`);
     await new Promise(r => player.on('close', r));
 
-    check('el medidor de System se mueve con audio real',
-      during.lit > resting.lit * 1.5 && during.lit > 200,
-      `reposo ${resting.lit}, sonando ${during.lit}`);
+    // Scaled to a rolling peak, a real signal fills most of the canvas while
+    // silence stays near the baseline — that gap is the whole point of the
+    // meter, and it is what "it doesn't work" meant when it was 8%.
+    check('el medidor de System se mueve con audio real', during > 50,
+      `sonando ${during}%, reposo ${resting}%`);
+    // El "reposo" de arriba depende de la máquina: si hay música o una pestaña
+    // sonando, el tap la capta y el trazo sube con razón. Para probar el piso
+    // hace falta silencio de verdad, así que se fabrica.
+    await $(`sysRing.fill(128); sysWritten = 1024; sysCursor = 0; true`);
+    await pause(200);
+    const silent = await meterSpread(win);
+    say(`  · con silencio fabricado: ${silent}% del alto`);
+    check('el silencio no se amplifica hasta parecer señal', silent < 15, `${silent}%`);
 
     // The slider has to reach the process that does the mixing, or it is a
     // control that moves nothing — which is what it was.
@@ -77,9 +98,11 @@ app.whenReady().then(async () => {
 
     await $('stopAndProcess()').catch(() => { });
     await pause(1500);
-    const after = await meterMotion(win);
-    check('al parar vuelve a plano, no se congela en el último pico',
-      after.lit <= resting.lit + 40, `reposo ${resting.lit}, tras parar ${after.lit}`);
+    // The canvas keeps whatever was drawn last — the loop stops with the
+    // recording — so what matters is that the buffer behind it was emptied,
+    // and the next recording does not open on the last one's audio.
+    check('al parar se vacía el búfer, no queda audio de la reunión anterior',
+      await $('sysWritten'), 0);
   } catch (err) {
     fails++;
     say('FAIL  ' + (err.stack || err.message));

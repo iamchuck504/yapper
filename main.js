@@ -863,7 +863,7 @@ ipcMain.handle('recording-start', async (_e, participants) => {
     sysAudio.start();
     startSoloDrain();
   }
-  sysRecent = Buffer.alloc(0);     // last meeting's tail is not this one's
+  sysRemainder = 0;
   startHeadStart(recFolder, participants);
   return recFolder;
 });
@@ -978,16 +978,16 @@ ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
 // So the waveform is sent from here, already shaped the way drawWave reads it:
 // one byte per point, centred on 128.
 
-const SYS_WAVE_POINTS = 128;
-const SYS_WAVE_MS = 25;               // ~40 fps, close enough to the mic's rAF
-// A window of recent audio rather than whatever chunk just arrived. Sending
-// one chunk at a time meant each frame was an unrelated snapshot: the trace
-// jumped rather than moved, next to a microphone meter reading a live
-// analyser sixty times a second. Overlapping windows scroll instead.
-const SYS_WAVE_WINDOW = engine.BYTES_PER_SEC / 4;   // 250 ms
+// Points of waveform per second of audio. The renderer holds these in a ring
+// and walks it on its own clock, so it draws every frame instead of once per
+// packet — sending finished frames at the rate audio chunks arrive looked
+// robotic next to a microphone meter reading a live analyser sixty times a
+// second, however overlapped the windows were. So what goes across is the new
+// samples, and the drawing rate stops depending on the delivery rate.
+const SYS_WAVE_RATE = 256;
+const SAMPLES_PER_SEC = engine.BYTES_PER_SEC / 2;
 let sysGain = 1;
-let lastSysWaveAt = 0;
-let sysRecent = Buffer.alloc(0);
+let sysRemainder = 0;      // fractional points carried between chunks
 
 function applySysGain(pcm) {
   if (sysGain === 1) return pcm;
@@ -1002,24 +1002,28 @@ function applySysGain(pcm) {
 }
 
 function sendSysWave(pcm) {
-  // Keep the tail of what has been mixed, so every frame draws an overlapping
-  // slice of the same signal and the trace scrolls.
-  sysRecent = Buffer.concat([sysRecent, pcm]);
-  if (sysRecent.length > SYS_WAVE_WINDOW) {
-    sysRecent = sysRecent.subarray(sysRecent.length - SYS_WAVE_WINDOW);
-  }
-
-  const now = Date.now();
-  if (now - lastSysWaveAt < SYS_WAVE_MS) return;
-  const samples = sysRecent.length >> 1;
+  const samples = pcm.length >> 1;
   if (!samples) return;
-  lastSysWaveAt = now;
 
-  const out = Buffer.alloc(SYS_WAVE_POINTS, 128);
-  const stride = samples / SYS_WAVE_POINTS;
-  for (let i = 0; i < SYS_WAVE_POINTS; i++) {
-    const at = Math.min(samples - 1, Math.floor(i * stride));
-    out[i] = 128 + Math.max(-128, Math.min(127, Math.round(sysRecent.readInt16LE(at * 2) / 256)));
+  // How many points this chunk is worth, carrying the fraction so the trace
+  // advances at a steady rate rather than rounding a little away each time.
+  const exact = (samples / SAMPLES_PER_SEC) * SYS_WAVE_RATE + sysRemainder;
+  const n = Math.floor(exact);
+  sysRemainder = exact - n;
+  if (n <= 0) return;
+
+  const out = Buffer.alloc(n, 128);
+  const stride = samples / n;
+  for (let i = 0; i < n; i++) {
+    // the loudest sample in each slice, so a peak between points is not missed
+    const from = Math.floor(i * stride);
+    const to = Math.min(samples, Math.floor((i + 1) * stride)) || from + 1;
+    let peak = 0;
+    for (let j = from; j < to; j++) {
+      const v = pcm.readInt16LE(j * 2);
+      if (Math.abs(v) > Math.abs(peak)) peak = v;
+    }
+    out[i] = 128 + Math.max(-128, Math.min(127, Math.round(peak / 256)));
   }
   broadcast('system-wave', out);
 }
