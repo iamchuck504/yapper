@@ -43,19 +43,31 @@ app.whenReady().then(async () => {
   const timer = watchdog(say, 200000);
   try {
     require('../main.js');
+
+    // Muestreado desde antes de que la ventana esté lista. Con el permiso ya
+    // concedido el sondeo termina en cuanto el helper dice "capturing" —
+    // cientos de milisegundos — y el harness tarda más que eso en devolver la
+    // ventana, así que cualquier lectura posterior llegaría tarde siempre.
+    let seen = false;
+    const watching = setInterval(() => { if (running() >= 1) seen = true; }, 40);
+
     const win = await mainWindow();
-
-    // The probe runs after the hand-off, so it is up about now.
-    await pause(1200);
-    check('sondea el permiso de audio al arrancar', running() >= 1, `helpers: ${running()}`);
-
     await pause(3500);
+    clearInterval(watching);
+
+    check('sondea el permiso de audio al arrancar', seen, 'nunca apareció un helper');
     // Suelta el tap: un helper que sigue vivo captura todo lo que suena en la
     // máquina, sin ventana y sin forma de notarlo.
     check('y lo suelta, sin dejar un tap abierto', running() === 0, `quedan ${running()}`);
 
-    check('queda marcado para no volver a preguntar',
-      !!settings().permissionsAskedBy, JSON.stringify(settings().permissionsAskedBy));
+    // Sin bandera de "ya preguntado": macOS tira estos permisos cuando cambia
+    // la identidad de código de la app, que con firma ad-hoc es cada build. Una
+    // bandera por versión decía que ya se había preguntado mientras el permiso
+    // llevaba seis reinstalaciones borrado, y la app volvía a preguntar a media
+    // reunión — justo lo que esto existe para evitar.
+    check('no se apoya en una bandera que la identidad de código invalida',
+      settings().permissionsAskedBy === undefined,
+      JSON.stringify(settings().permissionsAskedBy));
 
     // Priming must not have broken the thing it exists to smooth.
     const $ = js => win.webContents.executeJavaScript(js, true);
