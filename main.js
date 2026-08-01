@@ -984,7 +984,8 @@ ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
 // robotic next to a microphone meter reading a live analyser sixty times a
 // second, however overlapped the windows were. So what goes across is the new
 // samples, and the drawing rate stops depending on the delivery rate.
-const SYS_WAVE_RATE = 256;
+const SYS_WAVE_RATE = 16000;   // every sample: the same kind of trace the
+                               // microphone's analyser draws, not an envelope
 const SAMPLES_PER_SEC = engine.BYTES_PER_SEC / 2;
 let sysGain = 1;
 let sysRemainder = 0;      // fractional points carried between chunks
@@ -1015,15 +1016,8 @@ function sendSysWave(pcm) {
   const out = Buffer.alloc(n, 128);
   const stride = samples / n;
   for (let i = 0; i < n; i++) {
-    // the loudest sample in each slice, so a peak between points is not missed
-    const from = Math.floor(i * stride);
-    const to = Math.min(samples, Math.floor((i + 1) * stride)) || from + 1;
-    let peak = 0;
-    for (let j = from; j < to; j++) {
-      const v = pcm.readInt16LE(j * 2);
-      if (Math.abs(v) > Math.abs(peak)) peak = v;
-    }
-    out[i] = 128 + Math.max(-128, Math.min(127, Math.round(peak / 256)));
+    const v = pcm.readInt16LE(Math.min(samples - 1, Math.floor(i * stride)) * 2);
+    out[i] = 128 + Math.max(-128, Math.min(127, Math.round(v / 256)));
   }
   broadcast('system-wave', out);
 }

@@ -60,10 +60,10 @@ let gainSys = numOr(localStorage.getItem('yapper-gain-sys'), 1);
 // which is what makes it look like sound rather than like a slideshow. It
 // deliberately reads a little behind the newest sample, because a trace that
 // stalls waiting for the next packet is exactly the stutter being removed.
-const SYS_WAVE_POINTS = 128;        // one screenful: half a second at 256/s
-const SYS_WAVE_RATE = 256;
-const SYS_RING = 4096;
-const SYS_LAG = 48;                 // ~190 ms of slack against a late packet
+const SYS_WAVE_POINTS = 160;    // one screenful: 10 ms, like the mic's analyser
+const SYS_WAVE_RATE = 16000;
+const SYS_RING = 8192;          // half a second of slack
+const SYS_LAG = 1600;           // 100 ms, against a late packet
 
 const sysRing = new Uint8Array(SYS_RING).fill(128);
 let sysWritten = 0;                 // points ever received
@@ -993,36 +993,45 @@ function drawWave(m) {
   ctx.lineWidth = 2.4;
   ctx.lineJoin = 'round';
   ctx.beginPath();
-  // Drawn to a rolling peak rather than to full scale. A voice at a normal
-  // level sits around 8% of an int16, so at full scale it is a line with a
-  // tremor in it — technically correct, and indistinguishable from a dead
-  // input to anyone watching. That is exactly how it was reported: "the
-  // waveforms don't work".
+  // Two problems pull in opposite directions here, and this draws for both.
   //
-  // The peak decays instead of resetting, so the trace does not jump scale
-  // between frames, and it is floored well above the noise a live-but-silent
-  // microphone carries — otherwise silence would be amplified into a
-  // convincing signal, which is a worse lie than a flat line.
+  // At true scale a voice sits around 8% of an int16 — a line with a tremor in
+  // it, indistinguishable from a dead input, which is how "the waveforms don't
+  // work" was meant. Normalising to a rolling peak fixes that and breaks the
+  // gain sliders: turn one up, the signal grows, the peak grows with it, the
+  // scale shrinks by exactly as much, and the trace never moves. A meter that
+  // normalises away the thing its own slider controls is worse than a quiet
+  // one. A fixed boost fixes the sliders and puts the first problem back, since
+  // whatever multiplier suits a quiet microphone saturates a loud call.
+  //
+  // So: normalised for visibility, then multiplied by the gain the user chose.
+  // The shape is always readable whatever the source level, turning the gain up
+  // grows the trace until it flattens against the edges — which is what
+  // clipping looks like everywhere else, and the honest signal that the
+  // recording is too hot — and turning it down visibly shrinks it.
   let peak = 0;
   for (let i = 0; i < buf.length; i++) {
     const d = Math.abs(buf[i] - 128);
     if (d > peak) peak = d;
   }
+  // Decays rather than resets, so the scale does not jump between frames, and
+  // floored so silence is not stretched into a convincing signal — a worse lie
+  // than a flat line, and one that would hide the very failure the silence
+  // warning exists to catch.
   m.peak = Math.max(peak, (m.peak || 0) * 0.92, VIZ_FLOOR);
-  const scale = (mid * 0.92) / m.peak;
+  const scale = (mid * 0.92) / m.peak * (m.gainOf ? m.gainOf() : 1);
 
   const step = w / buf.length;
   let x = 0;
   for (let i = 0; i < buf.length; i++) {
-    const y = mid + Math.max(-mid, Math.min(mid, (buf[i] - 128) * scale));
+    const y = mid + Math.max(-mid * 0.98, Math.min(mid * 0.98, (buf[i] - 128) * scale));
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     x += step;
   }
   ctx.stroke();
 }
 
-// About 6% of full scale. Below this the input is silence or its noise floor,
-// and stretching it to fill the canvas would draw a waveform out of nothing.
+// About 6% of full scale: below this the input is silence or its noise floor.
 const VIZ_FLOOR = 8;
 
 /** Peak deviation in a viz's current buffer, 0..1 — what the bubble's bars show. */
@@ -1175,7 +1184,8 @@ async function startRecording() {
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 512;
       sourceNode.connect(analyser);
-      return { analyser, canvas, ctx: canvas.getContext('2d'), color, buf: new Uint8Array(analyser.fftSize) };
+      return { analyser, canvas, ctx: canvas.getContext('2d'), color,
+        buf: new Uint8Array(analyser.fftSize), gainOf: () => (canvas === vizSys ? gainSys : gainMic) };
     };
 
     analysers = { sys: null, mic: null };
@@ -1198,7 +1208,8 @@ async function startRecording() {
         canvas: vizSys,
         ctx: vizSys.getContext('2d'),
         color: colSys,
-        buf: new Uint8Array(SYS_WAVE_POINTS)
+        buf: new Uint8Array(SYS_WAVE_POINTS),
+        gainOf: () => gainSys
       };
     }
     analysers.mic = makeViz(micBus, vizMic, colMic);
