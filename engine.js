@@ -574,7 +574,8 @@ function progressive(file, opts = {}) {
   };
   const lines = [];
   let at = 0;
-  let working = false;
+  let working = null;      // the promise of the pass currently running
+  let cancelled = false;
 
   return {
     get consumedSec() { return at; },
@@ -587,29 +588,51 @@ function progressive(file, opts = {}) {
      * and never throws: this is work brought forward, so failing it should
      * cost time at the end, not the meeting.
      */
-    async advance() {
-      if (working || !fs.existsSync(file)) return;
-      working = true;
-      try {
-        for (;;) {
-          const available = audioSecondsIn(file);
-          if (available < at + o.windowSec + o.overlapSec) return;
-          await start(o.model);
-          const fd = fs.openSync(file, 'r');
-          try {
-            const done = await serialize(() =>
-              transcribeWindow(fd, at, o.windowSec, false, o));
-            lines.push(...done);
-            at += o.windowSec;
-          } finally {
-            fs.closeSync(fd);
+    advance() {
+      if (working || cancelled || !fs.existsSync(file)) return working || Promise.resolve();
+      const run = (async () => {
+        try {
+          while (!cancelled) {
+            const available = audioSecondsIn(file);
+            if (available < at + o.windowSec + o.overlapSec) return;
+            await start(o.model);
+            const fd = fs.openSync(file, 'r');
+            try {
+              const done = await serialize(() =>
+                transcribeWindow(fd, at, o.windowSec, false, o));
+              lines.push(...done);
+              at += o.windowSec;
+            } finally {
+              fs.closeSync(fd);
+            }
           }
+        } catch (err) {
+          console.log('[transcribe] the head start stalled, will finish at the end:', err.message);
         }
-      } catch (err) {
-        console.log('[transcribe] the head start stalled, will finish at the end:', err.message);
-      } finally {
-        working = false;
-      }
+      })();
+      working = run;
+      // Cleared out here, not in the body's `finally`. When there is nothing to
+      // do the body returns before its first await — so its finally ran before
+      // `working = run` had happened, and the flag stayed set on a promise that
+      // was already settled. Nothing advanced again after that.
+      const clear = () => { if (working === run) working = null; };
+      run.then(clear, clear);
+      return run;
+    },
+
+    /**
+     * Stop getting ahead, and resolve once the window in flight has landed.
+     *
+     * Both halves matter at the moment someone presses stop. Left running, a
+     * head start with a backlog keeps feeding windows into the same queue the
+     * final pass needs — so the wait this was built to remove comes back,
+     * behind work nobody is waiting for. And snapshotting while a window is
+     * still in flight would leave that window out, so the final pass would do
+     * it a second time.
+     */
+    async settle() {
+      cancelled = true;
+      if (working) await working.catch(() => { });
     }
   };
 }
