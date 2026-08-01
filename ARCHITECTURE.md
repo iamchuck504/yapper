@@ -105,7 +105,7 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 2739 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `main.js` | 2766 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
 | `engine.js` | 988 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
@@ -129,9 +129,9 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 2787 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
-| `renderer/style.css` | 1552 | Everything visual, light and dark |
-| `renderer/index.html` | 454 | Main window markup |
+| `renderer/app.js` | 2964 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
+| `renderer/style.css` | 1661 | Everything visual, light and dark |
+| `renderer/index.html` | 503 | Main window markup |
 | `renderer/bubble.html` | 184 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
 | `renderer/bubble.js` | 174 | Its behaviour, including sizing itself to its own contents |
 | `renderer/splash.html` | 116 | Boot screen, including the first-run calibration status; follows the theme |
@@ -818,6 +818,7 @@ run can never touch a real meeting):
 | `test-tray.js` | macOS: the menu bar icon loads, is the height the bar asks for, and is black-on-alpha with no colour left in it — createTray() skips itself silently when the icon will not load, so a malformed template would remove the feature with no error anywhere |
 | `test-sys-meter.js` | macOS: the System meter moves with real audio playing, read from the pixels it drew rather than from the data that reached the renderer, and goes flat again on stop |
 | `test-screen-prompt.js` | macOS: a refused Screen Recording permission raises a prompt with the two steps the user cannot take from inside the app, says the grant applies only after reopening rather than "record again", and a helper dying mid-meeting — a different problem — does not raise it |
+| `test-theme.js` | Auto, Light and Dark: what a new install opens on, that the preference is stored as the word chosen rather than the colour it resolved to, that Auto follows the system changing under a running app, and that the corner button commits to a side instead of flipping Auto |
 | `test-smoke.js` | Every view, control and export, while listening for renderer errors |
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
 | `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |

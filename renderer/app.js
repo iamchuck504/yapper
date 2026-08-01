@@ -195,21 +195,47 @@ const liveTranscriptEl = $('live-transcript');
 // ---------- theme (persisted) ----------
 
 const btnTheme = $('btn-theme');
-// Light unless someone chose otherwise. Main paints the window background from
-// the same stored value before the stylesheet lands, so the two defaults have
-// to agree or the first launch opens on a flash of the wrong one.
-let theme = localStorage.getItem('yapper-theme') || 'light';
+const themeSeg = $('theme-seg');
+// The preference, which may be "auto" — not the colour it resolves to. Dark
+// unless someone chose otherwise. Main resolves the same three values before
+// the stylesheet lands, for the window background and the splash, so the
+// defaults have to agree or a launch opens on a flash of the other one.
+const THEMES = ['auto', 'light', 'dark'];
+let theme = THEMES.includes(localStorage.getItem('yapper-theme'))
+  ? localStorage.getItem('yapper-theme') : 'dark';
+
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+const resolvedTheme = () =>
+  theme === 'auto' ? (systemDark.matches ? 'dark' : 'light') : theme;
 
 function applyTheme() {
-  document.body.classList.toggle('light', theme === 'light');
-  window.yapper.bubbleState({ theme });   // keep the floating bubble in sync
-  window.yapper.setTheme(theme);          // so the next launch paints the right bg
+  const showing = resolvedTheme();
+  document.body.classList.toggle('light', showing === 'light');
+  document.querySelectorAll('#theme-seg .seg-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.theme === theme));
+  // The bubble is told what to paint; main is told what was chosen, so that
+  // "auto" is still "auto" the next time the app opens.
+  window.yapper.bubbleState({ theme: showing });
+  window.yapper.setTheme(theme);
 }
 
-btnTheme.addEventListener('click', () => {
-  theme = theme === 'dark' ? 'light' : 'dark';
+function setTheme(next) {
+  theme = THEMES.includes(next) ? next : 'dark';
   localStorage.setItem('yapper-theme', theme);
   applyTheme();
+}
+
+// On auto, the system can change under a running app — at sunset, or when
+// someone flips it in System Settings. Following it is the whole point.
+systemDark.addEventListener('change', () => { if (theme === 'auto') applyTheme(); });
+
+// The button beside the title is the quick way, and it commits to a side:
+// flipping "auto" would otherwise land on whatever the system already was.
+btnTheme.addEventListener('click', () => setTheme(resolvedTheme() === 'dark' ? 'light' : 'dark'));
+
+themeSeg.addEventListener('click', e => {
+  const b = e.target.closest('.seg-btn');
+  if (b) setTheme(b.dataset.theme);
 });
 
 applyTheme();
