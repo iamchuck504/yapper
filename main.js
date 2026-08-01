@@ -724,6 +724,14 @@ app.whenReady().then(() => {
   screen.on('display-metrics-changed', keepBubbleOnScreen);
   screen.on('display-removed', keepBubbleOnScreen);
   initOpenAtLogin();
+  // Ask for the Dock tile outright rather than trusting LaunchServices to
+  // remember. Replacing the bundle in place leaves it holding the old record,
+  // and an ad-hoc signature changes identity with every build — so it keeps
+  // deciding this is an accessory app and giving it no tile, while
+  // `lsregister -f` fixes it only until the next update. Reported twice.
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.show().catch(() => { /* already showing */ });
+  }
   createTray();
   bootWithSplash();
 });
@@ -855,6 +863,7 @@ ipcMain.handle('recording-start', async (_e, participants) => {
     sysAudio.start();
     startSoloDrain();
   }
+  sysRecent = Buffer.alloc(0);     // last meeting's tail is not this one's
   startHeadStart(recFolder, participants);
   return recFolder;
 });
@@ -970,9 +979,15 @@ ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
 // one byte per point, centred on 128.
 
 const SYS_WAVE_POINTS = 128;
-const SYS_WAVE_MS = 50;               // ~20 fps, well past what an eye reads
+const SYS_WAVE_MS = 25;               // ~40 fps, close enough to the mic's rAF
+// A window of recent audio rather than whatever chunk just arrived. Sending
+// one chunk at a time meant each frame was an unrelated snapshot: the trace
+// jumped rather than moved, next to a microphone meter reading a live
+// analyser sixty times a second. Overlapping windows scroll instead.
+const SYS_WAVE_WINDOW = engine.BYTES_PER_SEC / 4;   // 250 ms
 let sysGain = 1;
 let lastSysWaveAt = 0;
+let sysRecent = Buffer.alloc(0);
 
 function applySysGain(pcm) {
   if (sysGain === 1) return pcm;
@@ -987,16 +1002,24 @@ function applySysGain(pcm) {
 }
 
 function sendSysWave(pcm) {
+  // Keep the tail of what has been mixed, so every frame draws an overlapping
+  // slice of the same signal and the trace scrolls.
+  sysRecent = Buffer.concat([sysRecent, pcm]);
+  if (sysRecent.length > SYS_WAVE_WINDOW) {
+    sysRecent = sysRecent.subarray(sysRecent.length - SYS_WAVE_WINDOW);
+  }
+
   const now = Date.now();
   if (now - lastSysWaveAt < SYS_WAVE_MS) return;
-  const samples = pcm.length >> 1;
+  const samples = sysRecent.length >> 1;
   if (!samples) return;
   lastSysWaveAt = now;
+
   const out = Buffer.alloc(SYS_WAVE_POINTS, 128);
-  const stride = Math.max(1, Math.floor(samples / SYS_WAVE_POINTS));
+  const stride = samples / SYS_WAVE_POINTS;
   for (let i = 0; i < SYS_WAVE_POINTS; i++) {
-    const at = Math.min(samples - 1, i * stride);
-    out[i] = 128 + Math.max(-128, Math.min(127, Math.round(pcm.readInt16LE(at * 2) / 256)));
+    const at = Math.min(samples - 1, Math.floor(i * stride));
+    out[i] = 128 + Math.max(-128, Math.min(127, Math.round(sysRecent.readInt16LE(at * 2) / 256)));
   }
   broadcast('system-wave', out);
 }
