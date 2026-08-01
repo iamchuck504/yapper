@@ -329,6 +329,102 @@ async function primePermissions() {
   writeSettings(now);
 }
 
+// ---------- the application menu ----------
+// Electron ships a default one and it is not this app's: it names itself from
+// package.json, so it read "yapper" in lower case; File offers only Close
+// Window; and View hands every user Reload and Toggle Developer Tools. A menu
+// bar that offers nothing the app does, and several things it should not, is
+// worse than the absence people notice.
+//
+// What it carries instead is what the menu bar is for on macOS: the two
+// actions that matter reachable by keyboard, the editing roles the text fields
+// need, and the developer items only where a developer is.
+
+function buildAppMenu() {
+  const recording = () => rendererRecording;
+  const send = channel => () => {
+    showMainWindow();
+    if (win && !win.isDestroyed()) win.webContents.send(channel);
+  };
+
+  return Menu.buildFromTemplate([
+    {
+      label: 'Yapper',
+      submenu: [
+        { role: 'about', label: 'About Yapper' },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide', label: 'Hide Yapper' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit', label: 'Quit Yapper' }
+      ]
+    },
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'New meeting',
+          accelerator: 'CmdOrCtrl+N',
+          enabled: !recording(),
+          click: send('start-recording')
+        },
+        {
+          label: 'Stop recording',
+          accelerator: 'CmdOrCtrl+.',
+          enabled: recording(),
+          click: send('remote-stop')
+        },
+        { type: 'separator' },
+        { role: 'close' }
+      ]
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
+        { role: 'selectAll' }
+      ]
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+        // Only where there is someone to use them. Shipping Reload and the
+        // developer tools to everyone is how a recording gets thrown away by
+        // a stray Cmd+R.
+        ...(app.isPackaged ? [] : [
+          { type: 'separator' },
+          { role: 'reload' },
+          { role: 'toggleDevTools' }
+        ])
+      ]
+    },
+    {
+      label: 'Window',
+      submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }]
+    },
+    {
+      label: 'Help',
+      submenu: [{
+        label: 'Yapper on GitHub',
+        click: () => shell.openExternal('https://github.com/iamchuck504/yapper')
+      }]
+    }
+  ]);
+}
+
+function refreshAppMenu() {
+  if (process.platform !== 'darwin') return;
+  Menu.setApplicationMenu(buildAppMenu());
+}
+
 // ---------- the menu bar ----------
 // The app spends a meeting behind the call it is recording, so what it most
 // needs is a way to start and stop without being found first. On macOS that is
@@ -794,6 +890,8 @@ app.whenReady().then(() => {
   screen.on('display-metrics-changed', keepBubbleOnScreen);
   screen.on('display-removed', keepBubbleOnScreen);
   initOpenAtLogin();
+  app.setName('Yapper');       // or the menu names itself from package.json
+  refreshAppMenu();
   // Ask for the Dock tile outright rather than trusting LaunchServices to
   // remember. Replacing the bundle in place leaves it holding the old record,
   // and an ad-hoc signature changes identity with every build — so it keeps
@@ -2527,6 +2625,7 @@ ipcMain.on('recording-state', (_e, recording) => {
   // accumulated windows stay until `transcribe` collects them.
   if (!recording) stopHeadStart();
   refreshTray();               // the menu bar says start or stop, never both
+  refreshAppMenu();            // and so does File
   meetingGoneStreak = 0;
   // once a recording ends, allow the same app to trigger a fresh prompt later
   if (!rendererRecording) meetingCurrent = null;
