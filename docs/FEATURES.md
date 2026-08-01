@@ -326,8 +326,12 @@ The rules around it:
 
 ### Everything else
 
-- **Theme** — light by default, dark one click away, everywhere including the
-  capsule and the startup splash.
+- **Theme** — **Auto**, **Light** or **Dark** under Meeting options → App. Auto
+  follows the system setting and keeps following it while the app runs, so a
+  machine that switches at sunset takes Yapper with it. Dark by default. The
+  button beside the title is the shortcut, and it commits to a side rather than
+  flipping Auto. Applies everywhere, including the capsule and the startup
+  splash.
 - **Start at login** — on by default, switchable.
 - **Updates** — checked at launch and every four hours. **Windows** downloads in
   the background and applies on quit, or immediately from the sidebar pill.

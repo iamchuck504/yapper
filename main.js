@@ -1,6 +1,6 @@
 ﻿const { app, BrowserWindow, ipcMain, session, desktopCapturer, shell, dialog, screen,
   Notification, globalShortcut, safeStorage, powerSaveBlocker,
-  Tray, Menu, nativeImage, systemPreferences } = require('electron');
+  Tray, Menu, nativeImage, systemPreferences, nativeTheme } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -489,10 +489,23 @@ function createTray() {
   refreshTray();
 }
 
+/**
+ * Dark or light, for painting something before the stylesheet lands.
+ *
+ * The preference is what the user chose — `auto` defers to the system, and
+ * anything unset is dark. Resolved here as well as in the renderer because the
+ * window and the splash are painted before any of that page runs.
+ */
+function darkNow() {
+  const pref = readSettings().theme;
+  if (pref === 'auto') return nativeTheme.shouldUseDarkColors;
+  return pref !== 'light';
+}
+
 function createWindow() {
   // The last theme is remembered so the window paints its own background colour
   // instead of flashing white before the stylesheet lands.
-  const dark = readSettings().theme === 'dark';
+  const dark = darkNow();
   win = new BrowserWindow({
     width: 1100,
     height: 760,
@@ -533,9 +546,26 @@ function settingsFile() {
 function readSettings() {
   try { return JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); } catch { return {}; }
 }
-function writeSettings(s) {
-  fs.writeFileSync(settingsFile(), JSON.stringify(s, null, 2), 'utf8');
+/**
+ * Merged onto whatever is on disk, not written over it.
+ *
+ * Callers read the file, change a field and write the whole object back, and
+ * two of them overlapping meant the slower one restored every field the other
+ * had just changed. It is not hypothetical: the first-run calibration reads at
+ * launch and writes seconds later, so a theme chosen in between was silently
+ * discarded — and the only symptom is a setting that did not stick.
+ */
+function writeSettings(s, drop = []) {
+  let onDisk = {};
+  try { onDisk = JSON.parse(fs.readFileSync(settingsFile(), 'utf8')); } catch { /* first write */ }
+  const merged = { ...onDisk, ...s };
+  // Removing a key is the one thing a merge cannot express, and two callers do
+  // it on purpose: the legacy single key slot and an old keepAudio that must
+  // not linger. They say so rather than relying on absence.
+  for (const k of drop) delete merged[k];
+  fs.writeFileSync(settingsFile(), JSON.stringify(merged, null, 2), 'utf8');
 }
+const LEGACY_LLM_KEYS = ['llmKey', 'llmModel', 'llmBaseUrl'];
 
 // Start with Windows. Defaults to on, but only the first time — after that the
 // user's choice is what counts.
@@ -681,7 +711,7 @@ ipcMain.handle('get-llm-settings', async () => {
   const s = readSettings();
   // migrate first, and persist it, so the old single slot does not linger in
   // the file where later code could read it by mistake
-  if (migrateLlmSettings(s)) writeSettings(s);
+  if (migrateLlmSettings(s)) writeSettings(s, LEGACY_LLM_KEYS);
   const provider = s.llmProvider || 'claude-cli';
   const slot = llmSlot(s, provider);
   return {
@@ -750,11 +780,14 @@ ipcMain.handle('test-llm', async (_e, override) => {
   }
 });
 
-// Remembered only so the next launch can paint the right window background.
+// The preference itself, not the colour it resolves to today: `auto` has to
+// arrive here as `auto` or the next launch would paint whatever the system
+// happened to be the last time the app was open.
 ipcMain.on('set-theme', (_e, theme) => {
   const s = readSettings();
-  if (s.theme === theme) return;
-  s.theme = theme === 'light' ? 'light' : 'dark';
+  const pref = ['auto', 'light', 'dark'].includes(theme) ? theme : 'dark';
+  if (s.theme === pref) return;
+  s.theme = pref;
   writeSettings(s);
 });
 
@@ -814,7 +847,7 @@ async function bootWithSplash() {
     splash.setMenuBarVisibility(false);
     await splash.loadFile(path.join(__dirname, 'renderer', 'splash.html'));
     // Same theme as the window about to open behind it.
-    if (readSettings().theme !== 'dark') {
+    if (!darkNow()) {
       await splash.webContents
         .executeJavaScript(`document.body.classList.add('light')`)
         .catch(() => { /* splash already gone */ });
@@ -1478,7 +1511,7 @@ ipcMain.handle('set-keep-audio', async (_e, keep) => {
   keepThisOne = !!keep;
   // an older build persisted this as a setting; make sure that cannot linger
   const s = readSettings();
-  if (s.keepAudio !== undefined) { delete s.keepAudio; writeSettings(s); }
+  if (s.keepAudio !== undefined) writeSettings(s, ['keepAudio']);
   return keepThisOne;
 });
 
