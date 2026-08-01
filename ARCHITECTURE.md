@@ -105,7 +105,7 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 2640 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `main.js` | 2739 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
 | `engine.js` | 988 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
@@ -809,6 +809,7 @@ run can never touch a real meeting):
 | `test-actions-ui.js` | The action list: filters, the meeting each item came from, and completing one |
 | `test-silence-warning.js` | A microphone delivering exact zeros — the asleep wireless headset — is announced on screen within seconds, the recording keeps going, and the warning clears itself when the device wakes |
 | `test-bubble-corner.js` | Which corner the capsule appears in: measured geometrically against the display's work area rather than by reading the setting back, including that a resize keeps it in the corner instead of walking it out |
+| `test-app-menu.js` | macOS: the menu bar is this app's rather than Electron's default — the two actions that matter are in File and say which is available right now, Edit carries the editing roles the text fields need, and Reload and the developer tools ship only to unpackaged builds |
 | `test-permissions-early.js` | macOS: the permissions are asked at launch rather than mid-meeting — the microphone through its API, system audio by briefly creating a tap, since that is the only thing that triggers it. Pins that the probe ends (a helper left running holds a tap on everything the machine plays) and that it happens once |
 | `test-audio-orphans.js` | The system-audio helper left behind by a run that died: it holds a tap on everything the machine plays and takes the microphone with it. Its own file because the sweep is once-per-process by design |
 | `test-progressive.js` | Transcribing while the meeting runs. Asserts the result is **identical** to a single pass at the end, byte for byte — the head start is only worth having if it changes nothing but the wait — and that it never takes the last window, which is the one the segment-dropping depends on |
