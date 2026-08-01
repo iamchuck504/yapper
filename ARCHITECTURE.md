@@ -134,7 +134,7 @@ reachable in a test.
 | `renderer/index.html` | 454 | Main window markup |
 | `renderer/bubble.html` | 184 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
 | `renderer/bubble.js` | 174 | Its behaviour, including sizing itself to its own contents |
-| `renderer/splash.html` | 104 | Boot screen, including the first-run calibration status |
+| `renderer/splash.html` | 116 | Boot screen, including the first-run calibration status; follows the theme |
 | `renderer/pcm-worklet.js` | 33 | The audio-thread tap that produces PCM |
 
 `app.js` is the largest file and the obvious candidate for splitting. It is

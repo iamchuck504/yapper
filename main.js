@@ -492,7 +492,7 @@ function createTray() {
 function createWindow() {
   // The last theme is remembered so the window paints its own background colour
   // instead of flashing white before the stylesheet lands.
-  const dark = readSettings().theme !== 'light';
+  const dark = readSettings().theme === 'dark';
   win = new BrowserWindow({
     width: 1100,
     height: 760,
@@ -813,6 +813,12 @@ async function bootWithSplash() {
     });
     splash.setMenuBarVisibility(false);
     await splash.loadFile(path.join(__dirname, 'renderer', 'splash.html'));
+    // Same theme as the window about to open behind it.
+    if (readSettings().theme !== 'dark') {
+      await splash.webContents
+        .executeJavaScript(`document.body.classList.add('light')`)
+        .catch(() => { /* splash already gone */ });
+    }
     splash.show();
   } catch {
     splash = null;   // boot without it
