@@ -38,7 +38,7 @@ for (const c of claimed) {
 const pre = read('preload.js');
 const count = re => (pre.match(re) || []).length;
 const invoke = count(/(?:^|[^.\w])invoke\('/g);
-const send = count(/ipcRenderer\.send\('/g);
+const send = count(/ipcRenderer\.send(?:Sync)?\('/g);
 const on = count(/ipcRenderer\.on\('/g);
 const total = invoke + send + on;
 

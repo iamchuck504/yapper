@@ -780,6 +780,14 @@ ipcMain.handle('test-llm', async (_e, override) => {
   }
 });
 
+// The one place the preference is kept. The page used to hold its own copy in
+// localStorage, so a profile could carry "light" on one side and "auto" on the
+// other — main painting the window one colour and the page rendering the other.
+ipcMain.on('get-theme', e => {
+  const pref = readSettings().theme;
+  e.returnValue = ['auto', 'light', 'dark'].includes(pref) ? pref : 'dark';
+});
+
 // The preference itself, not the colour it resolves to today: `auto` has to
 // arrive here as `auto` or the next launch would paint whatever the system
 // happened to be the last time the app was open.

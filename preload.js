@@ -41,6 +41,11 @@ contextBridge.exposeInMainWorld('yapper', {
   generateTitle: folder => invoke('generate-title', folder),
   saveTextFile: opts => invoke('save-text-file', opts),
   setTheme: theme => ipcRenderer.send('set-theme', theme),
+  // Read here, synchronously, and only here: the theme has to be right on the
+  // first frame, so there is no round trip to wait for — and it kept it from
+  // living in localStorage as well, where the renderer's copy and the one main
+  // paints the window from could disagree. They did.
+  theme: ipcRenderer.sendSync('get-theme'),
   getOpenAtLogin: () => invoke('get-open-at-login'),
   getKeepAudio: () => invoke('get-keep-audio'),
   setKeepAudio: keep => invoke('set-keep-audio', keep),

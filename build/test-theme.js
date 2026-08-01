@@ -101,11 +101,30 @@ app.whenReady().then(async () => {
     win.webContents.reload();
     await new Promise(r => win.webContents.once('did-finish-load', r));
     await pause(900);
+    // Una sola copia. La página tenía la suya en localStorage y las dos se
+    // separaron: los ajustes decían "auto" mientras aquella decía "light", así
+    // que main pintaba la ventana de un color y la página se dibujaba del otro
+    // — con el sistema en oscuro y la app abriendo en claro sin que nadie lo
+    // hubiera elegido.
+    check('la página no guarda su propia copia',
+      (await $(`localStorage.getItem('yapper-theme')`)) === null,
+      await $(`localStorage.getItem('yapper-theme')`));
+
     check('al reabrir sigue en Auto',
       (await $(`document.querySelector('#theme-seg .seg-btn.active').dataset.theme`)) === 'auto',
       await $(`document.querySelector('#theme-seg .seg-btn.active').dataset.theme`));
     check('y Auto vuelve a resolver contra el sistema de ahora',
       (await showing()) === 'dark', await showing());
+
+    // Un perfil que arrastra la copia vieja no puede volver a mandar: lo que
+    // vale es lo guardado, y una recarga con basura en localStorage lo prueba.
+    await $(`localStorage.setItem('yapper-theme', 'light')`);
+    win.webContents.reload();
+    await new Promise(r => win.webContents.once('did-finish-load', r));
+    await pause(900);
+    check('una copia vieja en la página no gana',
+      (await $(`document.querySelector('#theme-seg .seg-btn.active').dataset.theme`)) === 'auto',
+      await $(`document.querySelector('#theme-seg .seg-btn.active').dataset.theme`));
   } catch (err) {
     fails++;
     say('FAIL  ' + (err.stack || err.message));
