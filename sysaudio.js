@@ -32,6 +32,38 @@ function mixPcm(a, b) {
   return out;
 }
 
+/**
+ * Kill helpers left behind by a run that died.
+ *
+ * The helper holds a system-wide audio tap for as long as it lives, and it
+ * outlives a parent that is *killed* rather than closed — a crash, a force
+ * quit, a debugger stopped mid-recording. What is left is a process still
+ * capturing everything the machine plays, with no window and no way for anyone
+ * to notice, and it takes the microphone with it: three of them, orphaned by an
+ * afternoon of testing, were enough to make the next recording hang waiting for
+ * a device that was never coming free.
+ *
+ * Once per run, before the first helper starts, for the same reason engine.js
+ * reaps whisper-servers once: orphans belong to *previous* executions, and a
+ * second sweep would kill the helper this run just spawned.
+ */
+let reaped = false;
+function reapOrphans(probePath) {
+  if (reaped || !probePath) return 0;
+  reaped = true;
+  try {
+    const found = require('child_process').spawnSync('pgrep', ['-f', probePath], { encoding: 'utf8' });
+    const pids = String(found.stdout || '').split('\n')
+      .map(s => Number(s.trim())).filter(pid => pid && pid !== process.pid);
+    for (const pid of pids) {
+      try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+    }
+    return pids.length;
+  } catch {
+    return 0;                 // best effort: never block a recording over this
+  }
+}
+
 function create({ probePath, onStatus = () => { } } = {}) {
   let proc = null;
   let chunks = [];
@@ -76,6 +108,9 @@ function create({ probePath, onStatus = () => { } } = {}) {
         state = 'starting';
         stopping = false;
         chunks = []; buffered = 0; dropped = 0;
+
+        const orphans = reapOrphans(probePath);
+        if (orphans) console.log(`[audio] cleaned up ${orphans} helper(s) from a previous run`);
 
         try {
           proc = spawn(probePath, []);
@@ -196,4 +231,4 @@ function create({ probePath, onStatus = () => { } } = {}) {
   return api;
 }
 
-module.exports = { create, mixPcm, MAX_BUFFERED };
+module.exports = { create, mixPcm, reapOrphans, MAX_BUFFERED };

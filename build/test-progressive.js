@@ -70,6 +70,16 @@ function growingCopy(dest, pcm, seconds) {
   const live = path.join(os.tmpdir(), 'yapper-progressive.wav');
 
   try {
+    // ---- dónde puede adelantar sin pelearse con el vivo ----
+    // Los dos comparten un servidor y pedirle otro modelo lo reinicia: cientos
+    // de megas de disco cada vez que se alternan. En `steady` el vivo usa
+    // `base` y la pasada final `small`, así que adelantar ahí sería recargar
+    // el modelo cada pocos segundos y el transcript en vivo se derrumba.
+    check('fast adelanta: los dos quieren el mismo modelo', engine.canGetAhead('fast'));
+    check('modest adelanta: no hay vivo al que interrumpir', engine.canGetAhead('modest'));
+    check('steady NO adelanta: base contra small en el mismo servidor',
+      engine.canGetAhead('steady'), false);
+
     // ---- the answer to beat: one pass, at the end, over the whole file ----
     const atEnd = await engine.transcribeFile(SRC, opts);
     check('la pasada completa produce transcript', atEnd.length > 0);

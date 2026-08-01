@@ -875,8 +875,16 @@ let headStartTimer = null;
 
 function startHeadStart(folder, participants) {
   stopHeadStart();
-  const tier = engine.tierConfig(readSettings().tier || engine.guessTier());
+  headStart = null;
+  const tierName = readSettings().tier || engine.guessTier();
+  const tier = engine.tierConfig(tierName);
   if (!engine.isInstalled() || !engine.hasModel(tier.finalModel)) return;
+  // Not on a tier where getting ahead would restart the server out from under
+  // the live transcript on every window. See engine.canGetAhead.
+  if (!engine.canGetAhead(tierName)) {
+    console.log(`[transcribe] no head start on the ${tierName} tier: it would fight live over the model`);
+    return;
+  }
   headStart = {
     folder,
     run: engine.progressive(path.join(folder, 'recording.wav'), {
@@ -901,6 +909,16 @@ function stopHeadStart() {
 /** What is already done for this meeting, if anything. */
 async function headStartFor(folder) {
   if (!headStart || headStart.folder !== folder) return null;
+  // Collecting it settles it, and settling is permanent — so a transcription
+  // of a meeting that is *still recording* would kill its head start for
+  // everything after. No call site does that today: `transcribe` is reached
+  // from stopping, from a past meeting, and from an import. It is one new call
+  // site away from happening, and the failure would be silent.
+  //
+  // `settled` is set by stopHeadStart and by nothing else, so it says "this
+  // recording has ended" in our own terms rather than reading a flag other
+  // code also writes.
+  if (!headStart.settled) return null;
   // Let the window in flight land first, or the final pass redoes it.
   await (headStart.settled || headStart.run.settle());
   const snap = headStart.run.snapshot();
