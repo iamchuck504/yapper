@@ -112,7 +112,10 @@ Yapper resumes it.
 
 ## 4. The two permissions
 
-The **first time you record**, macOS asks for two things.
+**Yapper asks for both when it first opens**, not when you press record.
+macOS would otherwise ask in the middle of a meeting — and the system-audio
+one is not a yes/no, it needs the app reopened before it applies, so answering
+it mid-call still leaves that call recorded one-sided.
 
 ### Microphone — obvious, and a normal prompt
 

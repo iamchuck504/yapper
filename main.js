@@ -1,6 +1,6 @@
 ﻿const { app, BrowserWindow, ipcMain, session, desktopCapturer, shell, dialog, screen,
   Notification, globalShortcut, safeStorage, powerSaveBlocker,
-  Tray, Menu, nativeImage } = require('electron');
+  Tray, Menu, nativeImage, systemPreferences } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -264,6 +264,69 @@ ipcMain.on('bubble-focus-main', () => {
 function showMainWindow() {
   if (win && !win.isDestroyed()) { win.show(); win.focus(); }
   if (process.platform === 'darwin') app.focus({ steal: true });
+}
+
+// ---------- permissions, asked once and early ----------
+// macOS asks the first time something is used, which for a meeting recorder is
+// the worst possible moment: the call has started, the other side is talking,
+// and the app is putting dialogs on screen. Worse, the system-audio one is not
+// a yes/no — it needs the app reopened before it takes effect — so answering it
+// mid-meeting still leaves that meeting recorded one-sided.
+//
+// So they are asked at launch instead, once. The microphone has an API for it.
+// System audio does not: the permission is triggered by *creating* a tap, so
+// the helper is run for a moment and stopped. It captures nothing that is
+// kept — its output is dropped on the floor — and it only happens when this
+// build has not asked before.
+
+const PERMISSION_PROBE_MS = 2500;
+
+async function primePermissions() {
+  if (process.platform !== 'darwin') return;
+  const s = readSettings();
+  if (s.permissionsAskedBy === app.getVersion()) return;
+
+  try {
+    if (systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
+      await systemPreferences.askForMediaAccess('microphone');
+    }
+  } catch (err) {
+    console.log('[permissions] could not ask for the microphone:', err.message);
+  }
+
+  const helper = helperPath('system-audio');
+  if (fs.existsSync(helper)) {
+    // Before spawning one of our own: a helper left by a run that died still
+    // holds a tap, and stacking another on top of it would prime nothing and
+    // leave two.
+    const orphans = sysaudio.reapOrphans(helper);
+    if (orphans) console.log(`[permissions] cleared ${orphans} helper(s) from a previous run`);
+    await new Promise(resolve => {
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+      let proc;
+      try {
+        proc = spawn(helper, []);
+      } catch (err) {
+        console.log('[permissions] could not start the audio helper:', err.message);
+        return finish();
+      }
+      // Drained, not read: a helper whose stdout nobody empties blocks on it.
+      proc.stdout.on('data', () => { });
+      proc.stderr.on('data', () => { });
+      proc.on('error', finish);
+      proc.on('close', finish);
+      setTimeout(() => { try { proc.kill(); } catch { /* already gone */ } finish(); },
+        PERMISSION_PROBE_MS);
+    });
+  }
+
+  // Recorded even when the answer was no. Asking again every launch is
+  // nagging; the recording path still offers Settings and the reopen if the
+  // permission is missing when it matters.
+  const now = readSettings();
+  now.permissionsAskedBy = app.getVersion();
+  writeSettings(now);
 }
 
 // ---------- the menu bar ----------
@@ -708,6 +771,10 @@ async function bootWithSplash() {
     await envPromise;
     setStatus('Ready');
     handOff();
+    // After the hand-off: a permission dialog belongs over the app, not over
+    // the splash it would otherwise interrupt.
+    primePermissions().catch(err =>
+      console.log('[permissions] priming failed:', err.message));
   });
 
   // Safety net: never leave the app hidden behind a stuck splash.
