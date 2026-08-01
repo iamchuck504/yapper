@@ -201,8 +201,11 @@ const themeSeg = $('theme-seg');
 // the stylesheet lands, for the window background and the splash, so the
 // defaults have to agree or a launch opens on a flash of the other one.
 const THEMES = ['auto', 'light', 'dark'];
-let theme = THEMES.includes(localStorage.getItem('yapper-theme'))
-  ? localStorage.getItem('yapper-theme') : 'dark';
+let theme = THEMES.includes(window.yapper.theme) ? window.yapper.theme : 'dark';
+// It used to live here too, and the two copies drifted apart: settings said
+// auto while this said light, so the window opened one colour and the page
+// painted the other. Settings is the only copy now.
+localStorage.removeItem('yapper-theme');
 
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
 const resolvedTheme = () =>
@@ -221,8 +224,7 @@ function applyTheme() {
 
 function setTheme(next) {
   theme = THEMES.includes(next) ? next : 'dark';
-  localStorage.setItem('yapper-theme', theme);
-  applyTheme();
+  applyTheme();       // which is what tells main, the only place it is kept
 }
 
 // On auto, the system can change under a running app — at sunset, or when
