@@ -46,6 +46,29 @@ wedged.listen(0, '127.0.0.1', async () => {
   };
 
   try {
+    // ---- el plazo sale de lo que la máquina midió, no de un múltiplo a ciegas ----
+    // La primera versión daba cuatro veces tiempo real, que sonaba prudente y
+    // era inútil: una ventana de dos minutos tarda ~3 s en una máquina
+    // calibrada y recibía ocho minutos. Un trabón debe costar segundos.
+    const wav = n => Buffer.alloc(44 + n * 32000);
+
+    engine.setPace(0);                       // sin medición todavía
+    const blind = engine.deadlineFor(wav(120), 'small');
+    check('sin medir cae al presupuesto flojo', blind, 480000);
+
+    engine.setPace(111);                     // lo que midió esta Mac
+    const cold = engine.deadlineFor(wav(120), 'small');
+    check('medido, el plazo se aprieta mucho', cold < blind / 10);
+    check('pero deja margen de sobra sobre los ~3 s reales', cold > 20000);
+
+    // `base` cuesta menos que `small`, y el plazo lo refleja
+    check('un modelo más barato pide menos plazo',
+      engine.deadlineFor(wav(120), 'base') < cold);
+
+    // y escala con el audio: una ventana viva no es una final
+    check('diez segundos de audio piden menos que ciento veinte',
+      engine.deadlineFor(wav(10), 'small') < engine.deadlineFor(wav(120), 'small'));
+
     // The floor is 60 s and the budget scales with the audio, so a short clip
     // is used with the deadline overridden — waiting a real minute to prove a
     // timeout works is its own kind of hang.

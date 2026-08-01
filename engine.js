@@ -201,6 +201,7 @@ async function calibrate({ passes = 3 } = {}) {
 
   times.sort((a, b) => a - b);
   const msPerPass = times[Math.floor(times.length / 2)];
+  setPace(msPerPass);
   return { tier: tierFromBenchmark(msPerPass), msPerPass };
 }
 
@@ -327,6 +328,7 @@ async function stop() {
   const p = proc;
   proc = null;
   loadedModel = null;
+  answeredOnce = false;      // the next server is cold again
   try { p.kill(); } catch { /* already gone */ }
   await new Promise(r => setTimeout(r, 120));
 }
@@ -348,13 +350,53 @@ async function stop() {
 // machine the tier table admits, so nothing healthy trips it.
 let testDeadlineMs = 0;      // see __setDeadline in the exports
 
-function deadlineFor(wavBuffer) {
+// What this machine measured at calibration: milliseconds for one pass over a
+// 10-second window with CALIBRATION_MODEL. main.js hands it over from settings
+// at startup, and calibrate() sets it when it reruns.
+let measuredPace = 0;
+function setPace(ms) { measuredPace = Number(ms) > 0 ? Number(ms) : 0; }
+
+// `small` costs roughly two and a half times `base` on the same audio —
+// measured across both anchor machines in the tier table.
+const SMALL_VS_BASE = 2.5;
+
+// Enough for a cold model load, which is the one legitimately slow moment in a
+// run — and it is only the first request after a server starts that pays it.
+// Charging it to every window would keep the deadline a third wider than it
+// needs to be for the whole of a long meeting.
+const STARTUP_ALLOWANCE_MS = 12000;
+let answeredOnce = false;
+
+// Eight times the measured cost. Wide enough that thermal throttling, a busy
+// GPU or a laptop on battery never trip it; narrow enough to be useful, which
+// the first version of this was not.
+const PACE_MARGIN = 8;
+
+/**
+ * How long to wait for one request before calling the server dead.
+ *
+ * The first version gave every request four times real time, which sounded
+ * cautious and was useless: a two-minute window takes about three seconds on a
+ * calibrated machine, and it was being handed eight minutes. A wedge is meant
+ * to cost seconds.
+ *
+ * So the budget comes from what this machine actually measured rather than
+ * from the length of the audio alone. With no measurement yet — a first run,
+ * before calibration — it falls back to the old proportional guess, since a
+ * loose deadline still beats none.
+ */
+function deadlineFor(wavBuffer, model) {
   if (testDeadlineMs) return testDeadlineMs;
   const seconds = Math.max(0, (wavBuffer.length - WAV_HEADER) / BYTES_PER_SEC);
-  return Math.max(60000, Math.round(seconds * 4000));
+  if (!measuredPace) return Math.max(60000, Math.round(seconds * 4000));
+
+  const perTenSeconds = measuredPace * (model === CALIBRATION_MODEL ? 1 : SMALL_VS_BASE);
+  const expected = (seconds / 10) * perTenSeconds;
+  const cold = answeredOnce ? 0 : STARTUP_ALLOWANCE_MS;
+  return Math.round(cold + expected * PACE_MARGIN);
 }
 
-function transcribeWav(wavBuffer, { language = 'auto', prompt = '' } = {}) {
+function transcribeWav(wavBuffer, { language = 'auto', prompt = '', model = null } = {}) {
   return new Promise((resolve, reject) => {
     if (!proc) return reject(new Error('whisper-server is not running'));
     const boundary = '----yapper' + Date.now().toString(16);
@@ -388,13 +430,14 @@ function transcribeWav(wavBuffer, { language = 'auto', prompt = '' } = {}) {
       res.setEncoding('utf8');
       res.on('data', c => { out += c; });
       res.on('end', () => {
+        answeredOnce = true;
         try { ok(JSON.parse(out)); }
         catch { fail(new Error(`whisper-server replied with: ${out.slice(0, 200)}`)); }
       });
     });
     req.on('error', fail);
 
-    const budget = deadlineFor(wavBuffer);
+    const budget = deadlineFor(wavBuffer, model || loadedModel);
     timer = setTimeout(() => {
       // A server that did not answer this one will not answer the next either,
       // so it goes. Every caller's recovery path starts a fresh one — the
@@ -614,7 +657,7 @@ async function transcribeFileNow(file, { language = 'auto', model, prompt = '', 
 
       let res;
       try {
-        res = await transcribeWav(wavFromPcm(pcm.subarray(0, read)), { language, prompt });
+        res = await transcribeWav(wavFromPcm(pcm.subarray(0, read)), { language, prompt, model });
       } catch (err) {
         // The server can be killed under us — antivirus, an out-of-memory kill,
         // the user ending the task. One retry with a fresh one costs a few
@@ -622,7 +665,7 @@ async function transcribeFileNow(file, { language = 'auto', model, prompt = '', 
         if (!/ECONNRESET|ECONNREFUSED|socket hang up|not running|timed out/i.test(err.message)) throw err;
         await stop();
         await start(model);
-        res = await transcribeWav(wavFromPcm(pcm.subarray(0, read)), { language, prompt })
+        res = await transcribeWav(wavFromPcm(pcm.subarray(0, read)), { language, prompt, model })
           .catch(() => { throw new Error('The transcriber stopped unexpectedly. Try again.'); });
       }
       for (const seg of res.segments || []) {
@@ -774,7 +817,7 @@ module.exports = {
   TIERS, tierConfig, guessTier, tierFromBenchmark, hasNvidiaGpu, isAppleSilicon,
   CALIBRATION_MODEL, calibrate,
   start, stop, busy, serialize, tryExclusive, loaded, transcribeWav, transcribeFile,
-  deduplicate, undoStutter, deadlineFor,
+  deduplicate, undoStutter, deadlineFor, setPace,
   wavFromPcm, openWav, finishWav, repairWav, WAV_HEADER, BYTES_PER_SEC,
 
   // Test seam, and the only one in this file. A wedged server — the failure

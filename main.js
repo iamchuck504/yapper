@@ -1481,6 +1481,10 @@ function checkEnvironment() {
 async function ensureTier() {
   const s = readSettings();
   const flavour = path.basename(engine.binDir());
+  // The measured pace decides how long a request may go unanswered before the
+  // server is called dead, so it has to survive a restart — otherwise every
+  // launch runs on the loose fallback deadline until something recalibrates.
+  if (s.tierMs) engine.setPace(s.tierMs);
   if (s.tier && s.tierFor === flavour) return s.tier;
   try {
     const res = await engine.calibrate();
