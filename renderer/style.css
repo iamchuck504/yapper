@@ -394,7 +394,11 @@ body.light #btn-theme .icon-sun { display: none; }
 body.light #btn-theme .icon-moon { display: block; }
 
 /* ============ Main ============ */
-#content { flex: 1; overflow-y: auto; padding: 36px 44px 60px; }
+/* The right gutter clears the theme button, which is fixed to the window and
+   floats over whatever is under it. On a narrow window the column reaches the
+   edge, and the first thing at the top — the action-items bar — ended up
+   underneath it. 16 (its offset) + 32 (its width) + air. */
+#content { flex: 1; overflow-y: auto; padding: 36px 62px 60px 44px; }
 #view-record, #view-meeting {
   max-width: 800px;
   margin: 0 auto;
