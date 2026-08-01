@@ -1550,3 +1550,47 @@ details summary:hover { color: var(--text); border-color: var(--border-2); }
 .new-btn.recording {
   font-variant-numeric: tabular-nums;   /* the clock must not jitter each second */
 }
+
+/* ---- Recording takes the top of the view ---- */
+/* The options card is a page of settings, and while a meeting is running it is
+   a page of settings nobody can change — it was pushing the clock, the meters
+   and the stop button below the fold. Recording, the controls move up and the
+   card folds into one line that says what was chosen. */
+.opts-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  background: transparent;
+  color: var(--text-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.opts-toggle:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-2); }
+.opts-toggle .chev { margin-left: auto; color: var(--text-3); }
+.options-card.collapsed { display: none; }
+
+/* Start and Import are unusable mid-meeting; the microphone picker is not, and
+   stays. */
+#view-record.is-recording .rec-actions { display: none; }
+/* The meters get the room they never had. 120 px of canvas is not a level
+   anyone can read — and it was 120 px because there was nowhere else for it to
+   go. Stacked one per row now, each filling the width of the panel. */
+/* Sharing the row with the clock and three buttons left the meters 306 px of
+   a 1250 px panel. They wrap onto their own line instead, one per row, each
+   filling it. */
+#view-record.is-recording .rec-status-row { flex-wrap: wrap; row-gap: 12px; }
+#view-record.is-recording #levels {
+  flex: 1 0 100%;
+  order: 1;                 /* after the clock and the buttons, so it wraps */
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+#view-record.is-recording .level { width: 100%; }
+#view-record.is-recording .viz { flex: 1; width: auto; min-width: 0; height: 34px; }
