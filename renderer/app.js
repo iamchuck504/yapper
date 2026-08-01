@@ -195,7 +195,10 @@ const liveTranscriptEl = $('live-transcript');
 // ---------- theme (persisted) ----------
 
 const btnTheme = $('btn-theme');
-let theme = localStorage.getItem('yapper-theme') || 'dark';
+// Light unless someone chose otherwise. Main paints the window background from
+// the same stored value before the stylesheet lands, so the two defaults have
+// to agree or the first launch opens on a flash of the wrong one.
+let theme = localStorage.getItem('yapper-theme') || 'light';
 
 function applyTheme() {
   document.body.classList.toggle('light', theme === 'light');

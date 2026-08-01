@@ -151,9 +151,16 @@ app.whenReady().then(async () => {
   await click('#btn-speak');
   await new Promise(r => setTimeout(r, 300));
   await click('#btn-speak');            // and stop again
+  // Claro de salida, y el interruptor lleva y trae. El arranque se afirma aquí
+  // porque main pinta el fondo de la ventana desde el mismo valor guardado: si
+  // los dos dejan de coincidir, el primer arranque abre con un destello del
+  // tema contrario.
+  check('arranca en claro', await $("document.body.classList.contains('light')"), 'arrancó oscuro');
   await click('#btn-theme');
-  check('el tema claro se aplica', await $("document.body.classList.contains('light')"), 'no cambió');
+  check('el interruptor lleva al oscuro',
+    !(await $("document.body.classList.contains('light')")), 'siguió claro');
   await click('#btn-theme');
+  check('y vuelve al claro', await $("document.body.classList.contains('light')"), 'se quedó oscuro');
 
   await click('#btn-new');
   for (const sel of ['#style-pills .seg-btn:nth-child(3)', '#detail-seg .seg-btn:nth-child(2)',

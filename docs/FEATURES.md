@@ -326,7 +326,8 @@ The rules around it:
 
 ### Everything else
 
-- **Theme** — light and dark, everywhere including the capsule.
+- **Theme** — light by default, dark one click away, everywhere including the
+  capsule and the startup splash.
 - **Start at login** — on by default, switchable.
 - **Updates** — checked at launch and every four hours. **Windows** downloads in
   the background and applies on quit, or immediately from the sidebar pill.
