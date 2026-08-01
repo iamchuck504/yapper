@@ -9,18 +9,14 @@ const btnStop = $('btn-stop');
 const btnNew = $('btn-new');
 const btnNewLabel = $('btn-new-label');
 
-// ---------- the record view rearranges while recording ----------
-// The options card sat above the recording controls, so a meeting in progress
-// pushed the clock, the meters and the stop button below the fold — which is
-// how someone ended up mid-call with no visible way to stop. Recording, the
-// zone moves to the top and the card folds into a line that says what was
-// chosen. The move is a DOM reparent rather than a reordering of styles: it
-// leaves every existing rule about these elements untouched.
+// ---------- the options fold away ----------
+// The card is a page of settings sitting between the reader and the button
+// they came for. Recording and importing are the first thing in the view now,
+// and the settings live behind one line that says what is currently chosen —
+// open it when you want to change something, which is not most meetings.
 const viewRecordEl = $('view-record');
-const recZoneEl = $('rec-zone');
 const optionsCardEl = $('options-card');
 const optsToggleEl = $('opts-toggle');
-const pipelineAnchorEl = $('pipeline');
 
 /** "General · Concise" — what the folded card is currently set to. */
 function chosenOptions() {
@@ -34,28 +30,46 @@ function chosenOptions() {
 function paintOptsToggle() {
   const open = !optionsCardEl.classList.contains('collapsed');
   const what = chosenOptions();
-  optsToggleEl.innerHTML = '';
-  optsToggleEl.append(
+  const parts = [
     Object.assign(document.createElement('span'),
-      { textContent: what ? `Meeting options — ${what}` : 'Meeting options' }),
-    Object.assign(document.createElement('span'),
-      { className: 'chev', textContent: open ? '▾' : '▸' }));
+      { textContent: what ? `Meeting options — ${what}` : 'Meeting options' })
+  ];
+  // Something in there is unfinished — today only a provider without its key.
+  // Folded, that warning is off screen, and the first time it is noticed is at
+  // the end of the first meeting, which is what it exists to prevent.
+  // Looked up here rather than closed over: this runs once during module
+  // evaluation, before the settings elements have been bound.
+  const llm = document.getElementById('llm-status');
+  if (!open && llm && llm.dataset.kind === 'needs-key') {
+    parts.push(Object.assign(document.createElement('span'),
+      { className: 'opts-flag', id: 'opts-flag', textContent: 'API key needed' }));
+  }
+  parts.push(Object.assign(document.createElement('span'),
+    { className: 'chev', textContent: open ? '▾' : '▸' }));
+  optsToggleEl.replaceChildren(...parts);
   optsToggleEl.setAttribute('aria-expanded', String(open));
 }
 
-function layoutForRecording(on) {
-  viewRecordEl.classList.toggle('is-recording', on);
-  optsToggleEl.classList.toggle('hidden', !on);
-  optionsCardEl.classList.toggle('collapsed', on);
-  // Anchored to elements that never move, so this is exactly reversible.
-  viewRecordEl.insertBefore(recZoneEl, on ? titleInput : pipelineAnchorEl);
-  if (on) paintOptsToggle();
+function setOptionsOpen(open) {
+  optionsCardEl.classList.toggle('collapsed', !open);
+  localStorage.setItem('yapper-options-open', open ? '1' : '0');
+  paintOptsToggle();
 }
 
-optsToggleEl.addEventListener('click', () => {
-  optionsCardEl.classList.toggle('collapsed');
+optsToggleEl.addEventListener('click', () =>
+  setOptionsOpen(optionsCardEl.classList.contains('collapsed')));
+
+// Folded to begin with, and it remembers being opened. Someone who lives in
+// these settings should not have to reopen them every launch.
+setOptionsOpen(localStorage.getItem('yapper-options-open') === '1');
+
+function layoutForRecording(on) {
+  viewRecordEl.classList.toggle('is-recording', on);
+  // Nothing in there can be changed mid-meeting, so it folds and stays folded
+  // until the recording ends.
+  if (on) setOptionsOpen(false);
   paintOptsToggle();
-});
+}
 
 /** The sidebar button doubles as the recording indicator and the way back. */
 function markRecordingInSidebar(on) {
@@ -121,7 +135,11 @@ let sysFrameAt = 0;
 
 if (window.yapper.platform === 'darwin') {
   window.yapper.onSystemWave(bytes => {
-    if (!bytes || !bytes.length) return;
+    // Packets keep arriving for a moment after stopping — the helper is asked
+    // to stop from here and takes a beat to hear it. Without this, the ring is
+    // emptied on stop and then refilled by that tail, and the next meeting
+    // opens on the previous one's audio.
+    if (!recording || !bytes || !bytes.length) return;
     for (let i = 0; i < bytes.length; i++) sysRing[(sysWritten + i) % SYS_RING] = bytes[i];
     sysWritten += bytes.length;
   });
@@ -382,6 +400,7 @@ function setLlmStatus(text, kind = '') {
   llmStatus.textContent = text;
   llmStatus.dataset.kind = kind;
   llmStatus.classList.toggle('bad', kind === 'needs-key' || kind === 'error');
+  paintOptsToggle();     // folded, the toggle line is where this has to show
 }
 
 async function saveLlm() {

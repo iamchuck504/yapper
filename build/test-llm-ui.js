@@ -30,7 +30,10 @@ app.whenReady().then(async () => {
   // Measuring them while their own section is display:none reports 0×0 for
   // everything, so "is it actually on screen" could never pass — it was
   // measuring the closed view, not the notice.
-  await $(`showView('record')`);
+  // Y desplegadas: estos controles viven dentro de las opciones de reunión,
+  // que arrancan plegadas. Medir "se ve en pantalla" con el pliegue cerrado
+  // vuelve a dar 0×0 por una razón distinta.
+  await $(`showView('record'); setOptionsOpen(true)`);
   await new Promise(r => setTimeout(r, 300));
 
   check('el selector de proveedor existe y tiene opciones',
@@ -99,6 +102,19 @@ app.whenReady().then(async () => {
     nokey.visible && nokey.kind === 'needs-key' && /Paste a key/.test(nokey.text),
     JSON.stringify(nokey));
   check('y lo marca como pendiente, no como informativo', nokey.bad, JSON.stringify(nokey));
+
+  // Ese aviso vive dentro de las opciones, y las opciones se pliegan. Plegado,
+  // el aviso queda fuera de pantalla y se vuelve a caer en lo mismo: enterarse
+  // al final de la primera reunión. La línea del pliegue lo lleva.
+  const folded = await $(`(() => {
+    setOptionsOpen(false);
+    const f = document.getElementById('opts-flag');
+    const r = f && f.getBoundingClientRect();
+    return { text: f ? f.textContent : '', visible: !!r && r.width > 0 && r.height > 0 };
+  })()`);
+  check('plegado, el aviso de key pendiente sigue a la vista',
+    folded.visible && /key/i.test(folded.text), JSON.stringify(folded));
+  await $('setOptionsOpen(true)');
   check('el proceso principal rechaza URLs que no ofrece la app',
     (await $("window.yapper.openExternal('https://example.com/evil')")) === false,
     'la abrió');
@@ -136,6 +152,9 @@ app.whenReady().then(async () => {
   check('el aviso de "falta la key" desaparece al guardarla',
     (await $("document.getElementById('llm-status').dataset.kind")) !== 'needs-key',
     await $("document.getElementById('llm-status').textContent"));
+  check('y con él la marca del pliegue',
+    (await $("(() => { setOptionsOpen(false); return !document.getElementById('opts-flag'); })()")),
+    'la marca de key pendiente se quedó');
 
   const raw = fs.readFileSync(path.join(USER_DATA, 'settings.json'), 'utf8');
   check('la key NO está legible en settings.json', !raw.includes(KEY), raw.slice(0, 200));

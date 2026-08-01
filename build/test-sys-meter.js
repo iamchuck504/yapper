@@ -112,8 +112,15 @@ app.whenReady().then(async () => {
       return meterSpread(win);
     };
     if (captured) {
+      // Con audio sonando, o no hay trazo que encoger: medir la ganancia sobre
+      // el silencio da el mismo piso en las dos posiciones y el test se
+      // convierte en una afirmación sobre nada.
+      const again = spawn('afplay', [path.join(__dirname, 'calibration.wav')]);
+      await pause(1200);
       const quiet = await atGain('0.25');
       const loud = await atGain('1');
+      again.kill();
+      await new Promise(r => again.on('close', r));
       say(`  · ganancia 0.25x -> ${quiet}% | 1x -> ${loud}%`);
       check('bajar la ganancia encoge el trazo visiblemente', loud > quiet * 1.8,
         `0.25x ${quiet}%, 1x ${loud}%`);

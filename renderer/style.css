@@ -1573,6 +1573,14 @@ details summary:hover { color: var(--text); border-color: var(--border-2); }
 }
 .opts-toggle:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-2); }
 .opts-toggle .chev { margin-left: auto; color: var(--text-3); }
+.opts-toggle .opts-flag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c-risk) 18%, transparent);
+  color: var(--c-risk);
+  font-size: 12px;
+  font-weight: 600;
+}
 .options-card.collapsed { display: none; }
 
 /* Start and Import are unusable mid-meeting; the microphone picker is not, and
