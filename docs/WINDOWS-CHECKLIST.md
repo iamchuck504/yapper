@@ -84,6 +84,31 @@ older meeting. The live transcript should pause and resume with no errors, and
 the transcription should complete. `test-live-vs-final.js` covers this and can
 run on Windows.
 
+### Transcription now runs during the meeting
+
+The biggest change since this list was written, and it is platform-neutral
+code Windows will run. Windows are transcribed as the audio arrives, so
+stopping leaves only the tail — measured on macOS: 0.9 s instead of 5.8 s on a
+seven-minute meeting, identical-content transcript.
+
+**Test:** record ~5 minutes, stop, and watch how long "Transcribing…" shows.
+Seconds, not tens of seconds. Then compare the transcript against one produced
+by *Transcribe* on the same meeting reopened (kill the app between, so the
+head start is lost and the full pass runs) — the content should match.
+
+**The tier detail that matters here:** the head start is disabled on `steady`
+(`engine.canGetAhead`) because there live uses `base` while the final pass
+uses `small`, and alternating models restarts the shared server every few
+seconds. A CPU-only Windows machine that calibrates to `steady` should behave
+exactly as before this feature existed — verify the live transcript stays
+smooth there and that stopping still takes the old full-pass time.
+
+**And the deadline:** requests to whisper-server now time out against the
+machine's measured pace (`tierMs`), with a proportional fallback before
+calibration. A wedged server costs a retried window, not the transcript. The
+budget scales with the measured speed, so a slow CPU machine gets a
+correspondingly wide deadline — nothing healthy should ever trip it.
+
 ### The notes CLI gets an explicit working directory
 
 `llm.js` spawned the Claude Code CLI with no `cwd`, so it inherited the app's —
