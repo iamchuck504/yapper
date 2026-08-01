@@ -105,6 +105,28 @@ function growingCopy(dest, pcm, seconds) {
     await r2.advance();
     check('y despues de settle ya no adelanta mas', r2.consumedSec, before);
 
+    // ---- un adelanto que no corresponde se descarta, no se empalma ----
+    // Mezclar un adelanto hecho con `base` en una pasada con `small` deja un
+    // transcript mitad y mitad: peor que cualquiera de los dos, y sin señal
+    // alguna. Hoy no es alcanzable porque los tres tiers terminan con `small`,
+    // pero está a una edición de la tabla de tiers de serlo.
+    const r3 = engine.progressive(live, { ...opts, model: 'base' });
+    growingCopy(live, pcm, totalSec);
+    await r3.advance(); await r3.settle();
+    check('el adelanto llegó a hacer ventanas', r3.consumedSec > 0);
+
+    const mixed = await engine.transcribeFile(live, { ...opts, model: 'base', from: {
+      ...r3.snapshot(), fingerprint: 'otro-modelo'
+    } });
+    check('con otra huella, se descarta y se hace el archivo entero',
+      mixed.join('\n') === atEnd.join('\n'));
+
+    // Y una foto que va más allá del final: líneas de audio que ya no existe.
+    const shrunk = { ...r3.snapshot(), at: totalSec + 500 };
+    const past = await engine.transcribeFile(live, { ...opts, model: 'base', from: shrunk });
+    check('una foto más larga que la grabación también se descarta',
+      past.join('\n') === atEnd.join('\n'));
+
     // ---- and it still works when nothing was done early ----
     const cold = await engine.transcribeFile(live, opts);
     check('sin adelanto, el resultado es el mismo', cold.join('\n') === atEnd.join('\n'));

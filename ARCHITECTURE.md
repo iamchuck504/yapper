@@ -106,7 +106,7 @@ that ship are the files that run.
 | File | Lines | Responsibility |
 |---|---:|---|
 | `main.js` | 2531 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
-| `engine.js` | 942 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
+| `engine.js` | 969 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
 | `llm.js` | 367 | Note providers (§6) behind one `generate()` call |
