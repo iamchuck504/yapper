@@ -947,15 +947,37 @@ function drawWave(m) {
   ctx.lineWidth = 2.4;
   ctx.lineJoin = 'round';
   ctx.beginPath();
+  // Drawn to a rolling peak rather than to full scale. A voice at a normal
+  // level sits around 8% of an int16, so at full scale it is a line with a
+  // tremor in it — technically correct, and indistinguishable from a dead
+  // input to anyone watching. That is exactly how it was reported: "the
+  // waveforms don't work".
+  //
+  // The peak decays instead of resetting, so the trace does not jump scale
+  // between frames, and it is floored well above the noise a live-but-silent
+  // microphone carries — otherwise silence would be amplified into a
+  // convincing signal, which is a worse lie than a flat line.
+  let peak = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const d = Math.abs(buf[i] - 128);
+    if (d > peak) peak = d;
+  }
+  m.peak = Math.max(peak, (m.peak || 0) * 0.92, VIZ_FLOOR);
+  const scale = (mid * 0.92) / m.peak;
+
   const step = w / buf.length;
   let x = 0;
   for (let i = 0; i < buf.length; i++) {
-    const y = mid + ((buf[i] - 128) / 128) * mid * 0.92;
+    const y = mid + Math.max(-mid, Math.min(mid, (buf[i] - 128) * scale));
     if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     x += step;
   }
   ctx.stroke();
 }
+
+// About 6% of full scale. Below this the input is silence or its noise floor,
+// and stretching it to fill the canvas would draw a waveform out of nothing.
+const VIZ_FLOOR = 8;
 
 /** Peak deviation in a viz's current buffer, 0..1 — what the bubble's bars show. */
 function levelOf(m) {
