@@ -153,7 +153,11 @@ app.whenReady().then(async () => {
     (await $("document.getElementById('llm-status').dataset.kind")) !== 'needs-key',
     await $("document.getElementById('llm-status').textContent"));
   check('y con él la marca del pliegue',
-    (await $("(() => { setOptionsOpen(false); return !document.getElementById('opts-flag'); })()")),
+    (await $(`(() => {
+      setOptionsOpen(false);
+      const r = document.getElementById('opts-flag').getBoundingClientRect();
+      return r.width === 0 && r.height === 0;
+    })()`)),
     'la marca de key pendiente se quedó');
 
   const raw = fs.readFileSync(path.join(USER_DATA, 'settings.json'), 'utf8');

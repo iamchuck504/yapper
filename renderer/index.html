@@ -166,7 +166,23 @@
       <!-- The settings live behind this. They were a page between the reader
            and the button they came for, and mid-meeting they are a page nobody
            can change — it was pushing the stop button off screen. -->
-      <button id="opts-toggle" class="opts-toggle" aria-expanded="false"></button>
+      <!-- Built here rather than in script so it reads as the control it is:
+           an empty bordered line with a small chevron was taken for a label. -->
+      <button id="opts-toggle" class="opts-toggle" aria-expanded="false">
+        <svg class="opts-ico" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <path d="M2 4.5h3.2M9 4.5h5M2 11.5h5M10.8 11.5h3.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          <circle cx="7.1" cy="4.5" r="1.7" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <circle cx="8.9" cy="11.5" r="1.7" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        </svg>
+        <span class="opts-label">Meeting options</span>
+        <span id="opts-sum" class="opts-sum"></span>
+        <span id="opts-flag" class="opts-flag hidden">API key needed</span>
+        <span class="opts-more"><span id="opts-more-text">Show</span>
+          <svg class="chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+            <path d="M6 3.2L10.8 8 6 12.8" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </span>
+      </button>
 
       <div id="options-card" class="options-card">
         <div class="opt-row">
