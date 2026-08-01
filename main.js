@@ -855,8 +855,52 @@ ipcMain.handle('recording-start', async (_e, participants) => {
     sysAudio.start();
     startSoloDrain();
   }
+  startHeadStart(recFolder, participants);
   return recFolder;
 });
+
+// ---------- transcribing while the meeting runs ----------
+// The wait after a long meeting is almost all transcription, and none of it
+// needs the meeting to be over: windows are independent, and the audio for
+// minute 5 is final while minute 50 is still being spoken. So it is done as it
+// arrives, and stopping leaves only the tail — about three seconds instead of
+// fifty on a half-hour meeting.
+//
+// It is a head start, not a dependency. If it stalls, fails, or never runs,
+// `transcribe` does the whole file exactly as it always did.
+
+const HEAD_START_EVERY_MS = 15000;
+let headStart = null;          // { folder, run }
+let headStartTimer = null;
+
+function startHeadStart(folder, participants) {
+  stopHeadStart();
+  const tier = engine.tierConfig(readSettings().tier || engine.guessTier());
+  if (!engine.isInstalled() || !engine.hasModel(tier.finalModel)) return;
+  headStart = {
+    folder,
+    run: engine.progressive(path.join(folder, 'recording.wav'), {
+      model: tier.finalModel,
+      language: process.env.YAPPER_LANG || 'auto',
+      prompt: transcriptionHint(participants)
+    })
+  };
+  headStartTimer = setInterval(() => {
+    if (headStart) headStart.run.advance();
+  }, HEAD_START_EVERY_MS);
+}
+
+function stopHeadStart() {
+  if (headStartTimer) clearInterval(headStartTimer);
+  headStartTimer = null;
+}
+
+/** What is already done for this meeting, if anything. */
+function headStartFor(folder) {
+  if (!headStart || headStart.folder !== folder) return null;
+  const snap = headStart.run.snapshot();
+  return snap.at > 0 ? snap : null;
+}
 
 function writeRecorded(buf) {
   if (recFd !== null) {
@@ -1126,6 +1170,11 @@ ipcMain.handle('transcribe', async (_e, folder) => {
       model: tier.finalModel,
       language: process.env.YAPPER_LANG || 'auto',
       prompt: transcriptionHint(readParticipants(folder)),
+      // Whatever was transcribed while the meeting ran. Its windows are
+      // identical to the ones this pass would have produced for them, so only
+      // the tail is left — and if there is nothing, this is the same full pass
+      // it always was.
+      from: headStartFor(folder),
       onProgress: ({ done, total }) => {
         send(`\rTranscribing… ${Math.round(done / total * 100)}%`);
       }
@@ -2360,6 +2409,9 @@ ipcMain.on('autodetect-set', (_e, enabled) => {
 
 ipcMain.on('recording-state', (_e, recording) => {
   rendererRecording = !!recording;
+  // No more audio is coming, so there is nothing left to get ahead of. The
+  // accumulated windows stay until `transcribe` collects them.
+  if (!recording) stopHeadStart();
   refreshTray();               // the menu bar says start or stop, never both
   meetingGoneStreak = 0;
   // once a recording ends, allow the same app to trigger a fresh prompt later

@@ -547,6 +547,73 @@ function fmtStamp(sec) {
  * onProgress({ done, total }) is called after each window.
  * Returns lines of "[hh:mm:ss] text".
  */
+/**
+ * Transcription that runs *while* the meeting does.
+ *
+ * The wait at the end of a long meeting is almost all transcription — 50
+ * seconds for 36 minutes here — and none of that work needs the meeting to be
+ * over. Windows are independent, the audio for minute 5 is final while minute
+ * 50 is still being spoken, and the machine is nearly idle: the live loop uses
+ * about a sixth of a fast Mac. So the windows are done as the audio arrives,
+ * and stopping leaves only the tail.
+ *
+ * The rule that makes the result *identical* rather than merely similar: a
+ * window is only taken early when there is a full window plus its overlap of
+ * audio after it. That guarantees it is not the last window, which is the one
+ * fact the segment-dropping depends on — and "not last now" stays true, since
+ * recordings only grow.
+ *
+ * Each window goes through the queue on its own, so the live transcript
+ * interleaves between them rather than waiting behind the lot. In steady state
+ * this costs live about 2% of its passes: one 2.6-second window per 120
+ * seconds of meeting.
+ */
+function progressive(file, opts = {}) {
+  const o = {
+    language: 'auto', model: undefined, prompt: '', windowSec: 120, overlapSec: 2, ...opts
+  };
+  const lines = [];
+  let at = 0;
+  let working = false;
+
+  return {
+    get consumedSec() { return at; },
+    get windows() { return lines.length ? at / o.windowSec : 0; },
+    /** What transcribeFile needs to finish the job. */
+    snapshot() { return { at, lines: lines.slice() }; },
+
+    /**
+     * Take whatever windows are now safe. Resolves when it runs out of them,
+     * and never throws: this is work brought forward, so failing it should
+     * cost time at the end, not the meeting.
+     */
+    async advance() {
+      if (working || !fs.existsSync(file)) return;
+      working = true;
+      try {
+        for (;;) {
+          const available = audioSecondsIn(file);
+          if (available < at + o.windowSec + o.overlapSec) return;
+          await start(o.model);
+          const fd = fs.openSync(file, 'r');
+          try {
+            const done = await serialize(() =>
+              transcribeWindow(fd, at, o.windowSec, false, o));
+            lines.push(...done);
+            at += o.windowSec;
+          } finally {
+            fs.closeSync(fd);
+          }
+        }
+      } catch (err) {
+        console.log('[transcribe] the head start stalled, will finish at the end:', err.message);
+      } finally {
+        working = false;
+      }
+    }
+  };
+}
+
 function transcribeFile(file, opts = {}) {
   // One server, one job at a time. Two of these at once used to fight over it:
   // the second one's start() killed the first one's server mid-request, and the
@@ -632,52 +699,74 @@ function loaded() {
   return proc ? loadedModel : null;
 }
 
+/**
+ * One window, transcribed and turned into stamped lines.
+ *
+ * Shared by the pass that runs after a meeting and the one that runs during
+ * it, because the two must agree exactly. The subtle part is the last
+ * argument: a window drops any segment that begins inside its overlap, since
+ * the next window owns that audio — unless there is no next window, in which
+ * case dropping it would lose the end of the meeting.
+ */
+async function transcribeWindow(fd, at, len, isLast, o) {
+  const from = Math.floor(at * BYTES_PER_SEC);
+  const size = Math.ceil((len + (isLast ? 0 : o.overlapSec)) * BYTES_PER_SEC);
+  const pcm = Buffer.alloc(size);
+  const read = fs.readSync(fd, pcm, 0, size, WAV_HEADER + from);
+  const wav = wavFromPcm(pcm.subarray(0, read));
+
+  let res;
+  try {
+    res = await transcribeWav(wav, { language: o.language, prompt: o.prompt, model: o.model });
+  } catch (err) {
+    // The server can be killed under us — antivirus, an out-of-memory kill,
+    // the user ending the task. One retry with a fresh one costs a few
+    // seconds; failing outright costs the whole transcript.
+    if (!/ECONNRESET|ECONNREFUSED|socket hang up|not running|timed out/i.test(err.message)) throw err;
+    await stop();
+    await start(o.model);
+    res = await transcribeWav(wav, { language: o.language, prompt: o.prompt, model: o.model })
+      .catch(() => { throw new Error('The transcriber stopped unexpectedly. Try again.'); });
+  }
+
+  const out = [];
+  for (const seg of res.segments || []) {
+    const startSec = typeof seg.start === 'number'
+      ? seg.start
+      : parseOffset(seg.offsets && seg.offsets.from);
+    if (startSec >= len && !isLast) continue;
+    const text = (seg.text || '').trim();
+    if (text) out.push(`[${fmtStamp(at + startSec)}] ${text}`);
+  }
+  return out;
+}
+
+function audioSecondsIn(file) {
+  return Math.max(0, fs.statSync(file).size - WAV_HEADER) / BYTES_PER_SEC;
+}
+
 async function transcribeFileNow(file, { language = 'auto', model, prompt = '', windowSec = 120,
-  overlapSec = 2, onProgress } = {}) {
+  overlapSec = 2, onProgress, from = null } = {}) {
   if (!fs.existsSync(file)) {
     throw new Error('The recording for that meeting is no longer there.');
   }
   repairWav(file);
-  const total = Math.max(0, fs.statSync(file).size - WAV_HEADER);
-  const totalSec = total / BYTES_PER_SEC;
-  if (totalSec < 0.5) return [];
+  const totalSec = audioSecondsIn(file);
+  if (totalSec < 0.5) return from ? deduplicate(from.lines.slice()) : [];
 
   await start(model);
 
-  const lines = [];
+  const o = { language, model, prompt, windowSec, overlapSec };
+  // `from` is a run that was already under way while the meeting was still
+  // going: its windows are finished and identical to what this pass would
+  // have produced for them, so only the tail is left to do.
+  const lines = from ? from.lines.slice() : [];
+  let at = from ? from.at : 0;
   const fd = fs.openSync(file, 'r');
   try {
-    let at = 0;                       // seconds consumed so far
     while (at < totalSec) {
       const len = Math.min(windowSec, totalSec - at);
-      const from = Math.floor(at * BYTES_PER_SEC);
-      const size = Math.ceil(Math.min(len + overlapSec, totalSec - at) * BYTES_PER_SEC);
-      const pcm = Buffer.alloc(size);
-      const read = fs.readSync(fd, pcm, 0, size, WAV_HEADER + from);
-
-      let res;
-      try {
-        res = await transcribeWav(wavFromPcm(pcm.subarray(0, read)), { language, prompt, model });
-      } catch (err) {
-        // The server can be killed under us — antivirus, an out-of-memory kill,
-        // the user ending the task. One retry with a fresh one costs a few
-        // seconds; failing outright costs the whole transcript.
-        if (!/ECONNRESET|ECONNREFUSED|socket hang up|not running|timed out/i.test(err.message)) throw err;
-        await stop();
-        await start(model);
-        res = await transcribeWav(wavFromPcm(pcm.subarray(0, read)), { language, prompt, model })
-          .catch(() => { throw new Error('The transcriber stopped unexpectedly. Try again.'); });
-      }
-      for (const seg of res.segments || []) {
-        const startSec = typeof seg.start === 'number'
-          ? seg.start
-          : parseOffset(seg.offsets && seg.offsets.from);
-        // drop anything that begins inside the overlap: the next window owns it
-        if (startSec >= len && at + len < totalSec) continue;
-        const text = (seg.text || '').trim();
-        if (text) lines.push(`[${fmtStamp(at + startSec)}] ${text}`);
-      }
-
+      lines.push(...await transcribeWindow(fd, at, len, at + len >= totalSec, o));
       at += len;
       if (onProgress) onProgress({ done: Math.min(at, totalSec), total: totalSec });
     }
@@ -817,7 +906,7 @@ module.exports = {
   TIERS, tierConfig, guessTier, tierFromBenchmark, hasNvidiaGpu, isAppleSilicon,
   CALIBRATION_MODEL, calibrate,
   start, stop, busy, serialize, tryExclusive, loaded, transcribeWav, transcribeFile,
-  deduplicate, undoStutter, deadlineFor, setPace,
+  deduplicate, undoStutter, deadlineFor, setPace, progressive,
   wavFromPcm, openWav, finishWav, repairWav, WAV_HEADER, BYTES_PER_SEC,
 
   // Test seam, and the only one in this file. A wedged server — the failure

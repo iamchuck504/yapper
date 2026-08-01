@@ -1,0 +1,103 @@
+// Transcribing while the meeting is still going.
+//
+// The wait at the end of a long meeting is almost all transcription — 50
+// seconds for 36 minutes — and none of it needs the meeting to be over. So the
+// windows are taken as the audio arrives.
+//
+// The assertion that matters is not "it was faster". It is that the transcript
+// comes out **identical** to the one a single pass at the end would have
+// produced. Anything less trades the recording's accuracy for a progress bar,
+// which is not a trade worth making.
+//
+// The hazard is one line of the window loop: a window drops any segment
+// beginning inside its overlap, unless it is the last window. Take a window
+// early while it happens to be the last one available, and the audio in that
+// overlap is emitted twice. So the head start only takes a window when a full
+// window plus its overlap of audio already sits behind it.
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const engine = require('../engine');
+
+let fails = 0;
+function check(name, got, want = true) {
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  if (ok) console.log(`ok    ${name}`);
+  else { fails++; console.log(`FAIL  ${name}\n      esperaba ${JSON.stringify(want)}\n      obtuve   ${JSON.stringify(got)}`); }
+}
+
+const SRC = path.join(os.tmpdir(), 'yapper-60s.wav');
+const HDR = engine.WAV_HEADER;
+
+/** A recording that grows, the way one does while someone is talking. */
+function growingCopy(dest, pcm, seconds) {
+  const head = Buffer.alloc(HDR);
+  head.write('RIFF', 0); head.write('WAVE', 8);
+  fs.writeFileSync(dest, Buffer.concat([head, pcm.subarray(0, Math.floor(seconds * 32000))]));
+}
+
+(async () => {
+  if (!fs.existsSync(SRC)) {
+    console.log('skip  falta el fixture: node build/make-fixtures.js');
+    process.exit(0);
+  }
+  if (!engine.isInstalled() || !engine.hasModel('base')) {
+    console.log('skip  el motor no está instalado en este checkout');
+    process.exit(0);
+  }
+
+  const whole = fs.readFileSync(SRC);
+  const pcm = whole.subarray(HDR);
+  const totalSec = pcm.length / 32000;
+
+  // Short windows, or a 60-second fixture is a single window and the seam —
+  // the only place this can go wrong — never gets exercised.
+  const opts = { model: 'base', language: 'en', windowSec: 10, overlapSec: 2 };
+  const live = path.join(os.tmpdir(), 'yapper-progressive.wav');
+
+  try {
+    // ---- the answer to beat: one pass, at the end, over the whole file ----
+    const atEnd = await engine.transcribeFile(SRC, opts);
+    check('la pasada completa produce transcript', atEnd.length > 0);
+    console.log(`  · referencia: ${atEnd.length} líneas de ${totalSec.toFixed(0)}s`);
+
+    // ---- the same recording, transcribed as it arrives ----
+    const run = engine.progressive(live, opts);
+    growingCopy(live, pcm, 0);
+    await run.advance();
+    check('sin audio suficiente no adelanta nada', run.consumedSec, 0);
+
+    // Grow it the way a meeting does and let the head start keep up.
+    for (let sec = 12; sec <= totalSec; sec += 12) {
+      growingCopy(live, pcm, Math.min(sec, totalSec));
+      await run.advance();
+    }
+    const headStart = run.consumedSec;
+    console.log(`  · adelantado durante la reunión: ${headStart}s de ${totalSec.toFixed(0)}s`);
+    check('adelantó trabajo de verdad', headStart > 0);
+    check('pero nunca la última ventana', headStart < totalSec);
+
+    // ---- stop: finish the tail and compare ----
+    growingCopy(live, pcm, totalSec);
+    const progressive = await engine.transcribeFile(live, { ...opts, from: run.snapshot() });
+
+    check('el transcript incremental es idéntico al de una sola pasada',
+      progressive.join('\n') === atEnd.join('\n'));
+    if (progressive.join('\n') !== atEnd.join('\n')) {
+      console.log('  --- una pasada ---\n' + atEnd.join('\n').slice(0, 400));
+      console.log('  --- incremental ---\n' + progressive.join('\n').slice(0, 400));
+    }
+
+    // ---- and it still works when nothing was done early ----
+    const cold = await engine.transcribeFile(live, opts);
+    check('sin adelanto, el resultado es el mismo', cold.join('\n') === atEnd.join('\n'));
+  } catch (err) {
+    fails++;
+    console.log('FAIL  ' + (err.stack || err.message));
+  }
+
+  await engine.stop().catch(() => { });
+  try { fs.unlinkSync(live); } catch { /* nunca existió */ }
+  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  process.exit(fails ? 1 : 0);
+})();
