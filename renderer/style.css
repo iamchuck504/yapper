@@ -1562,17 +1562,44 @@ details summary:hover { color: var(--text); border-color: var(--border-2); }
   gap: 8px;
   width: 100%;
   margin-bottom: 14px;
-  padding: 10px 14px;
-  background: transparent;
+  padding: 11px 12px 11px 14px;
+  /* Raised and bordered like every other control here. Transparent on a
+     transparent view, it read as a heading with a stray arrow, and the
+     settings behind it went unfound. */
+  background: var(--surface-2);
   color: var(--text-2);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-2);
   border-radius: var(--r-md);
   font-size: 13px;
   text-align: left;
   cursor: pointer;
 }
-.opts-toggle:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-2); }
-.opts-toggle .chev { margin-left: auto; color: var(--text-3); }
+.opts-toggle:hover { background: var(--surface-4); border-color: var(--text-3); }
+.opts-toggle:hover .opts-more { background: var(--accent-soft); color: var(--accent-text); }
+.opts-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.opts-toggle .opts-ico { color: var(--text-3); flex: none; }
+.opts-toggle .opts-label { color: var(--text); font-weight: 550; }
+.opts-toggle .opts-sum { color: var(--text-3); }
+.opts-toggle .opts-sum:not(:empty)::before { content: '— '; }
+/* The word says what the arrow only hints at. */
+.opts-toggle .opts-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 4px 8px 4px 10px;
+  /* surface-3 is surface-2 in the dark theme — the pill would vanish into the
+     row it sits on. */
+  background: var(--surface-4);
+  border: 1px solid var(--border-2);
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 550;
+}
+.opts-toggle .chev { transition: transform 140ms ease; }
+.opts-toggle[aria-expanded="true"] .chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .opts-toggle .chev { transition: none; } }
 .opts-toggle .opts-flag {
   padding: 2px 8px;
   border-radius: 999px;

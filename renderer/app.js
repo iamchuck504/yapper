@@ -30,23 +30,17 @@ function chosenOptions() {
 function paintOptsToggle() {
   const open = !optionsCardEl.classList.contains('collapsed');
   const what = chosenOptions();
-  const parts = [
-    Object.assign(document.createElement('span'),
-      { textContent: what ? `Meeting options — ${what}` : 'Meeting options' })
-  ];
+  $('opts-sum').textContent = what;
+  // "Show" / "Hide" spelled out beside the chevron: the chevron alone was read
+  // as decoration on a label, and the settings behind it were never found.
+  $('opts-more-text').textContent = open ? 'Hide' : 'Show';
   // Something in there is unfinished — today only a provider without its key.
   // Folded, that warning is off screen, and the first time it is noticed is at
   // the end of the first meeting, which is what it exists to prevent.
-  // Looked up here rather than closed over: this runs once during module
+  // Looked up rather than closed over: this runs once during module
   // evaluation, before the settings elements have been bound.
   const llm = document.getElementById('llm-status');
-  if (!open && llm && llm.dataset.kind === 'needs-key') {
-    parts.push(Object.assign(document.createElement('span'),
-      { className: 'opts-flag', id: 'opts-flag', textContent: 'API key needed' }));
-  }
-  parts.push(Object.assign(document.createElement('span'),
-    { className: 'chev', textContent: open ? '▾' : '▸' }));
-  optsToggleEl.replaceChildren(...parts);
+  $('opts-flag').classList.toggle('hidden', open || !llm || llm.dataset.kind !== 'needs-key');
   optsToggleEl.setAttribute('aria-expanded', String(open));
 }
 
@@ -250,6 +244,10 @@ function syncOptionControls() {
   customInput.value = options.custom || '';
   regenStyle.value = options.style;
   regenDetail.value = options.detail;
+  // The folded line summarises these. Without this it kept whatever was chosen
+  // the last time the fold was opened or closed — a summary that says
+  // "General · Concise" over a meeting set to Minutes is worse than none.
+  paintOptsToggle();
 }
 
 document.querySelectorAll('#style-pills .seg-btn').forEach(p =>
