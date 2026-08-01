@@ -88,6 +88,15 @@ edges it is nearest, so one dropped in the middle of the screen does not jump
 sideways to expand. It does not remember being dragged between meetings; the
 corner above is where each one starts.
 
+### While recording, the view changes
+
+The options above are a page of settings, and once a meeting is running they
+are settings nobody can change — so they fold into one line that says what was
+chosen (*Meeting options — General · Concise*, click to reopen) and the
+recording controls take the top: the clock, **Mark**, **Pause** and **Stop &
+summarize** on the first line, the two meters full width below it. Stopping
+puts everything back.
+
 ### The menu bar (macOS)
 
 Yapper puts a mark next to the clock: **New meeting** when idle, **Stop

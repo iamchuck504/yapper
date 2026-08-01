@@ -91,7 +91,12 @@
 
       <input id="meeting-title" type="text" placeholder="Meeting title (optional)" autocomplete="off" spellcheck="false" />
 
-      <div class="options-card">
+      <!-- While recording, the card collapses behind this and the recording
+           controls take the top of the view. Nothing here can be changed
+           mid-meeting anyway, and it was pushing the stop button off screen. -->
+      <button id="opts-toggle" class="opts-toggle hidden" aria-expanded="true"></button>
+
+      <div id="options-card" class="options-card">
         <div class="opt-row">
           <span class="opt-label">Note style</span>
           <div id="style-pills" class="seg">

@@ -9,8 +9,57 @@ const btnStop = $('btn-stop');
 const btnNew = $('btn-new');
 const btnNewLabel = $('btn-new-label');
 
+// ---------- the record view rearranges while recording ----------
+// The options card sat above the recording controls, so a meeting in progress
+// pushed the clock, the meters and the stop button below the fold — which is
+// how someone ended up mid-call with no visible way to stop. Recording, the
+// zone moves to the top and the card folds into a line that says what was
+// chosen. The move is a DOM reparent rather than a reordering of styles: it
+// leaves every existing rule about these elements untouched.
+const viewRecordEl = $('view-record');
+const recZoneEl = $('rec-zone');
+const optionsCardEl = $('options-card');
+const optsToggleEl = $('opts-toggle');
+const pipelineAnchorEl = $('pipeline');
+
+/** "General · Concise" — what the folded card is currently set to. */
+function chosenOptions() {
+  const picked = sel => {
+    const b = document.querySelector(`${sel} .seg-btn.active`);
+    return b ? b.textContent.trim() : null;
+  };
+  return [picked('#style-pills'), picked('#detail-seg')].filter(Boolean).join(' · ');
+}
+
+function paintOptsToggle() {
+  const open = !optionsCardEl.classList.contains('collapsed');
+  const what = chosenOptions();
+  optsToggleEl.innerHTML = '';
+  optsToggleEl.append(
+    Object.assign(document.createElement('span'),
+      { textContent: what ? `Meeting options — ${what}` : 'Meeting options' }),
+    Object.assign(document.createElement('span'),
+      { className: 'chev', textContent: open ? '▾' : '▸' }));
+  optsToggleEl.setAttribute('aria-expanded', String(open));
+}
+
+function layoutForRecording(on) {
+  viewRecordEl.classList.toggle('is-recording', on);
+  optsToggleEl.classList.toggle('hidden', !on);
+  optionsCardEl.classList.toggle('collapsed', on);
+  // Anchored to elements that never move, so this is exactly reversible.
+  viewRecordEl.insertBefore(recZoneEl, on ? titleInput : pipelineAnchorEl);
+  if (on) paintOptsToggle();
+}
+
+optsToggleEl.addEventListener('click', () => {
+  optionsCardEl.classList.toggle('collapsed');
+  paintOptsToggle();
+});
+
 /** The sidebar button doubles as the recording indicator and the way back. */
 function markRecordingInSidebar(on) {
+  layoutForRecording(on);
   btnNew.classList.toggle('recording', on);
   btnNew.title = on ? 'Recording — click to go back to the controls' : '';
   if (!on) btnNewLabel.textContent = 'New meeting';
