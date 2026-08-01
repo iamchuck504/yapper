@@ -46,5 +46,5 @@ check('an old compressed recording does not count as empty',
 check('no audio but with a transcript does not count as empty',
   !isEmpty({ audioSec: 0, hasTranscript: true, hasSummary: false }), 'flagged it');
 
-console.log(fails ? `\n${fails} fallos` : '\nPASS');
+console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

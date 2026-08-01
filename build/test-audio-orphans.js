@@ -26,7 +26,7 @@ function check(name, ok, detail) {
 const HELPER = path.join(__dirname, 'system-audio');
 
 if (process.platform !== 'darwin' || !fs.existsSync(HELPER)) {
-  console.log('skip  el ayudante de audio es de macOS y no está compilado aquí');
+  console.log('skip  the audio helper is macOS-only and is not compiled here');
   process.exit(0);
 }
 
@@ -37,15 +37,15 @@ spawn(HELPER, [], { detached: true, stdio: 'ignore' }).unref();
 execSync('sleep 1.2');
 
 const before = alive();
-check('hay huérfanos que barrer', before >= 2, `vivos: ${before}`);
+check('there are orphans to sweep', before >= 2, `alive: ${before}`);
 
 const killed = reapOrphans(HELPER);
 execSync('sleep 0.8');
 const after = alive();
 
-check('el barrido se los lleva', after === 0, `quedan ${after}`);
-check('y cuenta los que había', killed >= 2, `barrió ${killed}`);
-check('una segunda llamada no vuelve a barrer', reapOrphans(HELPER) === 0);
+check('the sweep takes them away', after === 0, `${after} left`);
+check('and counts the ones there were', killed >= 2, `swept ${killed}`);
+check('a second call does not sweep again', reapOrphans(HELPER) === 0);
 
-console.log(fails ? `\n${fails} fallos` : '\nPASS');
+console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

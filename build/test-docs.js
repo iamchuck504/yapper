@@ -114,7 +114,7 @@ for (const f of ['preload.js', 'engine.js', 'live.js', 'main.js', 'llm.js',
   'keystore.js', 'bounds.js', 'setup.ps1', 'build/calibration.wav', 'README.md']) {
   check(`existe ${f}`, fs.existsSync(path.join(root, f)), 'the document names it and it is not there');
 }
-check('the README links to the architecture', /ARCHITECTURE\.md/.test(read('README.md')), 'sin enlace');
+check('the README links to the architecture', /ARCHITECTURE\.md/.test(read('README.md')), 'no link');
 
 // --- every test the docs list, exists ---
 const named = [...doc.matchAll(/`((?:test-|icon-)[\w-]+\.js)`/g)].map(m => m[1]);
@@ -123,5 +123,5 @@ for (const t of [...new Set(named)]) {
   check(`existe build/${t}`, fs.existsSync(path.join(root, 'build', t)), 'is missing');
 }
 
-console.log(fails ? `\n${fails} fallos` : '\nPASS');
+console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

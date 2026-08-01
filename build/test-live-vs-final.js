@@ -71,8 +71,8 @@ app.whenReady().then(async () => {
   const t0 = Date.now();
   const res = await within(
     $(`window.yapper.transcribe(${JSON.stringify(old)}).then(t => t.length, e => 'err:' + e.message)`),
-    'transcribing while live is running', 180000).catch(e => 'colgado:' + e.message);
-  say(`  resultado: ${String(res).slice(0, 90)} en ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+    'transcribing while live is running', 180000).catch(e => 'hung:' + e.message);
+  say(`  result: ${String(res).slice(0, 90)} en ${((Date.now() - t0) / 1000).toFixed(0)} s`);
   check('transcribing the old one works', typeof res === 'number' && res > 50, String(res));
 
   // and the live loop has to still be alive afterwards
@@ -91,6 +91,6 @@ app.whenReady().then(async () => {
 
   await live.stop();
   await engine.stop();
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { say('FAIL ' + (e.stack || e.message)); app.exit(1); });

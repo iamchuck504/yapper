@@ -38,19 +38,19 @@ app.whenReady().then(async () => {
   const timer = watchdog(say);
   try {
     require('../main.js');
-    const win = await within(mainWindow(), 'la ventana principal');
+    const win = await within(mainWindow(), 'the main window');
 
-    check('el aviso empieza oculto', (await state(win)).hidden, await state(win));
+    check('the prompt starts hidden', (await state(win)).hidden, await state(win));
 
-    // Exactamente por donde llega en producción: el helper nativo vive fuera
-    // de este proceso, así que su veredicto entra por el canal, no por la UI.
+    // Exactly the way it arrives in production: the native helper lives outside
+    // this process, so its verdict comes in over the channel, not through the UI.
     win.webContents.send('system-audio-status', { ok: false, reason: 'permission' });
     await pause(400);
 
     const shown = await state(win);
-    check('un permiso denegado levanta el aviso', shown.hidden === false, shown);
-    check('con los tres botones', shown.buttons, 'sp-settings,sp-relaunch,sp-dismiss');
-    check('y dice que hay que reabrir, no "grabar otra vez"',
+    check('a denied permission raises the prompt', shown.hidden === false, shown);
+    check('with all three buttons', shown.buttons, 'sp-settings,sp-relaunch,sp-dismiss');
+    check('and says it must be reopened, not "record again"',
       /reopen/i.test(shown.text) && !/record again/i.test(shown.text), shown.text);
 
     await win.webContents.executeJavaScript(
@@ -58,23 +58,23 @@ app.whenReady().then(async () => {
     await pause(250);
     check('descartar lo cierra', (await state(win)).hidden, await state(win));
 
-    // Una caída a mitad de reunión no se arregla con permisos ni reabriendo,
-    // así que tiene su propio mensaje y no debe levantar este aviso.
+    // A crash mid-meeting is fixed by neither permissions nor reopening, so it
+    // has a message of its own and must not raise this prompt.
     win.webContents.send('system-audio-status', { ok: false, reason: 'stopped' });
     await pause(400);
-    check('una caída a media reunión no levanta el aviso del permiso',
+    check('a crash mid-meeting does not raise the permission prompt',
       (await state(win)).hidden, await state(win));
 
-    // El helper ausente sí, porque la salida es la misma: concederlo y reabrir.
+    // A missing helper does, because the way out is the same: grant it and reopen.
     win.webContents.send('system-audio-status', { ok: false, reason: 'helper' });
     await pause(400);
-    check('un helper ausente sí lo levanta',
+    check('a missing helper does raise it',
       (await state(win)).hidden === false, await state(win));
   } catch (err) {
     fails++;
     say('FAIL  ' + (err.stack || err.message));
   }
   clearTimeout(timer);
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 });

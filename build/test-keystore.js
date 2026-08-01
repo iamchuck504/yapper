@@ -50,18 +50,18 @@ function suite(label, ss, expectEncrypted) {
 
 function run() {
   suite('with keystore', fake, true);
-  suite('sin keystore', none, false);
+  suite('no keystore', none, false);
 
   let real = null;
   try { real = require('electron').safeStorage; } catch { /* plain node */ }
   if (real) {
-    suite(real.isEncryptionAvailable() ? 'real system keystore' : 'sistema sin keystore',
+    suite(real.isEncryptionAvailable() ? 'real system keystore' : 'system with no keystore',
       real, real.isEncryptionAvailable());
   } else {
     console.log('\n(no Electron: the real system keystore was not tested)');
   }
 
-  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
   return fails ? 1 : 0;
 }
 

@@ -153,6 +153,6 @@ const ok = (req, res) => {
   await expectError('an invalid URL is explained',
     { provider: 'compatible', apiKey: 'k', baseUrl: 'not a url', model: 'm' }, 'not a valid URL');
 
-  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
   process.exit(fails ? 1 : 0);
 })();

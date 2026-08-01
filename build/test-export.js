@@ -77,6 +77,6 @@ app.whenReady().then(async () => {
   check('consecutive lines stay in the same paragraph',
     /\*\*\[00:01\]\*\*.*  \n\*\*\[00:07\]\*\*/.test(body), 'split them too eagerly');
 
-  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { console.log('FAIL', e.stack || e.message); app.exit(1); });

@@ -120,5 +120,5 @@ const legacy = a.mergeActionItems(
 check('an old reminder does not break', legacy.list.length, 2);
 check('and stays as it was', legacy.list[0].text, 'call the bank');
 
-console.log(fails ? `\n${fails} fallos` : '\nPASS');
+console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

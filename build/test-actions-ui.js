@@ -106,10 +106,10 @@ app.whenReady().then(async () => {
     /5 action items pending/.test(summary.text) && /1 high priority/.test(summary.text),
     summary.text);
 
-  // El botón de tema está fijo a la ventana y flota sobre lo que haya debajo.
-  // En una ventana estrecha la columna llega hasta el borde, y esta barra —lo
-  // primero de la vista— quedaba tapada por él: se veía el botón encima del
-  // texto. Se mide con la ventana chica, que es donde ocurre.
+  // The theme button is fixed to the window and floats over whatever is under
+  // it. On a narrow window the column reaches the edge, and this bar — the
+  // first thing in the view — ended up covered by it: the button sat on the
+  // text. Measured with the window small, which is where it happens.
   const wasSize = win.getSize();
   win.setSize(1000, 760);
   await new Promise(r => setTimeout(r, 400));
@@ -119,8 +119,8 @@ app.whenReady().then(async () => {
     const over = !(a.right < b.left || a.left > b.right || a.bottom < b.top || a.top > b.bottom);
     return { over, gap: Math.round(b.left - a.right) };
   })()`);
-  check('la barra no queda debajo del botón de tema en una ventana estrecha',
-    !clash.over, `se solapan ${-clash.gap}px`);
+  check('the bar does not end up under the theme button on a narrow window',
+    !clash.over, `they overlap by ${-clash.gap}px`);
   win.setSize(wasSize[0], wasSize[1]);
   await new Promise(r => setTimeout(r, 200));
 
@@ -176,7 +176,7 @@ app.whenReady().then(async () => {
   const before = (await rows()).length;
   await click('#reminders-list .reminder .r-del');
   check('deleting removes the row', (await rows()).length === before - 1,
-    `${(await rows()).length} de ${before}`);
+    `${(await rows()).length} of ${before}`);
 
   // ---- opening the meeting it came from ----
   // Clicked from here and then polled from here: waiting inside the page races
@@ -212,6 +212,6 @@ app.whenReady().then(async () => {
     `${again.length} ahora, ${after.length - 1} esperados`);
 
   if (errs.length) say('  renderer errors: ' + errs.slice(0, 4).join(' | '));
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { say('FAIL ' + (e.stack || e.message)); app.exit(1); });

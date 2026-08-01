@@ -115,6 +115,6 @@ app.whenReady().then(async () => {
     after.llmKey === undefined && !!after.llmByProvider.anthropic.key,
     JSON.stringify(after));
 
-  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { console.log('FAIL', e.message); app.exit(1); });

@@ -265,6 +265,6 @@ app.whenReady().then(async () => {
   check('from a later empty week, the way out points at something real',
     janWeek.previous === '2026-01-05', String(janWeek.previous));
 
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { say('FAIL ' + (e.stack || e.message)); app.exit(1); });

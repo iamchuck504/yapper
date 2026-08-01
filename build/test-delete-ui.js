@@ -110,6 +110,6 @@ app.whenReady().then(async () => {
   check('the one left is the right one',
     list[0] && list[0].title === 'Real Meeting', JSON.stringify(list[0]));
 
-  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { console.log('FAIL', e.stack || e.message); app.exit(1); });

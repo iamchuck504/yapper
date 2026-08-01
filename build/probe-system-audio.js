@@ -17,7 +17,7 @@ const { app } = require('electron');
 const { sandbox, logger, mainWindow, watchdog } = require('./harness');
 
 if (process.platform !== 'darwin') {
-  console.log('skip  esta prueba es de macOS');
+  console.log('skip  this probe is macOS-only');
   process.exit(0);
 }
 
@@ -55,7 +55,7 @@ app.whenReady().then(async () => {
   const win = await mainWindow();
   const $ = js => win.webContents.executeJavaScript(js, true);
 
-  say('  · silenciando la salida para que el micrófono no pueda oír nada');
+  say('  · muting the output so the microphone can hear nothing');
   osa('set volume output muted true');
 
   // The audio is the evidence, and stopAndProcess() releases it the moment a
@@ -68,7 +68,7 @@ app.whenReady().then(async () => {
   await new Promise(r => setTimeout(r, 2500));      // let the helper come up
 
   const clip = path.join(__dirname, 'calibration.wav');
-  say('  · reproduciendo el clip de calibración con el volumen apagado');
+  say('  · playing the calibration clip with the volume off');
   const player = spawn('afplay', [clip]);
   await new Promise(r => player.on('close', r));
   await new Promise(r => setTimeout(r, 1500));
@@ -78,21 +78,21 @@ app.whenReady().then(async () => {
   restore();
 
   const folders = fs.readdirSync(path.join(ROOT, 'Meetings'));
-  check('la grabación creó su carpeta', folders.length === 1, folders.join(', '));
+  check('the recording created its folder', folders.length === 1, folders.join(', '));
   if (folders.length === 1) {
     const wav = path.join(ROOT, 'Meetings', folders[0], 'recording.wav');
-    check('el WAV existe', fs.existsSync(wav));
+    check('the WAV exists', fs.existsSync(wav));
     if (fs.existsSync(wav)) {
       const peak = peakOf(wav);
       const seconds = ((fs.statSync(wav).size - 44) / 32000).toFixed(1);
       say(`  · ${seconds} s grabados, pico ${peak}`);
       // The clip is speech at a normal level. Anything above a few hundred is
       // unambiguously signal rather than the noise floor of a muted machine.
-      check('con el altavoz apagado, el audio del sistema llegó al archivo',
-        peak > 500, `pico ${peak}: solo se grabó el micrófono`);
+      check('with the speaker off, the system audio reached the file',
+        peak > 500, `peak ${peak}: only the microphone was recorded`);
     }
   }
 
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 });

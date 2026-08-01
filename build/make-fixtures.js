@@ -41,7 +41,7 @@ if (require.main === module) {
   }
   for (const seconds of [10, 60]) {
     const r = build(seconds);
-    console.log(`${r.made ? 'creado ' : 'ya está'} ${r.dest} (${Math.round(r.seconds)} s)`);
+    console.log(`${r.made ? 'made    ' : 'already'} ${r.dest} (${Math.round(r.seconds)} s)`);
   }
 }
 

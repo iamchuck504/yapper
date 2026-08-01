@@ -14,8 +14,8 @@ npx electron-builder --win --config build\e2e-update.config.js | Out-Null
 $env:UP_VERSION = '0.1.1'; $env:UP_OUT = 'dist-up-b'
 npx electron-builder --win --config build\e2e-update.config.js | Out-Null
 $env:UP_VERSION = $null; $env:UP_OUT = $null
-if (-not (Test-Path 'dist-up-a\Yapper-Setup-0.1.0.exe')) { Write-Host 'FAIL sin build A'; exit 1 }
-if (-not (Test-Path 'dist-up-b\Yapper-Setup-0.1.1.exe')) { Write-Host 'FAIL sin build B'; exit 1 }
+if (-not (Test-Path 'dist-up-a\Yapper-Setup-0.1.0.exe')) { Write-Host 'FAIL no build A'; exit 1 }
+if (-not (Test-Path 'dist-up-b\Yapper-Setup-0.1.1.exe')) { Write-Host 'FAIL no build B'; exit 1 }
 Write-Host 'ok    ambos builds listos'
 
 Step "instalando v0.1.0"

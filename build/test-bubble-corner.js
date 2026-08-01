@@ -30,8 +30,8 @@ const bubbleWindow = () => BrowserWindow.getAllWindows()
 function cornerOf(b, area) {
   const nearLeft = Math.abs(b.x - (area.x + INSET)) <= 2;
   const nearRight = Math.abs((b.x + b.width) - (area.x + area.width - INSET)) <= 2;
-  // Arriba ya no es exactamente area.y + INSET: en Mac se mantiene por debajo
-  // de la franja del notch aunque la barra de menús esté oculta.
+  // The top is no longer exactly area.y + INSET: on a Mac it stays below the
+  // notch band even when the menu bar is hidden.
   const nearTop = b.y >= area.y && b.y <= area.y + INSET + 40;
   const nearBottom = Math.abs((b.y + b.height) - (area.y + area.height - INSET)) <= 2;
   const v = nearTop ? 'top' : nearBottom ? 'bottom' : '?';
@@ -49,48 +49,48 @@ app.whenReady().then(async () => {
     // which is exactly what the first version of this got wrong.
     const work = screen.getPrimaryDisplay().workArea;
 
-    check('el default es arriba a la derecha, fuera de los controles de la llamada',
+    check('the default is top right, clear of the call controls',
       await $('window.yapper.getBubbleCorner()'), 'top-right');
 
     await $('window.yapper.bubbleShow()');
     await pause(1200);
     const b0 = bubbleWindow();
-    check('la burbuja existe', !!b0);
-    check('y nace ahí', cornerOf(b0.getBounds(), work), 'top-right');
+    check('the bubble exists', !!b0);
+    check('and it is born there', cornerOf(b0.getBounds(), work), 'top-right');
 
     for (const corner of ['top-left', 'top-right', 'bottom-left', 'bottom-right']) {
       await $(`window.yapper.setBubbleCorner(${JSON.stringify(corner)})`);
       await pause(500);
       const b = bubbleWindow();
-      check(`elegir ${corner} la mueve ahí en el momento`,
+      check(`picking ${corner} moves it there there and then`,
         cornerOf(b.getBounds(), work), corner);
     }
 
-    // Cerrarla y reabrirla es el caso de verdad: la próxima reunión.
+    // Closing and reopening it is the real case: the next meeting.
     await $(`window.yapper.setBubbleCorner('top-left')`);
     await $('window.yapper.bubbleHide()');
     await pause(600);
     await $('window.yapper.bubbleShow()');
     await pause(1200);
-    check('y la siguiente grabación la abre donde quedó',
+    check('and the next recording opens it where it was left',
       cornerOf(bubbleWindow().getBounds(), work), 'top-left');
 
-    // El notch. El área útil normalmente empieza bajo la barra de menús, que en
-    // una MacBook con notch es lo bastante alta para contenerlo — pero con la
-    // barra en ocultarse automáticamente empieza en el borde mismo, y ahí una
-    // cápsula arriba queda partida. No hay API para preguntar por el notch, así
-    // que se comprueba que arriba nunca se pegue al borde físico.
+    // The notch. The work area normally starts below the menu bar, which on a
+    // MacBook with a notch is tall enough to contain it — but with the bar set
+    // to hide automatically it starts at the physical edge, and a capsule at
+    // the top is cut in half. There is no API to ask about the notch, so what
+    // is checked is that the top never sits flush against the edge.
     if (process.platform === 'darwin') {
       const d = screen.getPrimaryDisplay();
       await $(`window.yapper.setBubbleCorner('top-left')`);
       await pause(500);
       const top = bubbleWindow().getBounds();
-      check('arriba deja sitio para el notch aunque la barra se oculte',
+      check('the top leaves room for the notch even when the bar hides',
         top.y - d.bounds.y >= 40);
-      say(`  · barra de menús: ${d.workArea.y - d.bounds.y} px | cápsula en y=${top.y}`);
+      say(`  · menu bar: ${d.workArea.y - d.bounds.y} px | capsule at y=${top.y}`);
     }
 
-    check('un valor inventado se rechaza',
+    check('a made-up value is rejected',
       await $(`window.yapper.setBubbleCorner('middle')`), false);
     check('y no cambia lo guardado',
       await $('window.yapper.getBubbleCorner()'), 'top-left');
@@ -99,6 +99,6 @@ app.whenReady().then(async () => {
     say('FAIL  ' + (err.stack || err.message));
   }
   clearTimeout(timer);
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 });

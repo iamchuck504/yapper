@@ -118,7 +118,7 @@ that ship are the files that run.
 | `meetings.js` | 72 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
-| `preload.js` | 112 | The only bridge between renderer and main |
+| `preload.js` | 118 | The only bridge between renderer and main |
 
 `keystore.js` and `bounds.js` are separate files for one reason: they are pure
 functions, so they can be tested without booting Electron, and `keystore.js`
@@ -132,7 +132,7 @@ reachable in a test.
 | `renderer/app.js` | 2964 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
 | `renderer/style.css` | 1661 | Everything visual, light and dark |
 | `renderer/index.html` | 503 | Main window markup |
-| `renderer/bubble.html` | 184 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
+| `renderer/bubble.html` | 198 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
 | `renderer/bubble.js` | 174 | Its behaviour, including sizing itself to its own contents |
 | `renderer/splash.html` | 116 | Boot screen, including the first-run calibration status; follows the theme |
 | `renderer/pcm-worklet.js` | 33 | The audio-thread tap that produces PCM |

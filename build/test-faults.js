@@ -46,10 +46,10 @@ app.whenReady().then(async () => {
   const win = await mainWindow({ settleMs: 1500 });
   const $ = js => win.webContents.executeJavaScript(js);
   const baseline = servers();
-  say(`whisper-server al empezar: ${baseline}\n`);
+  say(`whisper-server at the start: ${baseline}\n`);
 
   // ---- 1. the file handle: can the recording be deleted after a cycle? ----
-  say('--- 1. handles de archivo tras varios ciclos ---');
+  say('--- 1. file handles after several cycles ---');
   for (let i = 1; i <= 3; i++) {
     const folder = await $(`window.yapper.recordingStart('')`);
     await $(`window.yapper.recordingChunk(new Uint8Array(32000).buffer)`);
@@ -58,7 +58,7 @@ app.whenReady().then(async () => {
     const wav = path.join(folder, 'recording.wav');
     let locked = false;
     try { fs.unlinkSync(wav); } catch (e) { locked = true; }
-    check(`ciclo ${i}: el WAV queda liberado`, !locked, 'el archivo sigue bloqueado — descriptor filtrado');
+    check(`cycle ${i}: the WAV is released`, !locked, 'the file is still locked — leaked descriptor');
   }
 
   // a start that is never finished must not keep the previous one open either
@@ -66,89 +66,89 @@ app.whenReady().then(async () => {
   const orphan2 = await $(`window.yapper.recordingStart('')`);
   let locked = false;
   try { fs.unlinkSync(path.join(orphan, 'recording.wav')); } catch { locked = true; }
-  check('un arranque sin cierre no deja el anterior bloqueado', !locked,
-    'la grabación anterior quedó con el descriptor abierto');
+  check('a start without a stop does not leave the previous one locked', !locked,
+    'the previous recording was left with its descriptor open');
   await $(`window.yapper.recordingFinish('', [])`);
   fs.rmSync(orphan, { recursive: true, force: true });
   fs.rmSync(orphan2, { recursive: true, force: true });
 
   // ---- 2. the server dying mid-transcription ----
-  say('\n--- 2. el servidor de transcripción muere a mitad ---');
+  say('\n--- 2. the transcription server dies halfway ---');
   const f2 = seed('2026-07-29_1800', 40);
   const job = $(`window.yapper.transcribe(${JSON.stringify(f2)}).then(t => 'ok:' + t.length, e => 'err:' + e.message)`);
   await new Promise(r => setTimeout(r, 1200));
   try { execSync('taskkill /F /IM whisper-server.exe', { stdio: 'ignore' }); } catch { /* already gone */ }
-  say('  (matado)');
-  const r2 = await within(job, 'transcribe con el servidor muerto', 90000)
-    .catch(e => 'colgado:' + e.message);
-  say(`  resultado: ${String(r2).slice(0, 120)}`);
-  check('no se queda colgado', !String(r2).startsWith('colgado'), String(r2));
-  check('da un error legible o se recupera',
+  say('  (killed)');
+  const r2 = await within(job, 'transcribe with the server dead', 90000)
+    .catch(e => 'hung:' + e.message);
+  say(`  result: ${String(r2).slice(0, 120)}`);
+  check('it does not hang', !String(r2).startsWith('hung'), String(r2));
+  check('gives a readable error or recovers',
     /^ok:/.test(r2) || (/^err:/.test(r2) && String(r2).length > 12), String(r2));
 
   // and the app has to work again right after
   const f2b = seed('2026-07-29_1801', 15);
   const r2b = await within(
     $(`window.yapper.transcribe(${JSON.stringify(f2b)}).then(t => 'ok:' + t.length, e => 'err:' + e.message)`),
-    'transcribe después de matar el servidor', 120000).catch(e => 'colgado:' + e.message);
-  check('vuelve a transcribir después', /^ok:/.test(r2b), String(r2b).slice(0, 140));
+    'transcribe after killing the server', 120000).catch(e => 'hung:' + e.message);
+  check('it transcribes again afterwards', /^ok:/.test(r2b), String(r2b).slice(0, 140));
 
   // ---- 3. two transcriptions of the same meeting at once ----
-  say('\n--- 3. dos transcripciones a la vez ---');
+  say('\n--- 3. two transcriptions at once ---');
   const f3 = seed('2026-07-29_1802', 20);
   const both = await within(Promise.all([
     $(`window.yapper.transcribe(${JSON.stringify(f3)}).then(t => t.length, e => 'err:' + e.message)`),
     $(`window.yapper.transcribe(${JSON.stringify(f3)}).then(t => t.length, e => 'err:' + e.message)`)
-  ]), 'dos transcripciones simultáneas', 180000).catch(e => ['colgado', e.message]);
-  say(`  resultados: ${JSON.stringify(both)}`);
-  check('ninguna se cuelga', both[0] !== 'colgado', JSON.stringify(both));
-  check('las dos terminan bien (se ponen en cola, no se pelean)',
+  ]), 'two simultaneous transcriptions', 180000).catch(e => ['hung', e.message]);
+  say(`  results: ${JSON.stringify(both)}`);
+  check('neither hangs', both[0] !== 'hung', JSON.stringify(both));
+  check('both finish properly (they queue rather than fight)',
     both.every(x => typeof x === 'number' && x > 50), JSON.stringify(both));
   const tr3 = path.join(f3, 'transcript.txt');
-  check('el transcript no queda corrupto ni a medias',
+  check('the transcript is left neither corrupt nor half-written',
     fs.existsSync(tr3) && fs.readFileSync(tr3, 'utf8').trim().length > 50,
-    fs.existsSync(tr3) ? `${fs.readFileSync(tr3, 'utf8').length} caracteres` : 'no existe');
+    fs.existsSync(tr3) ? `${fs.readFileSync(tr3, 'utf8').length} characters` : 'does not exist');
 
   // ---- 4. the meeting vanishing under a job ----
-  say('\n--- 4. la reunión desaparece mientras se transcribe ---');
+  say('\n--- 4. the meeting disappears while it is being transcribed ---');
   const f4 = seed('2026-07-29_1803', 30);
   const job4 = $(`window.yapper.transcribe(${JSON.stringify(f4)}).then(() => 'ok', e => 'err:' + e.message)`);
   await new Promise(r => setTimeout(r, 700));
   try { fs.rmSync(f4, { recursive: true, force: true }); } catch { /* held open */ }
-  const r4 = await within(job4, 'transcribe sobre carpeta borrada', 90000).catch(e => 'colgado:' + e.message);
-  say(`  resultado: ${String(r4).slice(0, 120)}`);
-  check('no se cuelga si le borran la carpeta', !String(r4).startsWith('colgado'), String(r4));
-  check('y lo dice en palabras, sin códigos ni rutas',
+  const r4 = await within(job4, 'transcribe over a deleted folder', 90000).catch(e => 'hung:' + e.message);
+  say(`  result: ${String(r4).slice(0, 120)}`);
+  check('it does not hang when the folder is deleted underneath it', !String(r4).startsWith('hung'), String(r4));
+  check('and says so in words, with no codes or paths',
     // Paths leak differently per platform, so both shapes count as a leak.
     !/ENOENT|ECONN|\\Users\\|\/Users\/|Error invoking/.test(String(r4)), String(r4));
 
   // ---- 5. a missing model ----
-  say('\n--- 5. falta el modelo ---');
+  say('\n--- 5. the model is missing ---');
   const model = engine.modelPath('small');
   const hidden = model + '.hidden';
   let moved = false;
-  try { fs.renameSync(model, hidden); moved = true; } catch (e) { say(`  (no pude mover el modelo: ${e.message})`); }
+  try { fs.renameSync(model, hidden); moved = true; } catch (e) { say(`  (could not move the model: ${e.message})`); }
   if (moved) {
     await engine.stop();
     const f5 = seed('2026-07-29_1804', 15);
     const r5 = await within(
       $(`window.yapper.transcribe(${JSON.stringify(f5)}).then(() => 'ok', e => 'err:' + e.message)`),
-      'transcribe sin modelo', 60000).catch(e => 'colgado:' + e.message);
-    say(`  resultado: ${String(r5).slice(0, 140)}`);
-    check('sin modelo lo explica sin jerga',
+      'transcribe with no model', 60000).catch(e => 'hung:' + e.message);
+    say(`  result: ${String(r5).slice(0, 140)}`);
+    check('with no model it explains itself without jargon',
       /^err:/.test(r5) && /setup\.ps1|not installed/i.test(r5), String(r5));
-    check('y no borra la grabación',
-      fs.existsSync(path.join(f5, 'recording.wav')), 'se perdió el audio');
+    check('and does not delete the recording',
+      fs.existsSync(path.join(f5, 'recording.wav')), 'the audio was lost');
     fs.renameSync(hidden, model);
   }
 
   // ---- 6. child processes left behind ----
-  say('\n--- 6. procesos huérfanos ---');
+  say('\n--- 6. orphaned processes ---');
   await engine.stop();
   await new Promise(r => setTimeout(r, 600));
   const left = servers();
-  check('no quedan servidores de más', left <= baseline, `${left} corriendo, empezó con ${baseline}`);
+  check('no extra servers are left', left <= baseline, `${left} running, started with ${baseline}`);
 
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { say('FAIL ' + (e.stack || e.message)); app.exit(1); });

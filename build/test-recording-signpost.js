@@ -47,41 +47,41 @@ app.whenReady().then(async () => {
     const $ = js => win.webContents.executeJavaScript(js, true);
 
     const idle = await sidebar(win);
-    check('en reposo ofrece empezar', idle.label, 'New meeting');
-    check('sin punto de grabación', idle.pipShown, false);
-    check('con el signo de más', idle.plusShown);
+    check('at rest it offers to start', idle.label, 'New meeting');
+    check('with no recording pip', idle.pipShown, false);
+    check('with the plus sign', idle.plusShown);
 
     await $('startRecording()');
     await pause(2500);
 
     const live = await sidebar(win);
-    check('grabando, el botón lo dice', live.recording);
-    check('y lleva el reloj, no "New meeting"', /^Recording — \d\d:\d\d/.test(live.label));
-    check('el punto sustituye al más', [live.pipShown, live.plusShown], [true, false]);
-    check('y el tooltip dice para qué sirve ahora',
+    check('recording, the button says so', live.recording);
+    check('and carries the clock, not "New meeting"', /^Recording — \d\d:\d\d/.test(live.label));
+    check('the pip replaces the plus', [live.pipShown, live.plusShown], [true, false]);
+    check('and the tooltip says what it is for now',
       /back to the controls/i.test(live.title));
 
-    // El caso exacto que lo destapó: irse a Action items y tener que volver.
+    // The exact case that uncovered it: leaving for Action items and having to come back.
     await $(`document.getElementById('btn-reminders').click()`);
     await pause(700);
-    check('me fui a otra vista', await view(win), 'otra');
-    check('y el aviso sigue visible desde ahí', (await sidebar(win)).recording);
+    check('I went to another view', await view(win), 'otra');
+    check('and the indicator is still visible from there', (await sidebar(win)).recording);
 
     await $(`document.getElementById('btn-new').click()`);
     await pause(700);
-    check('el mismo botón me regresa a los controles', await view(win), 'record');
-    check('sin arrancar una segunda grabación', await $('recording'));
+    check('the same button takes me back to the controls', await view(win), 'record');
+    check('without starting a second recording', await $('recording'));
 
     await $('stopAndProcess()').catch(() => { });
     await pause(2000);
     const after = await sidebar(win);
-    check('al parar vuelve a ofrecer empezar', after.label, 'New meeting');
-    check('y el punto se va', [after.recording, after.pipShown], [false, false]);
+    check('on stopping it offers to start again', after.label, 'New meeting');
+    check('and the pip goes away', [after.recording, after.pipShown], [false, false]);
   } catch (err) {
     fails++;
     say('FAIL  ' + (err.stack || err.message));
   }
   clearTimeout(timer);
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 });

@@ -155,6 +155,6 @@ app.whenReady().then(async () => {
   check('and it does not mention Tokyo as if it had been discussed',
     !/tokyo office lease (was|is) /i.test(unanswerable.answer || ''), unanswerable.answer);
 
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { say('FAIL ' + (e.stack || e.message)); app.exit(1); });

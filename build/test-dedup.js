@@ -125,5 +125,5 @@ check('the real case: the same sentence six times',
     `[00:00:${String(i * 5).padStart(2, '0')}] I'm not asking you to do it. I actually very much`)),
   ["[00:00:00] I'm not asking you to do it. I actually very much"]);
 
-console.log(fails ? `\n${fails} fallos` : '\nPASS');
+console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

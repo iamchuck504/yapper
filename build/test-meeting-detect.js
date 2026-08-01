@@ -19,34 +19,34 @@ function check(name, ok, detail) {
 const eq = (name, got, want) => check(name, got === want, `dio ${JSON.stringify(got)}, esperaba ${JSON.stringify(want)}`);
 
 // ---- the helper-process bug, as observed ----
-eq('un huddle de Slack real (proceso helper)',
+eq('a real Slack huddle (helper process)',
   matchMeetingApp(['com.tinyspeck.slackmacgap.helper'], 'darwin'), 'Slack');
-eq('y el proceso principal, por si acaso',
+eq('and the main process, just in case',
   matchMeetingApp(['com.tinyspeck.slackmacgap'], 'darwin'), 'Slack');
-eq('Chromium sufija además el rol',
+eq('Chromium suffixes the role as well',
   matchMeetingApp(['com.google.Chrome.helper.renderer'], 'darwin'), 'a Chrome call (Meet/Hangouts)');
-eq('Teams desde su helper', matchMeetingApp(['com.microsoft.teams2.helper'], 'darwin'), 'Microsoft Teams');
+eq('Teams from its helper', matchMeetingApp(['com.microsoft.teams2.helper'], 'darwin'), 'Microsoft Teams');
 
-eq('appOf recorta el helper', appOf('com.tinyspeck.slackmacgap.helper'), 'com.tinyspeck.slackmacgap');
-eq('y el rol que le cuelga', appOf('com.google.Chrome.helper.gpu'), 'com.google.Chrome');
-eq('deja en paz lo que no es helper', appOf('us.zoom.xos'), 'us.zoom.xos');
+eq('appOf trims the helper', appOf('com.tinyspeck.slackmacgap.helper'), 'com.tinyspeck.slackmacgap');
+eq('and the role hanging off it', appOf('com.google.Chrome.helper.gpu'), 'com.google.Chrome');
+eq('leaves alone what is not a helper', appOf('us.zoom.xos'), 'us.zoom.xos');
 
 // ---- what must NOT trigger a meeting ----
-eq('Yapper grabando no es una reunión',
+eq('Yapper recording is not a meeting',
   matchMeetingApp(['com.yapper.meetingnotes'], 'darwin'), null);
-eq('ni un helper de algo ajeno',
+eq('nor a helper of something unrelated',
   matchMeetingApp(['com.spotify.client.helper'], 'darwin'), null);
 eq('nadie capturando', matchMeetingApp([], 'darwin'), null);
-eq('ni una lista ausente', matchMeetingApp(null, 'darwin'), null);
+eq('nor an absent list', matchMeetingApp(null, 'darwin'), null);
 
 // ---- Windows keeps working, and keeps its own vocabulary ----
-eq('Slack en Windows', matchMeetingApp(['slack.exe'], 'win32'), 'Slack');
-eq('Zoom en Windows', matchMeetingApp(['zoom.exe'], 'win32'), 'Zoom');
-eq('un exe cualquiera no dispara', matchMeetingApp(['notepad.exe'], 'win32'), null);
-eq('un bundle id no cuela como exe', matchMeetingApp(['com.tinyspeck.slackmacgap'], 'win32'), null);
+eq('Slack on Windows', matchMeetingApp(['slack.exe'], 'win32'), 'Slack');
+eq('Zoom on Windows', matchMeetingApp(['zoom.exe'], 'win32'), 'Zoom');
+eq('any old exe does not fire', matchMeetingApp(['notepad.exe'], 'win32'), null);
+eq('a bundle id does not pass as an exe', matchMeetingApp(['com.tinyspeck.slackmacgap'], 'win32'), null);
 
 // ---- the first match wins, in order ----
-eq('elige la app de reunión de entre varias',
+eq('picks the meeting app out of several',
   matchMeetingApp(['com.apple.podcasts', 'com.tinyspeck.slackmacgap.helper'], 'darwin'), 'Slack');
 
 // ---- both lists say the same words ----
@@ -64,29 +64,29 @@ check('macOS usa bundle ids, no ejecutables',
 const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 const watch = main.slice(main.indexOf('function startMeetingWatch'),
   main.indexOf('function stopMeetingWatch'));
-check('el vigilante arranca en Windows', /'win32'/.test(watch), 'no menciona win32');
-check('y también en macOS', /'darwin'/.test(watch), 'sigue siendo solo Windows');
-check('no arranca sin la sonda compilada', /probePath\(\)/.test(watch),
-  'lanzaría un binario inexistente cada 5 s');
+check('the watcher starts on Windows', /'win32'/.test(watch), 'does not mention win32');
+check('and on macOS too', /'darwin'/.test(watch), 'still Windows-only');
+check('does not start without the probe compiled', /probePath\(\)/.test(watch),
+  'it would launch a binary that does not exist every 5 s');
 
 const poll = main.slice(main.indexOf('async function pollMeetings'),
   main.indexOf('function notifyMeeting'));
-check('una sonda fallida no se confunde con silencio', /users === null/.test(poll),
-  'null se trataría como lista vacía y cortaría la grabación');
-check('la coincidencia sale del módulo, no de un mapa suelto',
-  /matchMeetingApp\(users\)/.test(poll), 'main.js volvió a hacerlo por su cuenta');
+check('a failed probe is not mistaken for silence', /users === null/.test(poll),
+  'null would be treated as an empty list and cut the recording');
+check('the match comes from the module, not a loose map',
+  /matchMeetingApp\(users\)/.test(poll), 'main.js went back to doing it on its own');
 
 // ---- the probe itself, where there is one ----
 const probe = path.join(__dirname, 'mic-probe');
 if (process.platform === 'darwin' && fs.existsSync(probe)) {
   const r = spawnSync(probe, [], { encoding: 'utf8', timeout: 10000 });
-  check('la sonda responde sin error', r.status === 0, `salió con ${r.status}: ${r.stderr}`);
+  check('the probe answers without an error', r.status === 0, `exited with ${r.status}: ${r.stderr}`);
   const lines = (r.stdout || '').split('\n').map(s => s.trim()).filter(Boolean);
-  check('y responde en bundle ids, uno por línea',
+  check('and answers in bundle ids, one per line',
     lines.every(l => /^[\w.-]+$/.test(l)), JSON.stringify(lines));
 } else {
-  console.log('skip  la sonda no está compilada aquí (solo se construye en macOS)');
+  console.log('skip  the probe is not compiled here (it is only built on macOS)');
 }
 
-console.log(fails ? `\n${fails} fallos` : '\nPASS');
+console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

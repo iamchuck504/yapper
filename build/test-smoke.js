@@ -151,8 +151,8 @@ app.whenReady().then(async () => {
   await click('#btn-speak');
   await new Promise(r => setTimeout(r, 300));
   await click('#btn-speak');            // and stop again
-  // El tema en detalle vive en build/test-theme.js; aquí sólo que el atajo de
-  // la esquina sigue llevando y trayendo.
+  // The theme in detail lives in build/test-theme.js; here, only that the
+  // corner shortcut still takes you there and back.
   await click('#btn-theme');
   check('the light theme applies', await $("document.body.classList.contains('light')"), 'did not change');
   await click('#btn-theme');
@@ -189,6 +189,6 @@ app.whenReady().then(async () => {
   check('nothing threw errors along the way', problems.length === 0,
     problems.slice(0, 6).join('\n      '));
 
-  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { console.log('FAIL', e.stack || e.message); app.exit(1); });

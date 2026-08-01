@@ -52,5 +52,5 @@ for (const ch of [...handled, ...received]) {
 }
 
 console.log(`\ncanales: ${invoked.size} invoke, ${sent.size} send, ${listened.size} on`);
-console.log(fails ? `${fails} fallos` : 'PASS');
+console.log(fails ? `${fails} failures` : 'PASS');
 process.exit(fails ? 1 : 0);

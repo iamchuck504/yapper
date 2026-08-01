@@ -79,8 +79,8 @@ fi
 
 # ---------------------------------------------------------------- the download
 
-# ${ZIP} con llaves a propósito: pegado a un carácter multibyte como "…",
-# bash se lo traga dentro del nombre de la variable y muere con "unbound".
+# ${ZIP} braced on purpose: next to a multibyte character such as "…", bash
+# swallows it into the variable name and dies with "unbound".
 say "Downloading ${ZIP}…"
 curl -fL --retry 3 --retry-delay 2 --progress-bar "$FEED/$ZIP" -o "$WORK/$ZIP" \
   || fail "The download failed. Nothing was changed."

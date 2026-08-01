@@ -131,5 +131,5 @@ check('only the ones with content',
   ['Later today', 'Launch Sync']);
 
 fs.rmSync(ROOT, { recursive: true, force: true });
-console.log(fails ? `\n${fails} fallos` : '\nPASS');
+console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

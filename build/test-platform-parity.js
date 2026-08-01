@@ -28,46 +28,46 @@ const preload = read('preload.js');
 const renderer = read('renderer/app.js');
 
 // ---- the renderer has to know where it is running ----
-check('preload expone la plataforma', /platform:\s*process\.platform/.test(preload),
-  'el renderer no puede distinguir macOS de Windows');
+check('preload exposes the platform', /platform:\s*process\.platform/.test(preload),
+  'the renderer cannot tell macOS from Windows');
 
 // ---- 1. system audio is not asked for on macOS ----
 const gdmCalls = [...renderer.matchAll(/getDisplayMedia\(/g)];
-check('el renderer pide getDisplayMedia una sola vez', gdmCalls.length === 1,
-  `lo pide ${gdmCalls.length} veces; hay que revisar cada una`);
+check('the renderer asks for getDisplayMedia exactly once', gdmCalls.length === 1,
+  `it asks ${gdmCalls.length} times; each one needs looking at`);
 
 const startRec = renderer.slice(renderer.indexOf('async function startRecording'),
   renderer.indexOf('const sysAudio'));
-check('y solo fuera de macOS',
+check('and only off macOS',
   /platform\s*===\s*'darwin'\s*\?\s*null/.test(startRec),
-  'macOS acabaría pidiendo permiso de Grabación de Pantalla para nada');
-check('el resto del flujo tolera que no haya audio de sistema',
+  'macOS would end up asking for Screen Recording for nothing');
+check('the rest of the flow tolerates there being no system audio',
   /if\s*\(sys\s*&&\s*sys\.getAudioTracks\(\)\.length\)/.test(renderer),
-  'sys sería null y reventaría al leer sus pistas');
+  'sys would be null and reading its tracks would blow up');
 
 const sysUses = [...renderer.matchAll(/\bsys\.get(?:Audio|Video)Tracks\(\)/g)].length;
 const sysGuards = [...renderer.matchAll(/sys\s*&&\s*sys\.getAudioTracks\(\)/g)].length;
-check('ningún uso de sys queda sin proteger', sysUses - sysGuards <= 1,
+check('no use of sys is left unguarded', sysUses - sysGuards <= 1,
   `${sysUses} usos, ${sysGuards} protegidos`);
 
 // ---- 2. login item ----
 const login = main.slice(main.indexOf('function applyOpenAtLogin'),
   main.indexOf('function initOpenAtLogin'));
-check('en macOS el login item no pasa una ruta',
+check('on macOS the login item passes no path',
   /'darwin'[\s\S]*setLoginItemSettings\(\{\s*openAtLogin:\s*enabled\s*\}\)/.test(login),
-  'registraría el binario interno en vez del bundle');
-check('Windows sigue registrando su ruta y argumentos',
-  /'win32'[\s\S]*process\.execPath[\s\S]*args:/.test(login), 'se perdió el comportamiento de Windows');
+  'it would register the inner binary instead of the bundle');
+check('Windows still registers its path and arguments',
+  /'win32'[\s\S]*process\.execPath[\s\S]*args:/.test(login), 'the Windows behaviour was lost');
 
 // ---- 3. no Windows-only advice on a Mac ----
 const ps1 = main.slice(main.indexOf('function humanTranscribeError'),
   main.indexOf('function humanTranscribeError') + 1200);
-check('el consejo de setup.ps1 depende de la plataforma',
+check('the setup.ps1 advice depends on the platform',
   /'darwin'[\s\S]{0,200}setup\.ps1|setup\.ps1[\s\S]{0,200}darwin/.test(ps1)
   || /darwin[\s\S]{0,300}setup\.ps1/.test(ps1),
-  'un usuario de Mac acabaría buscando un script de PowerShell');
-check('y macOS recibe uno que sí puede seguir',
-  /Restart Yapper to download it/.test(ps1), 'no se le dice qué hacer');
+  'a Mac user would end up hunting for a PowerShell script');
+check('and macOS gets one it can actually follow',
+  /Restart Yapper to download it/.test(ps1), 'it is not told what to do');
 
-console.log(fails ? `\n${fails} fallos` : '\nPASS');
+console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

@@ -156,6 +156,6 @@ app.whenReady().then(async () => {
   check('anyone who had it always open keeps it open (pin migrated)',
     !m.pill && m.pinOn, JSON.stringify({ pill: m.pill, pinOn: m.pinOn }));
 
-  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { console.log('FAIL', e.message); app.exit(1); });

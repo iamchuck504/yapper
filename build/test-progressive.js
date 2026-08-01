@@ -52,11 +52,11 @@ function growingCopy(dest, pcm, seconds) {
 
 (async () => {
   if (!fs.existsSync(SRC)) {
-    console.log('skip  falta el fixture: node build/make-fixtures.js');
+    console.log('skip  the fixture is missing: node build/make-fixtures.js');
     process.exit(0);
   }
   if (!engine.isInstalled() || !engine.hasModel('base')) {
-    console.log('skip  el motor no está instalado en este checkout');
+    console.log('skip  the engine is not installed in this checkout');
     process.exit(0);
   }
 
@@ -70,26 +70,27 @@ function growingCopy(dest, pcm, seconds) {
   const live = path.join(os.tmpdir(), 'yapper-progressive.wav');
 
   try {
-    // ---- dónde puede adelantar sin pelearse con el vivo ----
-    // Los dos comparten un servidor y pedirle otro modelo lo reinicia: cientos
-    // de megas de disco cada vez que se alternan. En `steady` el vivo usa
-    // `base` y la pasada final `small`, así que adelantar ahí sería recargar
-    // el modelo cada pocos segundos y el transcript en vivo se derrumba.
-    check('fast adelanta: los dos quieren el mismo modelo', engine.canGetAhead('fast'));
-    check('modest adelanta: no hay vivo al que interrumpir', engine.canGetAhead('modest'));
-    check('steady NO adelanta: base contra small en el mismo servidor',
+    // ---- where it can get ahead without fighting the live loop ----
+    // The two share one server, and asking it for a different model restarts
+    // it: hundreds of megabytes off disk every time they alternate. On `steady`
+    // live uses `base` while the final pass uses `small`, so getting ahead
+    // there would reload the model every few seconds and the live transcript
+    // would collapse.
+    check('fast gets ahead: both want the same model', engine.canGetAhead('fast'));
+    check('modest gets ahead: there is no live loop to interrupt', engine.canGetAhead('modest'));
+    check('steady does NOT: base against small on the same server',
       engine.canGetAhead('steady'), false);
 
     // ---- the answer to beat: one pass, at the end, over the whole file ----
     const atEnd = await engine.transcribeFile(SRC, opts);
-    check('la pasada completa produce transcript', atEnd.length > 0);
-    console.log(`  · referencia: ${atEnd.length} líneas de ${totalSec.toFixed(0)}s`);
+    check('the full pass produces a transcript', atEnd.length > 0);
+    console.log(`  · reference: ${atEnd.length} lines from ${totalSec.toFixed(0)}s`);
 
     // ---- the same recording, transcribed as it arrives ----
     const run = engine.progressive(live, opts);
     growingCopy(live, pcm, 0);
     await run.advance();
-    check('sin audio suficiente no adelanta nada', run.consumedSec, 0);
+    check('with too little audio it gets nothing ahead', run.consumedSec, 0);
 
     // Grow it the way a meeting does and let the head start keep up.
     for (let sec = 12; sec <= totalSec; sec += 12) {
@@ -97,9 +98,9 @@ function growingCopy(dest, pcm, seconds) {
       await run.advance();
     }
     const headStart = run.consumedSec;
-    console.log(`  · adelantado durante la reunión: ${headStart}s de ${totalSec.toFixed(0)}s`);
-    check('adelantó trabajo de verdad', headStart > 0);
-    check('pero nunca la última ventana', headStart < totalSec);
+    console.log(`  · done during the meeting: ${headStart}s of ${totalSec.toFixed(0)}s`);
+    check('it genuinely got work ahead', headStart > 0);
+    check('but never the last window', headStart < totalSec);
 
     // ---- stop: finish the tail and compare ----
     growingCopy(live, pcm, totalSec);
@@ -115,56 +116,56 @@ function growingCopy(dest, pcm, seconds) {
       const d = (bOut[w] || 0) - (bRef[w] || 0);
       if (d < 0) lost += -d; else extra += d;
     }
-    check('el adelanto no pierde ni una palabra', lost, 0);
-    // Un puñado de palabras de más en una costura es cosmético; una avalancha
-    // significaría que el solape dejó de descartarse y todo sale doble.
-    check('ni duplica más que alguna suelta en una costura', extra <= Math.ceil(wRef.length * 0.02));
+    check('the head start loses not one word', lost, 0);
+    // A handful of extra words at a seam is cosmetic; an avalanche would mean
+    // the overlap stopped being dropped and everything comes out twice.
+    check('nor duplicates more than the odd one at a seam', extra <= Math.ceil(wRef.length * 0.02));
     if (progressive.join('\n') !== atEnd.join('\n')) {
-      console.log(`  · segmentación distinta: ${lost} perdidas, ${extra} de más de ${wRef.length}`);
+      console.log(`  · different segmentation: ${lost} lost, ${extra} extra of ${wRef.length}`);
     }
 
-    // ---- parar tiene que parar de verdad ----
-    // Sin esto, un adelanto con retraso sigue metiendo ventanas en la misma
-    // cola que necesita la pasada final — y la espera que esto vino a quitar
-    // vuelve, detrás de trabajo que ya no le sirve a nadie.
+    // ---- stopping has to actually stop ----
+    // Without this, a head start running late keeps pushing windows into the
+    // same queue the final pass needs — and the wait this came to remove comes
+    // back, behind work that is no use to anyone any more.
     const r2 = engine.progressive(live, opts);
     growingCopy(live, pcm, totalSec);
-    const inFlight = r2.advance();          // sin await: queda una en vuelo
-    await r2.settle();                      // resuelve cuando aterriza
+    const inFlight = r2.advance();          // no await: one is left in flight
+    await r2.settle();                      // resolves when it lands
     const afterSettle = r2.consumedSec;
     await inFlight.catch(() => { });
-    check('settle() espera a la ventana en vuelo', r2.consumedSec, afterSettle);
+    check('settle() waits for the window in flight', r2.consumedSec, afterSettle);
 
     const before = r2.consumedSec;
     growingCopy(live, pcm, totalSec);
     await r2.advance();
-    check('y despues de settle ya no adelanta mas', r2.consumedSec, before);
+    check('and after settle it gets nothing more ahead', r2.consumedSec, before);
 
-    // ---- un adelanto que no corresponde se descarta, no se empalma ----
-    // Mezclar un adelanto hecho con `base` en una pasada con `small` deja un
-    // transcript mitad y mitad: peor que cualquiera de los dos, y sin señal
-    // alguna. Hoy no es alcanzable porque los tres tiers terminan con `small`,
-    // pero está a una edición de la tabla de tiers de serlo.
+    // ---- a head start that does not match is discarded, not spliced in ----
+    // Mixing a head start made with `base` into a pass with `small` leaves a
+    // transcript that is half one and half the other: worse than either, and
+    // with no sign of it anywhere. Unreachable today because all three tiers
+    // end on `small`, but one edit to the tier table away from being real.
     const r3 = engine.progressive(live, { ...opts, model: 'base' });
     growingCopy(live, pcm, totalSec);
     await r3.advance(); await r3.settle();
-    check('el adelanto llegó a hacer ventanas', r3.consumedSec > 0);
+    check('the head start did take windows', r3.consumedSec > 0);
 
     const mixed = await engine.transcribeFile(live, { ...opts, model: 'base', from: {
       ...r3.snapshot(), fingerprint: 'otro-modelo'
     } });
-    check('con otra huella, se descarta y se hace el archivo entero',
+    check('with another fingerprint it is dropped and the whole file is done',
       words(mixed).length > 0 && Math.abs(words(mixed).length - wRef.length) <= 3);
 
-    // Y una foto que va más allá del final: líneas de audio que ya no existe.
+    // And a snapshot that runs past the end: lines of audio that no longer exists.
     const shrunk = { ...r3.snapshot(), at: totalSec + 500 };
     const past = await engine.transcribeFile(live, { ...opts, model: 'base', from: shrunk });
-    check('una foto más larga que la grabación también se descarta',
+    check('a snapshot longer than the recording is dropped too',
       words(past).length > 0 && Math.abs(words(past).length - wRef.length) <= 3);
 
     // ---- and it still works when nothing was done early ----
     const cold = await engine.transcribeFile(live, opts);
-    check('sin adelanto, el resultado es el mismo',
+    check('with no head start, the result is the same',
       Math.abs(words(cold).length - wRef.length) <= 3);
   } catch (err) {
     fails++;
@@ -172,7 +173,7 @@ function growingCopy(dest, pcm, seconds) {
   }
 
   await engine.stop().catch(() => { });
-  try { fs.unlinkSync(live); } catch { /* nunca existió */ }
-  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  try { fs.unlinkSync(live); } catch { /* it never existed */ }
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
   process.exit(fails ? 1 : 0);
 })();

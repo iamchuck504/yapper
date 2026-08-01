@@ -15,10 +15,10 @@ set -euo pipefail
 VERSION="$(node -p "require('./package.json').version")"
 REPO="iamchuck504/yapper-releases"
 
-echo "== dependencias"
+echo "== dependencies"
 npm install
 
-echo "== ayudantes nativos (detección de reuniones y audio del sistema)"
+echo "== native helpers (meeting detection and system audio)"
 # Both are required before packaging: electron-builder copies them into the app,
 # and main.js degrades quietly if either is missing — auto-detection stays off,
 # and recording falls back to the microphone alone. swiftc ships with the
@@ -32,62 +32,63 @@ swiftc -O -target arm64-apple-macos14.4 mac/mic-probe.swift -o build/mic-probe
 swiftc -O -target arm64-apple-macos13.0 mac/system-audio.swift -o build/system-audio
 ./build/mic-probe >/dev/null || true   # exits 0 with no output when nobody is capturing
 
-echo "== suite de pruebas puras"
+echo "== pure test suite"
 npm test
 
-echo "== construyendo Yapper $VERSION (dmg + zip, arm64)"
+echo "== building Yapper $VERSION (dmg + zip, arm64)"
 npx electron-builder --mac
 
-echo "== artefactos"
+echo "== artefacts"
 ls -lh dist/*.dmg dist/*-mac.zip 2>/dev/null || ls -lh dist/
 
 DMG="dist/Yapper-$VERSION-arm64.dmg"
 test -f "$DMG" || DMG="$(ls dist/*.dmg | head -1)"
 
-echo "== subiendo al release v$VERSION"
+echo "== uploading to release v$VERSION"
 # latest-mac.yml goes up with the dmg, not as an afterthought: it is what an
 # installed Mac reads to notice a new version. Without it the app falls back to
 # latest.yml, which the Windows build owns — so a release cut only here would be
 # invisible to every Mac already installed.
 FEED="dist/latest-mac.yml"
-# El zip sube junto al dmg porque es lo que instala mac/install.sh: curl no le
-# pone cuarentena a lo que baja, así que esa vía se salta el bloqueo de
-# Gatekeeper que el dmg sí provoca. Sin el zip en el feed, el instalador de una
-# línea no tiene qué bajar.
+# The zip goes up beside the dmg because it is what mac/install.sh installs:
+# curl attaches no quarantine to what it downloads, so that route skips the
+# Gatekeeper block the dmg does trigger. With no zip on the feed, the one-line
+# installer has nothing to fetch.
 ZIP="dist/Yapper-$VERSION-arm64-mac.zip"
 
-# Este script solía exigir que Windows hubiera publicado el release primero, lo
-# que dejaba a la Mac sin poder cortar una versión por su cuenta. Ahora lo crea
-# si falta — y si lo crea, arrastra los assets de Windows del release anterior.
+# This script used to require that Windows had published the release first,
+# which left the Mac unable to cut a version on its own. It creates one if it is
+# missing now — and when it does, it carries the previous release's Windows
+# assets forward.
 NEW_RELEASE=0
 if ! gh release view "v$VERSION" --repo "$REPO" >/dev/null 2>&1; then
-  echo "   no existía v$VERSION; creándolo"
+  echo "   v$VERSION did not exist; creating it"
   gh release create "v$VERSION" --repo "$REPO" \
     --title "Yapper $VERSION" \
     --notes "Yapper $VERSION.
 
-macOS (Apple Silicon), sin el rodeo de Gatekeeper:
+macOS (Apple Silicon), without the Gatekeeper detour:
 
     curl -fsSL https://github.com/$REPO/releases/latest/download/install.sh | bash
 
-O baja el dmg y sigue docs/INSTALL-MACOS.md. Las copias instaladas leen este
-mismo feed para avisar de versiones nuevas."
+Or download the dmg and follow docs/INSTALL-MACOS.md. Installed copies read this
+same feed to tell you about new versions."
   NEW_RELEASE=1
 fi
 
 gh release upload "v$VERSION" "$DMG" --repo "$REPO" --clobber
 test -f "$ZIP"  && gh release upload "v$VERSION" "$ZIP"  --repo "$REPO" --clobber
 test -f "$FEED" && gh release upload "v$VERSION" "$FEED" --repo "$REPO" --clobber
-# el instalador se corta con el build que instala, en vez de vivir en una rama
+# the installer is cut with the build it installs, rather than living on a branch
 gh release upload "v$VERSION" mac/install.sh --repo "$REPO" --clobber
 
 if [ "$NEW_RELEASE" = "1" ]; then
-  # electron-updater busca latest.yml SIEMPRE en el release más reciente. Un
-  # corte sólo-mac lo dejaría sin él y las copias de Windows dejarían de ver
-  # actualizaciones — fallando calladas, que es la peor forma de fallar. Los
-  # assets de Windows del release anterior viajan hacia adelante tal cual: su
-  # latest.yml sigue declarando la versión que ya tienen instalada, así que
-  # nadie recibe un aviso de actualización que no existe.
+  # electron-updater ALWAYS looks for latest.yml on the most recent release. A
+  # mac-only cut would leave it without one and Windows copies would stop seeing
+  # updates — failing quietly, which is the worst way to fail. The previous
+  # release's Windows assets travel forward untouched: their latest.yml still
+  # declares the version those copies already have, so nobody is offered an
+  # update that does not exist.
   PREV="$(gh release list --repo "$REPO" --limit 30 --json tagName --jq '.[].tagName' \
     | grep -vx "v$VERSION" | grep -v '^engine-' | head -1)"
   if [ -n "$PREV" ]; then
@@ -97,16 +98,16 @@ if [ "$NEW_RELEASE" = "1" ]; then
       for f in "$CARRY"/*; do
         gh release upload "v$VERSION" "$f" --repo "$REPO" --clobber
       done
-      echo "   assets de Windows heredados de $PREV: $(ls "$CARRY" | tr '\n' ' ')"
+      echo "   Windows assets inherited from $PREV: $(ls "$CARRY" | tr '\n' ' ')"
     else
-      echo "   AVISO: $PREV no traía assets de Windows — las copias de Windows"
-      echo "          dejarán de ver este feed hasta que se publique desde allá"
+      echo "   WARNING: $PREV carried no Windows assets — Windows copies"
+      echo "          will stop seeing this feed until a release is cut from there"
     fi
     rm -rf "$CARRY"
   fi
 fi
 
 echo ""
-echo "listo: https://github.com/$REPO/releases/tag/v$VERSION"
-echo "prueba local: open \"$DMG\""
-echo "instalación limpia: curl -fsSL https://github.com/$REPO/releases/latest/download/install.sh | bash"
+echo "done: https://github.com/$REPO/releases/tag/v$VERSION"
+echo "local test: open \"$DMG\""
+echo "clean install: curl -fsSL https://github.com/$REPO/releases/latest/download/install.sh | bash"

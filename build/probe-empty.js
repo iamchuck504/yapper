@@ -57,7 +57,7 @@ app.whenReady().then(async () => {
   await $(`(() => { document.getElementById('search-q').value = 'pricing';
     document.getElementById('btn-search').click(); })()`);
   await new Promise(r => setTimeout(r, 1200));
-  say('\n### Search (buscando algo)');
+  say('\n### Search (looking for something)');
   say('  status: ' + await $("document.getElementById('search-status').textContent"));
 
   await $(`document.getElementById('btn-reminders').click()`);

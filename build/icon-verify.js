@@ -129,6 +129,6 @@ app.whenReady().then(() => {
   fs.writeFileSync(PREVIEW, nativeImage.createFromBitmap(out, { width: pw, height: ph }).toPNG());
   console.log(`\nvista previa: ${PREVIEW}`);
 
-  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 });

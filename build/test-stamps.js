@@ -60,10 +60,10 @@ app.whenReady().then(async () => {
       const ok = heads.length > 0 && bare.length === 0;
       if (!ok) fails++;
       say(`  ${ok ? 'ok  ' : 'FAIL'} ${style} round ${round}: ${stamped.length}/${heads.length} stamped`
-        + (bare.length ? `\n       sin marca: ${bare.join(' | ')}` : ''));
+        + (bare.length ? `\n       no stamp: ${bare.join(' | ')}` : ''));
     }
   }
 
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { console.log('FAIL', e.stack || e.message); app.exit(1); });

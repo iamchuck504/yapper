@@ -145,7 +145,7 @@ r = find('Atlas');
 check('every result carries its meeting and its date',
   r.results.every(x => x.meeting.title && x.meeting.date), JSON.stringify(r.results[0]));
 check('transcript hits carry a timestamp',
-  r.results.filter(x => x.kind === 'transcript').every(x => x.stamp), 'alguno sin marca');
+  r.results.filter(x => x.kind === 'transcript').every(x => x.stamp), 'one of them has no stamp');
 check('and the meeting participants',
   r.results.every(x => Array.isArray(x.meeting.participants)), 'faltan');
 check('one meeting cannot fill the page',
@@ -179,5 +179,5 @@ check('two paragraphs where the first is not a refusal are kept',
   s.cleanAnswer('The rollout moved to August 1 [Standup].\n\nIt had been planned for the second week [Q3 Planning].'),
   'The rollout moved to August 1 [Standup].\n\nIt had been planned for the second week [Q3 Planning].');
 
-console.log(fails ? `\n${fails} fallos` : '\nPASS');
+console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

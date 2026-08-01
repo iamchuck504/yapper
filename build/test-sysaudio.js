@@ -30,39 +30,39 @@ const samplesOf = buf => {
 // ---- the addition ----
 check('suma muestra a muestra',
   String(samplesOf(mixPcm(pcm(100, -100, 0), pcm(50, -50, 7)))) === String([150, -150, 7]));
-check('el silencio no cambia nada',
+check('silence changes nothing',
   String(samplesOf(mixPcm(pcm(1000, -2000), pcm(0, 0)))) === String([1000, -2000]));
 
 // Wrapping is the dangerous failure: 32767 + 1 becomes -32768, so a loud
 // passage would come back as a burst of noise instead of merely clipping.
-check('satura hacia arriba en vez de dar la vuelta',
+check('it clips upwards instead of wrapping round',
   samplesOf(mixPcm(pcm(30000), pcm(30000)))[0] === 32767,
   String(samplesOf(mixPcm(pcm(30000), pcm(30000)))));
-check('y hacia abajo también',
+check('and downwards too',
   samplesOf(mixPcm(pcm(-30000), pcm(-30000)))[0] === -32768);
-check('no toca el buffer que recibe', (() => {
+check('does not touch the buffer it is handed', (() => {
   const mic = pcm(100, 200);
   mixPcm(mic, pcm(1, 1));
   return String(samplesOf(mic)) === String([100, 200]);
-})(), 'mutó la entrada');
-check('una cola más corta no rompe la mezcla',
+})(), 'mutated the input');
+check('a shorter tail does not break the mix',
   String(samplesOf(mixPcm(pcm(10, 20, 30), pcm(5)))) === String([15, 20, 30]));
 
 // ---- taking, with no helper running ----
 const idle = create({ probePath: path.join(__dirname, 'no-such-helper') });
-check('sin ayudante no hay estado de captura', idle.state === 'off');
+check('with no helper there is no capture state', idle.state === 'off');
 check('y take() devuelve null, no silencio', idle.take(64) === null,
-  'escribiría ceros encima del micrófono');
+  'it would write zeros over the microphone');
 
 idle.start().then(started => {
-  check('arrancar sin ayudante resuelve false, sin lanzar', started === false);
-  check('y queda marcado como no disponible', idle.state === 'unavailable', idle.state);
+  check('starting with no helper resolves false rather than throwing', started === false);
+  check('and it is marked unavailable', idle.state === 'unavailable', idle.state);
 
   // Half a second at 16 kHz mono 16-bit. Stated as a number here so that
   // widening the bound has to be a decision, not a typo: the whole point is
   // that the far side cannot drift arbitrarily far behind the voice.
-  check('el tope del buffer es medio segundo de audio', MAX_BUFFERED === 16000,
-    `es ${MAX_BUFFERED}`);
+  check('the buffer cap is half a second of audio', MAX_BUFFERED === 16000,
+    `it is ${MAX_BUFFERED}`);
 
   // ---- the helper on disk, when this machine has one ----
   const helper = path.join(__dirname, 'system-audio');
@@ -75,29 +75,29 @@ idle.start().then(started => {
       // Neither says anything about whether this module works, so neither is
       // a failure here.
       if (!ok) {
-        console.log(`skip  el ayudante no pudo capturar (estado ${live.state}): `
-          + 'permiso de Grabación de Pantalla o pantalla dormida');
+        console.log(`skip  the helper could not capture (state ${live.state}): `
+          + 'Screen Recording permission, or the screen asleep');
         live.stop();
         return done();
       }
-      check('el ayudante real arranca y captura', true);
+      check('the real helper starts and captures', true);
       if (ok) {
         const chunk = live.take(3200);            // 0.1 s
-        check('entrega exactamente lo que se le pide', chunk && chunk.length === 3200,
+        check('hands over exactly what it is asked for', chunk && chunk.length === 3200,
           chunk ? String(chunk.length) : 'null');
-        check('y rellena con silencio lo que aún no llegó', chunk && chunk.length === 3200);
+        check('and pads with silence for what has not arrived yet', chunk && chunk.length === 3200);
       }
       live.stop();
-      check('parar lo deja apagado', live.state === 'off');
+      check('stopping leaves it off', live.state === 'off');
       done();
     });
   } else {
-    console.log('skip  el ayudante nativo no está compilado aquí (solo macOS)');
+    console.log('skip  the native helper is not compiled here (macOS only)');
     done();
   }
 });
 
 function done() {
-  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
   process.exit(fails ? 1 : 0);
 }

@@ -28,9 +28,9 @@ app.whenReady().then(async () => {
 
   // --- Memo is offered, and it is a real style ---
   const styles = await $(`[...document.querySelectorAll('#style-pills .seg-btn')].map(b => b.dataset.style)`);
-  check('Memo aparece entre los estilos', styles.includes('memo'), styles.join(', '));
+  check('Memo appears among the styles', styles.includes('memo'), styles.join(', '));
   const regenStyles = await $(`[...document.getElementById('regen-style').options].map(o => o.value)`);
-  check('Memo también al regenerar', regenStyles.includes('memo'), regenStyles.join(', '));
+  check('Memo on regenerate too', regenStyles.includes('memo'), regenStyles.join(', '));
 
   // --- attendees are per meeting, not a preference ---
   await $(`(() => {
@@ -44,9 +44,9 @@ app.whenReady().then(async () => {
   await new Promise(r => setTimeout(r, 300));
 
   const stored = await $(`localStorage.getItem('yapper-options')`);
-  check('los nombres NO se guardan en las preferencias',
+  check('the names are NOT saved in the preferences',
     !stored.includes('Maya'), stored);
-  check('lo que sí es preferencia se guarda',
+  check('what genuinely is a preference is saved',
     stored.includes('memo') && stored.includes('focus on the launch'), stored);
 
   // Left open on purpose: the fold used to remember this and the next launch
@@ -59,21 +59,21 @@ app.whenReady().then(async () => {
   await new Promise(r => win.webContents.once('did-finish-load', r));
   await new Promise(r => setTimeout(r, 1200));
 
-  check('al reabrir, el campo de asistentes está vacío',
+  check('on reopen, the attendees field is empty',
     (await $(`document.getElementById('participants-rec').value`)) === '',
     await $(`document.getElementById('participants-rec').value`));
-  check('al reabrir, el estilo elegido sí se recuerda',
+  check('on reopen, the chosen style is remembered',
     (await $(`document.querySelector('#style-pills .seg-btn.active').dataset.style`)) === 'memo',
     await $(`document.querySelector('#style-pills .seg-btn.active').dataset.style`));
-  check('al reabrir, las opciones vuelven a estar plegadas',
+  check('on reopen, the options are folded again',
     await $(`document.getElementById('options-card').classList.contains('collapsed')`),
-    'abrieron solas');
-  // Y la línea plegada dice lo que hay debajo. Se pintaba sólo al abrir o
-  // cerrar el pliegue, así que arrancaba en blanco o con lo de la vez pasada.
-  check('y la línea plegada resume lo que se recordó',
+    'they opened on their own');
+  // And the folded line says what is underneath it. It was painted only when
+  // the fold opened or closed, so it started blank, or on last time's answer.
+  check('and the folded line summarises what was remembered',
     /Memo/.test(await $(`document.getElementById('opts-sum').textContent`)),
     await $(`document.getElementById('opts-sum').textContent`));
-  check('al reabrir, las instrucciones sí se recuerdan',
+  check('on reopen, the instructions are remembered',
     (await $(`document.getElementById('custom-instructions').value`)) === 'focus on the launch',
     await $(`document.getElementById('custom-instructions').value`));
 
@@ -84,10 +84,10 @@ app.whenReady().then(async () => {
     document.getElementById('btn-new').click();
   })()`);
   await new Promise(r => setTimeout(r, 300));
-  check('"New" limpia los asistentes',
+  check('"New" clears the attendees',
     (await $(`document.getElementById('participants-rec').value`)) === '',
     await $(`document.getElementById('participants-rec').value`));
 
-  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { console.log('FAIL', e.stack || e.message); app.exit(1); });

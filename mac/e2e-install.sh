@@ -15,7 +15,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"; [ -n "${SRV:-}" ] && kill "$SRV" 2>/dev/null' EXIT
 
 fails=0
-check() {  # check <nombre> <condición-ya-evaluada:0|1>
+check() {  # check <name> <already-evaluated-condition:0|1>
   if [ "$2" -eq 0 ]; then echo "ok    $1"; else echo "FAIL  $1"; fails=$((fails+1)); fi
 }
 
@@ -27,16 +27,16 @@ if [ ! -f "$ROOT/dist/$ZIP" ] || [ ! -f "$ROOT/dist/latest-mac.yml" ]; then
   exit 2
 fi
 
-# ---- un feed local que sirve exactamente lo que sirve GitHub ----
+# ---- a local feed serving exactly what GitHub serves ----
 mkdir -p "$WORK/feed"
 cp "$ROOT/dist/$ZIP" "$ROOT/dist/latest-mac.yml" "$WORK/feed/"
-# -u o la línea del puerto se queda en el buffer; --bind porque por defecto
-# escucha en :: y el script pide 127.0.0.1
+# -u or the port line sits in the buffer; --bind because it listens on :: by
+# default and the script asks for 127.0.0.1
 (cd "$WORK/feed" && python3 -u -m http.server 0 --bind 127.0.0.1 >"$WORK/srv.log" 2>&1) &
 SRV=$!
 for _ in $(seq 1 40); do grep -q "port" "$WORK/srv.log" 2>/dev/null && break; sleep 0.1; done
 PORT="$(sed -n 's/.*port \([0-9]*\).*/\1/p' "$WORK/srv.log" | head -1)"
-[ -n "$PORT" ] || { echo "no arrancó el servidor local"; exit 2; }
+[ -n "$PORT" ] || { echo "the local server did not start"; exit 2; }
 FEED="http://127.0.0.1:$PORT"
 
 export YAPPER_FEED="$FEED"
@@ -44,40 +44,40 @@ export YAPPER_APP="$WORK/Applications/Yapper.app"
 export YAPPER_NO_OPEN=1
 mkdir -p "$WORK/Applications"
 
-# ---- 1. instalación limpia ----
-echo "== instalación limpia"
+# ---- 1. clean install ----
+echo "== clean install"
 bash "$ROOT/mac/install.sh" >"$WORK/install.log" 2>&1; rc=$?
-check "el instalador termina bien" "$rc"
-[ -d "$YAPPER_APP" ]; check "Yapper.app quedó en su lugar" $?
-[ -x "$YAPPER_APP/Contents/MacOS/Yapper" ]; check "el binario conserva el bit de ejecución" $?
+check "the installer finishes cleanly" "$rc"
+[ -d "$YAPPER_APP" ]; check "Yapper.app landed in place" $?
+[ -x "$YAPPER_APP/Contents/MacOS/Yapper" ]; check "the binary keeps its executable bit" $?
 
-# El framework de Electron trae symlinks; unzip los aplana y la app no arranca.
+# Electron's framework carries symlinks; unzip flattens them and the app will not start.
 [ -L "$YAPPER_APP/Contents/Frameworks/Electron Framework.framework/Versions/Current" ]
-check "los symlinks del framework sobrevivieron" $?
+check "the framework symlinks survived" $?
 
 PLIST_VER="$(defaults read "$YAPPER_APP/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null)"
-[ "$PLIST_VER" = "$VERSION" ]; check "la versión instalada es $VERSION" $?
+[ "$PLIST_VER" = "$VERSION" ]; check "the installed version is $VERSION" $?
 
-# Lo que justifica todo el script: sin cuarentena, sin paso de Gatekeeper.
+# What justifies the whole script: no quarantine, no Gatekeeper detour.
 ! xattr -p com.apple.quarantine "$YAPPER_APP" >/dev/null 2>&1
-check "la copia instalada no trae cuarentena" $?
+check "the installed copy carries no quarantine" $?
 
-# ---- 2. un zip alterado tiene que ser rechazado ----
+# ---- 2. a tampered zip has to be rejected ----
 echo "== zip alterado"
 printf 'x' >> "$WORK/feed/$ZIP"
 BEFORE="$(defaults read "$YAPPER_APP/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null)"
 bash "$ROOT/mac/install.sh" >"$WORK/tampered.log" 2>&1; rc=$?
-[ "$rc" -ne 0 ]; check "el instalador falla con checksum distinto" $?
-grep -qi "checksum mismatch" "$WORK/tampered.log"; check "y dice por qué" $?
+[ "$rc" -ne 0 ]; check "the installer fails on a different checksum" $?
+grep -qi "checksum mismatch" "$WORK/tampered.log"; check "and says why" $?
 AFTER="$(defaults read "$YAPPER_APP/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null)"
-[ "$BEFORE" = "$AFTER" ]; check "la copia que ya estaba quedó intacta" $?
+[ "$BEFORE" = "$AFTER" ]; check "the copy that was already there is untouched" $?
 
 # ---- 3. reinstalar encima ----
 echo "== reinstalar encima"
 cp "$ROOT/dist/$ZIP" "$WORK/feed/$ZIP"
 bash "$ROOT/mac/install.sh" >"$WORK/reinstall.log" 2>&1; rc=$?
-check "reinstalar sobre una copia existente funciona" "$rc"
-grep -qi "replacing it" "$WORK/reinstall.log"; check "y avisa que reemplaza" $?
+check "reinstalling over an existing copy works" "$rc"
+grep -qi "replacing it" "$WORK/reinstall.log"; check "and says it is replacing it" $?
 
 echo ""
 [ "$fails" -eq 0 ] && echo "PASS" || echo "$fails fallos"

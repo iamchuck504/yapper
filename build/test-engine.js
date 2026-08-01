@@ -33,13 +33,13 @@ function fail(msg) { console.log('FAIL  ' + msg); process.exit(1); }
     const alive = () => String(spawnSync('pgrep', ['-f', engine.serverPath()],
       { encoding: 'utf8' }).stdout || '').split('\n').filter(s => s.trim()).length;
     const before = alive();
-    if (before === 0) fail('no pude crear un servidor huérfano para la prueba');
+    if (before === 0) fail('could not create an orphaned server for the test');
 
     await engine.start('base');
     const after = alive();
     // exactly one: ours. The orphan is gone and we did not kill ourselves.
-    if (after !== 1) fail(`quedaron ${after} servidores tras arrancar (había ${before})`);
-    console.log(`huérfanos   : ${before} antes, ${after} después (el nuestro)`);
+    if (after !== 1) fail(`${after} servers were left after starting (there were ${before})`);
+    console.log(`orphans     : ${before} before, ${after} after (ours)`);
     await engine.stop();
   }
 

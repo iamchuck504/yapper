@@ -17,7 +17,7 @@ const { app } = require('electron');
 const { sandbox, logger, mainWindow, watchdog } = require('./harness');
 
 if (process.platform !== 'darwin') {
-  console.log('skip  esta prueba es de macOS');
+  console.log('skip  this test is macOS-only');
   process.exit(0);
 }
 
@@ -64,36 +64,36 @@ app.whenReady().then(async () => {
     await pause(2500);                     // let the helper come up
 
     const resting = await meterSpread(win);
-    say(`  · en reposo: el trazo ocupa ${resting}% del alto`);
+    say(`  · at rest: the trace spans ${resting}% of the height`);
 
     // Real audio, played out loud: this is the far side of a call.
     const player = spawn('afplay', [path.join(__dirname, 'calibration.wav')]);
     await pause(1800);
     const during = await meterSpread(win);
-    say(`  · con audio sonando: ${during}% del alto`);
+    say(`  · with audio playing: ${during}% of the height`);
     await new Promise(r => player.on('close', r));
 
-    // Normalizado, así que una señal real llena el lienzo venga fuerte o
-    // suave — el nivel del tap depende de qué más suene en la máquina, y un
-    // umbral absoluto sobre el volumen de una fuente concreta no es una
-    // propiedad de esta app.
-    // Si el tap no recibió nada en esta ventana —la máquina puede estar sin
-    // salida de audio, o el clip no llegó a sonar— no hay nada que medir, y
-    // afirmarlo igual convierte el test en una moneda al aire.
+    // Normalised, so a real signal fills the canvas whether it arrives loud or
+    // quiet — the tap's level depends on whatever else the machine is playing,
+    // and an absolute threshold on one source's volume is not a property of
+    // this app.
+    // If the tap received nothing in this window — the machine may have no
+    // audio output, or the clip may never have sounded — there is nothing to
+    // measure, and asserting anyway turns the test into a coin toss.
     const captured = during > 15;
-    if (!captured) say('  · sin audio capturado en esta corrida: se omiten las medidas de nivel');
+    if (!captured) say('  · no audio captured this run: the level measurements are skipped');
     if (captured) {
-      check('el medidor de System se mueve con audio real', during > 50,
+      check('the System meter moves with real audio', during > 50,
         `sonando ${during}%, reposo ${resting}%`);
     }
-    // El "reposo" de arriba depende de la máquina: si hay música o una pestaña
-    // sonando, el tap la capta y el trazo sube con razón. Para probar el piso
-    // hace falta silencio de verdad, así que se fabrica.
+    // The "at rest" above depends on the machine: if music or a tab is playing,
+    // the tap catches it and the trace rises, rightly. Testing the floor needs
+    // genuine silence, so it is manufactured.
     await $(`sysRing.fill(128); sysWritten = 1024; sysCursor = 0; true`);
     await pause(200);
     const silent = await meterSpread(win);
-    say(`  · con silencio fabricado: ${silent}% del alto`);
-    check('el silencio no se amplifica hasta parecer señal', silent < 15, `${silent}%`);
+    say(`  · with manufactured silence: ${silent}% of the height`);
+    check('silence is not amplified until it looks like signal', silent < 15, `${silent}%`);
 
     // The slider has to reach the process that does the mixing, or it is a
     // control that moves nothing — which is what it was.
@@ -102,27 +102,27 @@ app.whenReady().then(async () => {
       s.value = '2'; s.dispatchEvent(new Event('input'));
       return s.value;
     })()`);
-    check('el deslizador de volumen llega al mezclador', reached, '2');
+    check('the gain slider reaches the mixer', reached, '2');
 
-    // Y se ve: normalizar da visibilidad, multiplicar por la ganancia elegida
-    // devuelve al deslizador el efecto que la normalización le quitaba.
+    // And it shows: normalising buys visibility, multiplying by the chosen gain
+    // gives the slider back the effect normalising took from it.
     const atGain = async g => {
       await $(`(()=>{const s=document.getElementById('gain-sys'); s.value='${g}'; s.dispatchEvent(new Event('input'));})()`);
       await pause(500);
       return meterSpread(win);
     };
     if (captured) {
-      // Con audio sonando, o no hay trazo que encoger: medir la ganancia sobre
-      // el silencio da el mismo piso en las dos posiciones y el test se
-      // convierte en una afirmación sobre nada.
+      // With audio playing, or there is no trace to shrink: measuring gain over
+      // silence gives the same floor at both positions and the test becomes an
+      // assertion about nothing.
       const again = spawn('afplay', [path.join(__dirname, 'calibration.wav')]);
       await pause(1200);
       const quiet = await atGain('0.25');
       const loud = await atGain('1');
       again.kill();
       await new Promise(r => again.on('close', r));
-      say(`  · ganancia 0.25x -> ${quiet}% | 1x -> ${loud}%`);
-      check('bajar la ganancia encoge el trazo visiblemente', loud > quiet * 1.8,
+      say(`  · gain 0.25x -> ${quiet}% | 1x -> ${loud}%`);
+      check('turning the gain down shrinks the trace visibly', loud > quiet * 1.8,
         `0.25x ${quiet}%, 1x ${loud}%`);
     }
 
@@ -131,14 +131,14 @@ app.whenReady().then(async () => {
     // The canvas keeps whatever was drawn last — the loop stops with the
     // recording — so what matters is that the buffer behind it was emptied,
     // and the next recording does not open on the last one's audio.
-    // stopAndProcess vacía el anillo; en una corrida sin captura nunca se llenó.
-    check('al parar se vacía el búfer, no queda audio de la reunión anterior',
+    // stopAndProcess empties the ring; on a run with no capture it never filled.
+    check('stopping empties the buffer, no audio of the previous meeting is left',
       await $('sysWritten') === 0);
   } catch (err) {
     fails++;
     say('FAIL  ' + (err.stack || err.message));
   }
   clearTimeout(timer);
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 });

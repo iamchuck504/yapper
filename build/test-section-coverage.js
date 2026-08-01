@@ -41,7 +41,7 @@ const headings = [...setsBlock.matchAll(/(?:^|`)##\s+(.+)$/gm)].map(m => m[1].tr
 const unique = [...new Set(headings)];
 const orphans = unique.filter(h => !rules.some(r => r.match.test(h)));
 check('every section of every style has a colour rule',
-  orphans.length === 0, `sin regla: ${orphans.join(' | ')}`);
+  orphans.length === 0, `no rule: ${orphans.join(' | ')}`);
 console.log(`      (${unique.length} distinct sections across ${promptStyles.length} styles)`);
 
 // --- and no rule is dead weight ---
@@ -54,5 +54,5 @@ check('no defined style is left without a button',
   promptStyles.every(s => pillStyles.includes(s)),
   `no button: ${promptStyles.filter(s => !pillStyles.includes(s)).join(', ')}`);
 
-console.log(fails ? `\n${fails} fallos` : '\nPASS');
+console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

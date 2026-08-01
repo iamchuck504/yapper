@@ -18,7 +18,7 @@ const path = require('path');
 const { sandbox, logger, mainWindow, watchdog } = require('./harness');
 
 if (process.platform !== 'darwin') {
-  console.log('skip  estos permisos son de macOS');
+  console.log('skip  these permissions are macOS-only');
   process.exit(0);
 }
 
@@ -44,10 +44,10 @@ app.whenReady().then(async () => {
   try {
     require('../main.js');
 
-    // Muestreado desde antes de que la ventana esté lista. Con el permiso ya
-    // concedido el sondeo termina en cuanto el helper dice "capturing" —
-    // cientos de milisegundos — y el harness tarda más que eso en devolver la
-    // ventana, así que cualquier lectura posterior llegaría tarde siempre.
+    // Sampled from before the window is ready. With the permission already
+    // granted the probe ends as soon as the helper says "capturing" — hundreds
+    // of milliseconds — and the harness takes longer than that to hand back the
+    // window, so any later reading would always arrive too late.
     let seen = false;
     const watching = setInterval(() => { if (running() >= 1) seen = true; }, 40);
 
@@ -55,17 +55,17 @@ app.whenReady().then(async () => {
     await pause(3500);
     clearInterval(watching);
 
-    check('sondea el permiso de audio al arrancar', seen, 'nunca apareció un helper');
-    // Suelta el tap: un helper que sigue vivo captura todo lo que suena en la
-    // máquina, sin ventana y sin forma de notarlo.
-    check('y lo suelta, sin dejar un tap abierto', running() === 0, `quedan ${running()}`);
+    check('probes the audio permission at launch', seen, 'a helper never appeared');
+    // It lets the tap go: a helper left alive captures everything the machine
+    // plays, with no window and no way to notice.
+    check('and lets it go, leaving no tap open', running() === 0, `${running()} left`);
 
-    // Sin bandera de "ya preguntado": macOS tira estos permisos cuando cambia
-    // la identidad de código de la app, que con firma ad-hoc es cada build. Una
-    // bandera por versión decía que ya se había preguntado mientras el permiso
-    // llevaba seis reinstalaciones borrado, y la app volvía a preguntar a media
-    // reunión — justo lo que esto existe para evitar.
-    check('no se apoya en una bandera que la identidad de código invalida',
+    // No "already asked" flag: macOS drops these permissions when the app's
+    // code identity changes, which with an ad-hoc signature is every build. A
+    // per-version flag claimed it had already asked while the permission had
+    // been wiped six reinstalls ago, and the app went back to asking mid-meeting
+    // — exactly what this exists to prevent.
+    check('does not lean on a flag that code identity invalidates',
       settings().permissionsAskedBy === undefined,
       JSON.stringify(settings().permissionsAskedBy));
 
@@ -73,14 +73,14 @@ app.whenReady().then(async () => {
     const $ = js => win.webContents.executeJavaScript(js, true);
     await $('startRecording()');
     await pause(2500);
-    check('grabar sigue funcionando después', await $('recording'));
-    check('y la grabación tiene su propio helper', running() >= 1, `helpers: ${running()}`);
+    check('recording still works afterwards', await $('recording'));
+    check('and the recording has a helper of its own', running() >= 1, `helpers: ${running()}`);
     await $('stopAndProcess()').catch(() => { });
   } catch (err) {
     fails++;
     say('FAIL  ' + (err.stack || err.message));
   }
   clearTimeout(timer);
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 });

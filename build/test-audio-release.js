@@ -67,7 +67,7 @@ app.whenReady().then(async () => {
 
   // and the meeting still reads correctly with no audio
   const loaded = await $(`window.yapper.loadMeeting(${JSON.stringify(a)})`);
-  check('the meeting still opens without audio', loaded.transcript.length > 50, 'sin transcript');
+  check('the meeting still opens without audio', loaded.transcript.length > 50, 'no transcript');
   check('and knows the recording is gone', loaded.hasRecording === false, String(loaded.hasRecording));
   await $('refreshMeetingList()');
   await new Promise(r => setTimeout(r, 400));
@@ -87,7 +87,7 @@ app.whenReady().then(async () => {
   await engine.stop();
   const err = await within(
     $(`window.yapper.transcribe(${JSON.stringify(b)}).then(() => 'ok', e => 'err:' + e.message)`),
-    'transcribir sin modelo', 60000);
+    'transcribe with no model', 60000);
   fs.renameSync(hidden, model);
   say(`  ${String(err).slice(0, 90)}`);
   check('fails as it should', String(err).startsWith('err:'), String(err));
@@ -194,6 +194,6 @@ app.whenReady().then(async () => {
   const after = await $('window.yapper.heldAudio()');
   check('nothing is held any more', after.count === 0, JSON.stringify(after));
 
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { say('FAIL ' + (e.stack || e.message)); app.exit(1); });

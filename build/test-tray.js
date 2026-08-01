@@ -19,7 +19,7 @@ const fs = require('fs');
 const { sandbox, logger, mainWindow, watchdog } = require('./harness');
 
 if (process.platform !== 'darwin') {
-  console.log('skip  el item de barra de menús es de macOS');
+  console.log('skip  the menu bar item is macOS-only');
   process.exit(0);
 }
 
@@ -41,12 +41,12 @@ app.whenReady().then(async () => {
     const icon1x = path.join(__dirname, 'yapper-tray-Template.png');
     const icon2x = path.join(__dirname, 'yapper-tray-Template@2x.png');
 
-    check('el icono template existe', fs.existsSync(icon1x));
-    check('y el @2x que dibujan las pantallas Retina', fs.existsSync(icon2x));
+    check('the template icon exists', fs.existsSync(icon1x));
+    check('and the @2x that Retina screens draw', fs.existsSync(icon2x));
 
     const img = nativeImage.createFromPath(icon1x);
-    check('el icono carga como imagen', !img.isEmpty());
-    check('a la altura que pide la barra de menús', img.getSize(), { width: 18, height: 18 });
+    check('the icon loads as an image', !img.isEmpty());
+    check('at the height the menu bar asks for', img.getSize(), { width: 18, height: 18 });
 
     // A template is carried entirely by its alpha: black artwork, transparent
     // tile. If the amber ever survived into it, the menu bar would show a
@@ -59,8 +59,8 @@ app.whenReady().then(async () => {
         if (px[i] > 24 || px[i + 1] > 24 || px[i + 2] > 24) coloured++;
       }
     }
-    check('tiene marca visible', opaque > 30);
-    check('y ningún píxel de color: es artwork negro sobre alfa', coloured, 0);
+    check('it has a visible mark', opaque > 30);
+    check('and not one coloured pixel: it is black artwork on alpha', coloured, 0);
 
     // The rest is the app: the tray follows the renderer's recording state, so
     // a real recording is what moves it.
@@ -70,17 +70,17 @@ app.whenReady().then(async () => {
 
     await win.webContents.executeJavaScript('startRecording()', true);
     await pause(2500);
-    check('grabando de verdad', await win.webContents.executeJavaScript('recording', true));
+    check('genuinely recording', await win.webContents.executeJavaScript('recording', true));
 
     await win.webContents.executeJavaScript('stopAndProcess()', true).catch(() => { });
     await pause(2000);
-    check('y el estado vuelve al parar',
+    check('and the state returns on stopping',
       await win.webContents.executeJavaScript('recording', true), false);
   } catch (err) {
     fails++;
     say('FAIL  ' + (err.stack || err.message));
   }
   clearTimeout(timer);
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 });

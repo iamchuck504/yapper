@@ -67,7 +67,7 @@ app.whenReady().then(async () => {
 
   say(await $(`JSON.stringify({
     recording,
-    ctxState: audioCtx ? audioCtx.state : '(sin audioCtx)',
+    ctxState: audioCtx ? audioCtx.state : '(no audioCtx)',
     sysTracks: sysStream ? sysStream.getAudioTracks().length : -1,
     hasSysAnalyser: !!analysers.sys,
     hasMicAnalyser: !!analysers.mic

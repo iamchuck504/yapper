@@ -234,5 +234,5 @@ check('an empty answer declares itself empty',
 check('and so does a whole answer with no citations',
   digest.parseWeekly('## Threads\n- We talked about many things.\n', week).empty, true);
 
-console.log(fails ? `\n${fails} fallos` : '\nPASS');
+console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

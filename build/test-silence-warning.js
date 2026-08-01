@@ -68,9 +68,9 @@ app.whenReady().then(async () => {
   // source — which is every macOS recording without Screen Recording granted.
   const SILENCE = /(microphone has captured only silence|nothing but silence has been captured)/i;
 
-  check('grabando', await $('recording'), 'no arrancó');
+  check('recording', await $('recording'), 'did not start');
   const early = await status();
-  check('no acusa al micrófono antes de tiempo', !/microphone has captured/i.test(early), early);
+  check('does not accuse the microphone too early', !/microphone has captured/i.test(early), early);
 
   // the watchdog speaks after ~6 s of exact zeros
   const warned = await within((async () => {
@@ -80,15 +80,15 @@ app.whenReady().then(async () => {
       await new Promise(r => setTimeout(r, 500));
     }
     return '';
-  })(), 'esperar el aviso', 30000);
+  })(), 'wait for the warning', 30000);
   say(`  aviso: "${warned}"`);
-  check('un micrófono en ceros exactos se dice en pantalla', !!warned, 'nunca avisó');
+  check('a microphone on exact zeros is said on screen', !!warned, 'it never warned');
   // The wording depends on whether there was a second source to fall back on.
   // With system audio in the mix the microphone is the only suspect and it is
   // named; on macOS, where the mix is the microphone alone, the message covers
   // both ends of the cable. Either way it has to point at the hardware.
-  check('señala el hardware, no un error abstracto', /headset|microphone/i.test(warned), warned);
-  check('la grabación sigue — avisa, no aborta', await $('recording'), 'se detuvo');
+  check('it points at the hardware, not an abstract error', /headset|microphone/i.test(warned), warned);
+  check('the recording continues — it warns, it does not abort', await $('recording'), 'it stopped');
 
   // the device wakes up; the warning must not outlive the problem
   await $('__wake()');
@@ -105,13 +105,13 @@ app.whenReady().then(async () => {
       await new Promise(r => setTimeout(r, 300));
     }
     return false;
-  })(), 'esperar que se limpie', 15000);
+  })(), 'wait for it to clear', 15000);
   if (woke > 0) {
-    check('cuando el mic despierta, el aviso se va solo', cleared, await status());
+    check('when the mic wakes up, the warning clears itself', cleared, await status());
   } else {
-    say('skip  el mock no consiguió devolverle señal al stream, así que no hay despertar que comprobar');
+    say('skip  the mock could not get signal back into the stream, so there is no waking up to check');
   }
 
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { say('FAIL ' + (e.stack || e.message)); app.exit(1); });

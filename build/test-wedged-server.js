@@ -46,27 +46,27 @@ wedged.listen(0, '127.0.0.1', async () => {
   };
 
   try {
-    // ---- el plazo sale de lo que la máquina midió, no de un múltiplo a ciegas ----
-    // La primera versión daba cuatro veces tiempo real, que sonaba prudente y
-    // era inútil: una ventana de dos minutos tarda ~3 s en una máquina
-    // calibrada y recibía ocho minutos. Un trabón debe costar segundos.
+    // ---- the deadline comes from what the machine measured, not a blind multiple ----
+    // The first version gave four times real time, which sounded prudent and
+    // was useless: a two-minute window takes ~3 s on a calibrated machine and
+    // was handed eight minutes. A wedge should cost seconds.
     const wav = n => Buffer.alloc(44 + n * 32000);
 
-    engine.setPace(0);                       // sin medición todavía
+    engine.setPace(0);                       // nothing measured yet
     const blind = engine.deadlineFor(wav(120), 'small');
-    check('sin medir cae al presupuesto flojo', blind, 480000);
+    check('unmeasured, it falls back to the loose budget', blind, 480000);
 
-    engine.setPace(111);                     // lo que midió esta Mac
+    engine.setPace(111);                     // what this Mac measured
     const cold = engine.deadlineFor(wav(120), 'small');
-    check('medido, el plazo se aprieta mucho', cold < blind / 10);
-    check('pero deja margen de sobra sobre los ~3 s reales', cold > 20000);
+    check('measured, the deadline tightens a great deal', cold < blind / 10);
+    check('but leaves room to spare over the real ~3 s', cold > 20000);
 
-    // `base` cuesta menos que `small`, y el plazo lo refleja
-    check('un modelo más barato pide menos plazo',
+    // `base` costs less than `small`, and the deadline reflects it
+    check('a cheaper model asks for less time',
       engine.deadlineFor(wav(120), 'base') < cold);
 
-    // y escala con el audio: una ventana viva no es una final
-    check('diez segundos de audio piden menos que ciento veinte',
+    // and it scales with the audio: a live window is not a final one
+    check('ten seconds of audio ask less than a hundred and twenty',
       engine.deadlineFor(wav(10), 'small') < engine.deadlineFor(wav(120), 'small'));
 
     // The floor is 60 s and the budget scales with the audio, so a short clip
@@ -80,38 +80,38 @@ wedged.listen(0, '127.0.0.1', async () => {
     catch (e) { err = e; }
     const waited = Date.now() - t;
 
-    check('la petición termina en vez de esperar para siempre', !!err);
-    check('y dice que expiró, no algo genérico', /timed out/i.test(err ? err.message : ''));
-    check('dentro del plazo, no mucho después', waited < 4000);
-    check('el servidor sí llegó a recibirla', hits >= 1);
+    check('the request ends instead of waiting forever', !!err);
+    check('and says it timed out, not something generic', /timed out/i.test(err ? err.message : ''));
+    check('within the deadline, not long after it', waited < 4000);
+    check('the server did receive it', hits >= 1);
 
     // The message has to be one the file transcription recognises, or the
     // retry that restarts the server never runs and a single wedged window
     // takes the whole transcript with it.
     const retryable = /ECONNRESET|ECONNREFUSED|socket hang up|not running|timed out/i;
-    check('el mensaje dispara el reintento que reinicia el motor',
+    check('the message triggers the retry that restarts the engine',
       retryable.test(err ? err.message : ''));
 
     // And the wedged server is let go, so the next attempt gets a fresh one
     // instead of queueing behind a corpse.
-    check('el motor colgado se da por muerto', engine.loaded(), null);
-    // ---- y lo que de verdad importa: ¿sobrevive un transcript real? ----
-    // Un motor que se traba a mitad no debe costar la reunión entera. El
-    // reintento por ventana ya reiniciaba el servidor ante caídas de conexión;
-    // lo que faltaba era que un silencio contara como caída.
+    check('the wedged engine is given up for dead', engine.loaded(), null);
+    // ---- and what actually matters: does a real transcript survive? ----
+    // An engine that wedges halfway should not cost the whole meeting. The
+    // per-window retry already restarted the server on a dropped connection;
+    // what was missing was silence counting as a drop.
     const real = path.join(os.tmpdir(), 'yapper-wedge-e2e.wav');
     if (fs.existsSync(path.join(__dirname, 'calibration.wav'))) {
       const src = fs.readFileSync(path.join(__dirname, 'calibration.wav'));
       fs.writeFileSync(real, src);
-      engine.__pointAtServer(null, 0);        // suelta el falso
+      engine.__pointAtServer(null, 0);        // let the fake one go
       engine.__setDeadline(0);                // presupuesto normal otra vez
 
       if (engine.isInstalled() && engine.hasModel('base')) {
         const lines = await engine.transcribeFile(real, { model: 'base', language: 'en' });
-        check('con el motor real, un transcript sale completo', lines.length > 0);
+        check('with the real engine, a transcript comes out whole', lines.length > 0);
         await engine.stop();
       } else {
-        console.log('skip  el motor real no está instalado en este checkout');
+        console.log('skip  the real engine is not installed in this checkout');
       }
     }
   } catch (e) {
@@ -120,6 +120,6 @@ wedged.listen(0, '127.0.0.1', async () => {
   }
 
   wedged.close();
-  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
   process.exit(fails ? 1 : 0);
 });

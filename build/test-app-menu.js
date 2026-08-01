@@ -12,7 +12,7 @@ const { app, Menu } = require('electron');
 const { sandbox, logger, mainWindow, watchdog } = require('./harness');
 
 if (process.platform !== 'darwin') {
-  console.log('skip  el menú de aplicación es de macOS');
+  console.log('skip  the application menu is macOS-only');
   process.exit(0);
 }
 
@@ -40,40 +40,40 @@ app.whenReady().then(async () => {
     const win = await mainWindow();
     await pause(600);
 
-    check('hay un menú de aplicación', !!menu());
-    check('con el nombre en mayúscula, no el de package.json', !!top('Yapper'),
+    check('there is an application menu', !!menu());
+    check('with the name capitalised, not package.json\'s', !!top('Yapper'),
       menu() ? menu().items.map(i => i.label).join(', ') : '');
-    check('y los menús que espera cualquier app de macOS',
+    check('and the menus any macOS app is expected to have',
       ['File', 'Edit', 'View', 'Window', 'Help'].every(l => !!top(l)));
 
     // Editing roles: without them the text fields cannot cut, copy or paste
     // by keyboard, which people notice immediately in a title field.
-    check('Edit trae los roles de edición',
+    check('Edit carries the editing roles',
       ['Cut', 'Copy', 'Paste', 'Select All'].every(l => !!under('Edit', l)));
 
-    check('File ofrece las dos acciones que importan',
+    check('File offers the two actions that matter',
       !!under('File', 'New meeting') && !!under('File', 'Stop recording'));
-    check('en reposo se puede empezar, no parar',
+    check('at rest you can start, not stop',
       under('File', 'New meeting').enabled === true
       && under('File', 'Stop recording').enabled === false);
 
     const $ = js => win.webContents.executeJavaScript(js, true);
     await $('startRecording()');
     await pause(2500);
-    check('grabando se invierte: parar sí, empezar no',
+    check('recording it inverts: stop yes, start no',
       under('File', 'New meeting').enabled === false
       && under('File', 'Stop recording').enabled === true);
 
     await $('stopAndProcess()').catch(() => { });
     await pause(1500);
-    check('y al parar vuelve', under('File', 'New meeting').enabled === true);
+    check('and on stopping it comes back', under('File', 'New meeting').enabled === true);
 
     // Reload and the developer tools ship to developers only: a stray Cmd+R
     // during a meeting would reload the renderer with a recording in it.
     const devItems = ['Reload', 'Toggle Developer Tools'].filter(l => !!under('View', l));
     check(app.isPackaged
-      ? 'empaquetada, View no expone herramientas de desarrollo'
-      : 'sin empaquetar, View sí las trae (esta corrida)',
+      ? 'packaged, View exposes no developer tools'
+      : 'unpackaged, View does carry them (this run)',
       app.isPackaged ? devItems.length === 0 : devItems.length === 2,
       devItems.join(', '));
   } catch (err) {
@@ -81,6 +81,6 @@ app.whenReady().then(async () => {
     say('FAIL  ' + (err.stack || err.message));
   }
   clearTimeout(timer);
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 });

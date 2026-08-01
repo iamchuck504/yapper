@@ -24,7 +24,7 @@ function say(line) {
   console.log(line);
   try { fs.appendFileSync(LOG, line + '\n'); } catch { /* nothing to do */ }
 }
-console.log(`progreso en vivo: ${LOG}`);
+console.log(`live progress: ${LOG}`);
 
 let fails = 0;
 function check(name, ok, detail) {
@@ -37,7 +37,7 @@ function step(label) { say(`  · ${label}`); }
 // that never settles. Without this the run just hangs, which is indistinguishable
 // from being slow, so the whole thing is on a clock.
 const watchdog = setTimeout(() => {
-  say('FAIL  la prueba se colgó: algo no terminó de resolverse');
+  say('FAIL  the test hung: something never finished resolving');
   app.exit(1);
 }, 120000);
 
@@ -45,7 +45,7 @@ const watchdog = setTimeout(() => {
 function within(promise, label, ms = 25000) {
   return Promise.race([
     promise,
-    new Promise((_, rej) => setTimeout(() => rej(new Error(`"${label}" no respondió en ${ms / 1000} s`)), ms))
+    new Promise((_, rej) => setTimeout(() => rej(new Error(`"${label}" did not answer in ${ms / 1000} s`)), ms))
   ]);
 }
 
@@ -67,8 +67,8 @@ app.whenReady().then(async () => {
   })`);
 
   const before = await state();
-  check('arranca sin grabar', before.recording === false, JSON.stringify(before));
-  check('arranca en Today, no en la vista de grabar',
+  check('starts without recording', before.recording === false, JSON.stringify(before));
+  check('starts on Today, not on the record view',
     before.onHome && !before.onRecord, JSON.stringify(before));
 
   // --- 1. screen capture refused ---
@@ -83,31 +83,31 @@ app.whenReady().then(async () => {
     window.__realGDM = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices);
     navigator.mediaDevices.getDisplayMedia = () => Promise.reject(new Error('Permission denied by the system'));
   })()`);
-  await within($('startRecording()'), 'arranque con permiso denegado');
+  await within($('startRecording()'), 'start with the permission denied');
   await new Promise(r => setTimeout(r, MAC ? 1200 : 600));
 
   let s = await state();
   if (MAC) {
-    check('en macOS la pantalla denegada no impide grabar', s.recording === true, JSON.stringify(s));
-    check('y no se queja de un permiso que no necesita',
+    check('on macOS a denied screen does not stop recording', s.recording === true, JSON.stringify(s));
+    check('and does not complain about a permission it does not need',
       !/Permission denied/.test(s.error || ''), String(s.error));
     // leave the app idle again for the cases below
-    await within($('stopAndProcess()'), 'parar la grabación de macOS').catch(() => { });
+    await within($('stopAndProcess()'), 'stop the macOS recording').catch(() => { });
     await new Promise(r => setTimeout(r, 1500));
     try { fs.rmSync(path.join(ROOT, 'Meetings'), { recursive: true, force: true }); } catch { }
     fs.mkdirSync(path.join(ROOT, 'Meetings'), { recursive: true });
     s = await state();
-    check('y después vuelve a estar lista', s.recording === false, JSON.stringify(s));
+    check('and afterwards it is ready again', s.recording === false, JSON.stringify(s));
   } else {
-    check('un permiso denegado no deja la app grabando', s.recording === false, JSON.stringify(s));
-    // Grabar puede empezar desde tres lados; la vista tiene que ser la de grabar
-    // sin depender de quién llamó, o el error se muestra en una pantalla que no se ve.
-    check('arrancar una grabación se lleva la vista consigo',
+    check('a denied permission does not leave the app recording', s.recording === false, JSON.stringify(s));
+    // Recording can start from three places; the view has to be the record one
+    // whoever called, or the error shows on a screen nobody is looking at.
+    check('starting a recording brings the view with it',
       s.onRecord && !s.onHome, JSON.stringify(s));
-    check('lo explica en pantalla', /Permission denied/.test(s.error || ''), String(s.error));
-    check('el botón de grabar sigue disponible',
+    check('it explains it on screen', /Permission denied/.test(s.error || ''), String(s.error));
+    check('the record button is still available',
       !s.recordBtnHidden && !s.recordBtnDisabled, JSON.stringify(s));
-    check('no dejó carpeta de reunión huérfana',
+    check('left no orphaned meeting folder',
       fs.readdirSync(path.join(ROOT, 'Meetings')).length === 0,
       fs.readdirSync(path.join(ROOT, 'Meetings')).join(', '));
   }
@@ -119,7 +119,7 @@ app.whenReady().then(async () => {
     window.__realTap = startPcmTap;
     startPcmTap = () => { throw new Error('the audio device disappeared'); };
   })()`);
-  await within($('startRecording()'), 'arranque que falla a mitad');
+  await within($('startRecording()'), 'a start that fails halfway');
   // abortRecording sets the flag first and explains itself last, after closing
   // the file — which can take a moment. Waiting a fixed 800 ms reads the state
   // in between and calls a slow message a missing one, so wait for the message.
@@ -128,20 +128,20 @@ app.whenReady().then(async () => {
     await new Promise(r => setTimeout(r, 250));
     s = await state();
   }
-  check('un fallo a mitad de arranque tampoco deja la app grabando',
+  check('a failure halfway through starting leaves it not recording either',
     s.recording === false, JSON.stringify(s));
   check('y lo explica', /audio device disappeared/.test(s.error || ''), String(s.error));
-  check('el indicador de grabación no se queda encendido', !s.recordBtnHidden, JSON.stringify(s));
+  check('the recording indicator is not left switched on', !s.recordBtnHidden, JSON.stringify(s));
 
   // the folder was opened before the failure: it must be closed, not left half written
   const folders = fs.readdirSync(path.join(ROOT, 'Meetings'));
-  check('la reunión a medias quedó cerrada', folders.length === 1, folders.join(', '));
+  check('the half meeting was closed', folders.length === 1, folders.join(', '));
   if (folders.length === 1) {
     const wav = path.join(ROOT, 'Meetings', folders[0], 'recording.wav');
-    check('su WAV existe y tiene cabecera válida',
+    check('its WAV exists and has a valid header',
       fs.existsSync(wav) && fs.readFileSync(wav).toString('ascii', 0, 4) === 'RIFF',
       fs.existsSync(wav) ? 'cabecera rara' : 'no existe');
-    check('se ve como grabación vacía, no como reunión buena',
+    check('it reads as an empty recording, not a good meeting',
       fs.statSync(wav).size <= 44, `${fs.statSync(wav).size} bytes`);
   }
 
@@ -150,12 +150,12 @@ app.whenReady().then(async () => {
     navigator.mediaDevices.getDisplayMedia = window.__realGDM; })()`);
   const canStart = await $(`(() => {
     // the guard is what would silently block a retry
-    if (recording) return 'la app sigue creyendo que graba';
+    if (recording) return 'the app still believes it is recording';
     return 'ok';
   })()`);
-  check('se puede volver a grabar', canStart === 'ok', String(canStart));
+  check('recording can start again', canStart === 'ok', String(canStart));
 
   clearTimeout(watchdog);
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { console.log('FAIL', e.message); app.exit(1); });

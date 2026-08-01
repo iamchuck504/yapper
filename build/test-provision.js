@@ -144,43 +144,43 @@ server.listen(0, '127.0.0.1', async () => {
     // ---- a clean install, CPU only ----
     const A = path.join(ROOT, 'homeA');
     check('instala CPU + modelos', await provision.run({ ...opts(A), gpu: false }));
-    check('el server quedó donde el engine lo busca',
+    check('the server landed where the engine looks for it',
       fs.readFileSync(path.join(A, 'bin', 'win-x64', 'whisper-server.exe'), 'utf8'), 'fake cpu server');
-    check('la dll vino con él',
+    check('the dll came with it',
       fs.existsSync(path.join(A, 'bin', 'win-x64', 'whisper.dll')));
-    check('los dos modelos', ['base', 'small'].every(m =>
+    check('both models', ['base', 'small'].every(m =>
       fs.existsSync(path.join(A, 'models', `ggml-${m}.bin`))));
-    check('el redirect del CDN se siguió', hits['/cdn/ggml-base.bin'], 1);
-    check('no descargó el build GPU sin GPU', hits['/engine/whisper-cublas-12.4.0-bin-x64.zip'] || 0, 0);
-    check('la carpeta temporal no quedó tirada', fs.existsSync(path.join(A, 'tmp')), false);
-    check('el progreso llegó a "listo"',
+    check('the CDN redirect was followed', hits['/cdn/ggml-base.bin'], 1);
+    check('did not download the GPU build with no GPU', hits['/engine/whisper-cublas-12.4.0-bin-x64.zip'] || 0, 0);
+    check('the temp folder was not left behind', fs.existsSync(path.join(A, 'tmp')), false);
+    check('progress reached "ready"',
       progressLog.some(p => /engine ready/i.test(p.label)));
-    check('y trae paso y total', progressLog.every(p => p.steps === 3 && p.step >= 0 && p.step <= 3));
+    check('and carries step and total', progressLog.every(p => p.steps === 3 && p.step >= 0 && p.step <= 3));
 
-    // ---- grabar se abre en cuanto está el motor + el primer modelo ----
+    // ---- recording opens as soon as the engine and the first model are in ----
     const iUsable = progressLog.findIndex(p => p.usable === true);
     const iSmallDone = progressLog.findIndex(p => /"small" model — done/.test(p.label || ''));
-    check('avisa que ya se puede grabar', iUsable >= 0);
-    check('y lo avisa antes de que small termine', iUsable < iSmallDone);
-    check('una sola vez', progressLog.filter(p => p.usable === true).length, 1);
+    check('says recording is possible', iUsable >= 0);
+    check('and says it before small finishes', iUsable < iSmallDone);
+    check('exactly once', progressLog.filter(p => p.usable === true).length, 1);
 
     // ---- run it again: nothing re-downloads ----
     const before = { ...hits };
-    check('correrlo de nuevo es instantáneo', await provision.run({ ...opts(A), gpu: false }));
-    check('y no vuelve a bajar nada', hits, before);
+    check('running it again is instant', await provision.run({ ...opts(A), gpu: false }));
+    check('and downloads nothing a second time', hits, before);
 
     // ---- with GPU: the nested zip lands in the gpu dir ----
     const B = path.join(ROOT, 'homeB');
     progressLog = [];
-    check('con GPU instala ambos builds', await provision.run({ ...opts(B), gpu: true }));
-    check('el binario GPU quedó en su lugar, aunque el zip lo anide',
+    check('with a GPU it installs both builds', await provision.run({ ...opts(B), gpu: true }));
+    check('the GPU binary landed in place, however the zip nests it',
       fs.readFileSync(path.join(B, 'bin', 'win-x64-gpu', 'whisper-server.exe'), 'utf8'), 'fake gpu server');
-    // 646 MB que dan velocidad, no capacidad: van al final, detrás de todo lo
-    // que hace falta para grabar
-    check('el build GPU se baja después de los modelos',
+    // 646 MB that buy speed, not capability: they go last, behind everything
+    // needed to record at all
+    check('the GPU build downloads after the models',
       progressLog.findIndex(p => /GPU acceleration/.test(p.label || ''))
       > progressLog.findIndex(p => /"small" model — done/.test(p.label || '')));
-    check('y grabar se habilitó antes que él',
+    check('and recording was enabled before it',
       progressLog.findIndex(p => p.usable === true)
       < progressLog.findIndex(p => /GPU acceleration/.test(p.label || '')));
 
@@ -188,9 +188,9 @@ server.listen(0, '127.0.0.1', async () => {
     const C = path.join(ROOT, 'homeC');
     failGpu = true;
     progressLog = [];
-    check('si el build GPU falla, el CPU igual queda', await provision.run({ ...opts(C), gpu: true }));
-    check('sin binario GPU', fs.existsSync(path.join(C, 'bin', 'win-x64-gpu', 'whisper-server.exe')), false);
-    check('y el progreso lo dice en vez de esconderlo',
+    check('if the GPU build fails, the CPU one still stands', await provision.run({ ...opts(C), gpu: true }));
+    check('no GPU binary', fs.existsSync(path.join(C, 'bin', 'win-x64-gpu', 'whisper-server.exe')), false);
+    check('and progress says so instead of hiding it',
       progressLog.some(p => /GPU build skipped/i.test(p.label)));
     failGpu = false;
 
@@ -200,22 +200,22 @@ server.listen(0, '127.0.0.1', async () => {
     progressLog = [];
     let result = null;
     try { result = await provision.run({ ...opts(D), gpu: false }); } catch { result = 'threw'; }
-    check('una descarga cortada no se reporta como éxito', result === true, false);
-    check('no quedó un modelo a medias',
+    check('a cut download is not reported as success', result === true, false);
+    check('no half-written model was left',
       fs.existsSync(path.join(D, 'models', 'ggml-small.bin')), false);
     // The .part is now kept on purpose — it is what the next attempt resumes
     // from. What must never exist is the finished name.
-    check('el fragmento se conserva para reanudar',
+    check('the fragment is kept, to resume from',
       fs.existsSync(path.join(D, 'models', 'ggml-small.bin.part')));
-    check('y el que sí bajó quedó completo',
+    check('and the one that did arrive is complete',
       fs.readFileSync(path.join(D, 'models', 'ggml-base.bin'), 'utf8'), 'fake base model weights');
-    check('con base en su lugar, grabar ya estaba habilitado',
+    check('with base in place, recording was already enabled',
       progressLog.some(p => p.usable === true));
     corruptSmall = false;
 
     // ---- and the retry after the failure completes it ----
-    check('reintentar completa lo que faltaba', await provision.run({ ...opts(D), gpu: false }));
-    check('sin dejar el fragmento atrás',
+    check('retrying completes what was missing', await provision.run({ ...opts(D), gpu: false }));
+    check('without leaving the fragment behind',
       fs.existsSync(path.join(D, 'models', 'ggml-small.bin.part')), false);
 
     // ---- resume: the reason any of this exists ----
@@ -228,92 +228,92 @@ server.listen(0, '127.0.0.1', async () => {
     let cut = null;
     try { await provision.download(`${base}/ranged/big.bin`, R, null, { retries: 0 }); }
     catch (err) { cut = err; }
-    check('una conexión cortada falla', !!cut);
-    check('pero deja exactamente lo que alcanzó a llegar', fs.statSync(`${R}.part`).size, 180);
-    check('y guarda el validador para reanudar sin riesgo',
+    check('a cut connection fails', !!cut);
+    check('but leaves exactly what did arrive', fs.statSync(`${R}.part`).size, 180);
+    check('and stores the validator, to resume without risk',
       fs.readFileSync(`${R}.part.etag`, 'utf8'), '"v1"');
-    check('el archivo final no existe', fs.existsSync(R), false);
+    check('the final file does not exist', fs.existsSync(R), false);
 
     cutAfter = 0;
     await provision.download(`${base}/ranged/big.bin`, R, null, { retries: 0 });
-    check('el segundo intento lo completa', fs.readFileSync(R).equals(big));
-    check('pidiendo sólo lo que faltaba, no todo de nuevo', servedBytes, big.length);
-    check('y limpia el validador al terminar', fs.existsSync(`${R}.part.etag`), false);
+    check('the second attempt completes it', fs.readFileSync(R).equals(big));
+    check('asking only for what was missing, not all of it again', servedBytes, big.length);
+    check('and clears the validator when it is done', fs.existsSync(`${R}.part.etag`), false);
 
-    // ---- If-Range: un fragmento de otra versión no se pega al archivo nuevo ----
+    // ---- If-Range: a fragment of another version is not glued onto the new file ----
     const R2 = path.join(ROOT, 'changed.bin');
     servedBytes = 0;
     cutAfter = 200;
     try { await provision.download(`${base}/ranged/big.bin`, R2, null, { retries: 0 }); } catch { /* esperado */ }
-    check('hay un fragmento de la versión vieja', fs.statSync(`${R2}.part`).size, 200);
+    check('there is a fragment of the old version', fs.statSync(`${R2}.part`).size, 200);
 
-    bigEtag = '"v2"';            // el archivo cambió en el servidor
+    bigEtag = '"v2"';            // the file changed on the server
     cutAfter = 0;
     await provision.download(`${base}/ranged/big.bin`, R2, null, { retries: 0 });
-    check('el fragmento viejo se descarta en vez de empalmarse',
+    check('the stale fragment is discarded rather than spliced in',
       fs.readFileSync(R2).equals(big));
-    check('y para eso hubo que bajarlo entero', servedBytes, 200 + big.length);
+    check('and that meant downloading the whole thing', servedBytes, 200 + big.length);
     bigEtag = '"v1"';
 
-    // ---- los reintentos son de la descarga, no del usuario ----
+    // ---- the retries belong to the download, not to the user ----
     servedBytes = 0;
     cutAfter = 120;
     const R3 = path.join(ROOT, 'retried.bin');
     const notes = [];
-    // se corta tres veces seguidas: 120 bytes cada intento, y el cuarto cierra
+    // cut three times running: 120 bytes each attempt, and the fourth closes
     let left = 3;
     const stopCutting = setInterval(() => { if (--left <= 0) { cutAfter = 0; clearInterval(stopCutting); } }, 5);
     await provision.download(`${base}/ranged/big.bin`, R3, null,
       { retries: 5, backoff: [10], onRetry: n => notes.push(n) });
     clearInterval(stopCutting);
-    check('reintenta solo y termina el archivo', fs.readFileSync(R3).equals(big));
-    check('y avisa de cada reintento en vez de callarlo', notes.length > 0);
+    check('retries on its own and finishes the file', fs.readFileSync(R3).equals(big));
+    check('and reports each retry instead of swallowing it', notes.length > 0);
 
-    // ---- cerrar la app a media descarga y reabrirla ----
-    // El caso de verdad, extremo a extremo: no download() suelto, sino la
-    // instalación entera cortada y retomada en una segunda corrida, que es lo
-    // que pasa cuando alguien cierra Yapper con la barra a la mitad.
+    // ---- closing the app mid-download and reopening it ----
+    // The real case, end to end: not a bare download() but the whole install
+    // cut and picked up in a second run, which is what happens when someone
+    // closes Yapper with the bar halfway across.
     const Q = path.join(ROOT, 'homeQ');
     const qOpts = { ...opts(Q), gpu: false, modelBase: `${base}/rmodels`, retries: 0 };
     servedBytes = 0;
-    cutAfter = 120;                       // muere dentro del primer modelo
+    cutAfter = 120;                       // dies inside the first model
     let first = null;
     try { first = await provision.run(qOpts); } catch { first = 'threw'; }
-    check('una instalación cortada no dice que terminó', first === true, false);
+    check('a cut install does not claim it finished', first === true, false);
     const partQ = path.join(Q, 'models', 'ggml-base.bin.part');
-    check('y deja el fragmento del modelo en curso', fs.existsSync(partQ));
+    check('and leaves the fragment of the model in flight', fs.existsSync(partQ));
     const heldQ = fs.statSync(partQ).size;
 
-    cutAfter = 0;                         // la red vuelve
-    check('reabrir la completa', await provision.run(qOpts));
-    check('los dos modelos quedaron enteros', ['base', 'small'].every(m =>
+    cutAfter = 0;                         // the network comes back
+    check('reopening completes it', await provision.run(qOpts));
+    check('both models came out whole', ['base', 'small'].every(m =>
       fs.readFileSync(path.join(Q, 'models', `ggml-${m}.bin`)).equals(big)));
-    check('sin fragmentos abandonados',
+    check('with no fragments abandoned',
       fs.readdirSync(path.join(Q, 'models')).filter(f => f.includes('.part')).length, 0);
-    // Lo exacto, no una cota: 120 B antes del corte, 380 B al reanudar, 500 B
-    // del segundo modelo. Que el total sea el tamaño de los dos archivos
-    // significa que ningún byte viajó dos veces.
-    check('y ningún byte viajó dos veces', servedBytes, big.length * 2);
-    check('el fragmento retenido era el punto de corte', heldQ, 120);
+    // Exact, not a bound: 120 B before the cut, 380 B on resume, 500 B for
+    // the second model. The total being the size of the two files means no
+    // byte travelled twice.
+    check('and no byte travelled twice', servedBytes, big.length * 2);
+    check('the fragment held was the cut point', heldQ, 120);
 
     // ---- version comparison, what the mac update notice hangs on ----
-    check('0.1.1 es más nueva que 0.1.0', provision.newerVersion('0.1.1', '0.1.0'));
+    check('0.1.1 is newer than 0.1.0', provision.newerVersion('0.1.1', '0.1.0'));
     check('0.2.0 gana a 0.1.9', provision.newerVersion('0.2.0', '0.1.9'));
-    check('0.1.10 gana a 0.1.9 (numérico, no alfabético)', provision.newerVersion('0.1.10', '0.1.9'));
-    check('la misma versión no es más nueva', provision.newerVersion('0.1.0', '0.1.0'), false);
-    check('una vieja no es más nueva', provision.newerVersion('0.1.0', '0.1.1'), false);
+    check('0.1.10 beats 0.1.9 (numeric, not alphabetic)', provision.newerVersion('0.1.10', '0.1.9'));
+    check('the same version is not newer', provision.newerVersion('0.1.0', '0.1.0'), false);
+    check('an older one is not newer', provision.newerVersion('0.1.0', '0.1.1'), false);
     check('1.0 contra 1.0.1 pierde', provision.newerVersion('1.0', '1.0.1'), false);
 
     // ---- macOS: one Metal build from our own feed, no gpu variant ----
     const E = path.join(ROOT, 'homeE');
     progressLog = [];
-    check('mac instala desde nuestro feed', await provision.run({
+    check('mac installs from our own feed', await provision.run({
       ...opts(E), platform: 'mac-arm64', gpu: false,
       macZip: `${base}/engine/whisper-mac-arm64.zip`
     }));
-    check('el binario mac quedó donde engine.binDir() lo busca',
+    check('the mac binary landed where engine.binDir() looks for it',
       fs.readFileSync(path.join(E, 'bin', 'mac-arm64', 'whisper-server'), 'utf8'), 'fake mac server');
-    check('sin variante -gpu en mac',
+    check('no -gpu variant on mac',
       fs.existsSync(path.join(E, 'bin', 'mac-arm64-gpu')), false);
     check('en mac son 3 pasos (motor + 2 modelos)',
       progressLog.every(p => p.steps === 3));
@@ -324,6 +324,6 @@ server.listen(0, '127.0.0.1', async () => {
 
   server.close();
   try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { /* locked */ }
-  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
   process.exit(fails ? 1 : 0);
 });

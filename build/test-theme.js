@@ -49,80 +49,80 @@ app.whenReady().then(async () => {
     };
 
     // ---- what a new install opens on ----
-    check('sin nada elegido, arranca en oscuro', (await showing()) === 'dark', await showing());
-    check('y lo guardado dice "dark", no un color calculado',
+    check('with nothing chosen, it starts dark', (await showing()) === 'dark', await showing());
+    check('and what is stored says "dark", not a colour it worked out',
       (await storedTheme('dark')) === 'dark', JSON.stringify(settings().theme));
 
     // ---- the control offers the three, and marks the one in force ----
     const opts = await $(`[...document.querySelectorAll('#theme-seg .seg-btn')].map(b => b.dataset.theme)`);
-    check('el control ofrece las tres', JSON.stringify(opts) === '["auto","light","dark"]',
+    check('the control offers all three', JSON.stringify(opts) === '["auto","light","dark"]',
       opts.join(', '));
-    check('y marca la que está puesta',
+    check('and marks the one in force',
       (await $(`document.querySelector('#theme-seg .seg-btn.active').dataset.theme`)) === 'dark',
       await $(`document.querySelector('#theme-seg .seg-btn.active').dataset.theme`));
 
     // ---- explicit choices ----
     await pick('light');
-    check('elegir Light lo aplica', (await showing()) === 'light', await showing());
-    check('y se guarda', (await storedTheme('light')) === 'light', JSON.stringify(settings().theme));
+    check('picking Light applies it', (await showing()) === 'light', await showing());
+    check('and it is stored', (await storedTheme('light')) === 'light', JSON.stringify(settings().theme));
 
     // ---- auto: driven, not read ----
-    // themeSource es lo que Electron le enseña a prefers-color-scheme, así que
-    // esto es el ajuste del sistema visto desde la app.
+    // themeSource is what Electron shows prefers-color-scheme, so this is the
+    // system setting as the app sees it.
     nativeTheme.themeSource = 'dark';
     await pick('auto');
     await pause(300);
-    check('en Auto, un sistema oscuro pinta oscuro', (await showing()) === 'dark', await showing());
+    check('on Auto, a dark system paints dark', (await showing()) === 'dark', await showing());
 
-    // Y cambia con él, sin reabrir: la máquina puede cambiar sola al anochecer.
+    // And it changes with it, without reopening: the machine can switch on its own at dusk.
     nativeTheme.themeSource = 'light';
     await pause(400);
-    check('y sigue al sistema cuando cambia solo', (await showing()) === 'light', await showing());
+    check('and follows the system when it changes on its own', (await showing()) === 'light', await showing());
 
-    check('lo guardado es "auto", no el color de hoy',
+    check('what is stored is "auto", not today\'s colour',
       (await storedTheme('auto')) === 'auto', JSON.stringify(settings().theme));
 
     // ---- the corner button still works, and commits to a side ----
-    // Sobre "auto" no puede alternar: caería en lo que el sistema ya era.
+    // It cannot toggle over "auto": it would land on whatever the system already was.
     await $(`document.getElementById('btn-theme').click()`);
     await pause(250);
-    check('el atajo de la esquina sale de Auto a un lado concreto',
+    check('the corner shortcut leaves Auto for a definite side',
       ['light', 'dark'].includes(settings().theme), JSON.stringify(settings().theme));
-    check('y el control lo refleja',
+    check('and the control reflects it',
       (await $(`document.querySelector('#theme-seg .seg-btn.active').dataset.theme`)) === settings().theme,
       await $(`document.querySelector('#theme-seg .seg-btn.active').dataset.theme`));
 
-    // ---- el arranque siguiente ----
-    // Main resuelve lo guardado por su cuenta, antes de que exista la página.
-    // Si se desincroniza de aquí, el arranque abre con un destello.
+    // ---- the next launch ----
+    // Main resolves what is stored on its own, before the page exists. If that
+    // drifts from this, the launch opens on a flash.
     await pick('auto');
     nativeTheme.themeSource = 'dark';
     await pause(300);
     win.webContents.reload();
     await new Promise(r => win.webContents.once('did-finish-load', r));
     await pause(900);
-    // Una sola copia. La página tenía la suya en localStorage y las dos se
-    // separaron: los ajustes decían "auto" mientras aquella decía "light", así
-    // que main pintaba la ventana de un color y la página se dibujaba del otro
-    // — con el sistema en oscuro y la app abriendo en claro sin que nadie lo
-    // hubiera elegido.
-    check('la página no guarda su propia copia',
+    // One copy. The page kept its own in localStorage and the two drifted
+    // apart: settings said "auto" while that one said "light", so main painted
+    // the window one colour and the page drew itself the other — with the
+    // system in dark mode and the app opening light without anyone having
+    // chosen it.
+    check('the page keeps no copy of its own',
       (await $(`localStorage.getItem('yapper-theme')`)) === null,
       await $(`localStorage.getItem('yapper-theme')`));
 
-    check('al reabrir sigue en Auto',
+    check('on reopening it is still on Auto',
       (await $(`document.querySelector('#theme-seg .seg-btn.active').dataset.theme`)) === 'auto',
       await $(`document.querySelector('#theme-seg .seg-btn.active').dataset.theme`));
-    check('y Auto vuelve a resolver contra el sistema de ahora',
+    check('and Auto resolves again against the system as it is now',
       (await showing()) === 'dark', await showing());
 
-    // Un perfil que arrastra la copia vieja no puede volver a mandar: lo que
-    // vale es lo guardado, y una recarga con basura en localStorage lo prueba.
+    // A profile carrying the old copy cannot take over again: what counts is
+    // what is stored, and a reload with junk planted in localStorage proves it.
     await $(`localStorage.setItem('yapper-theme', 'light')`);
     win.webContents.reload();
     await new Promise(r => win.webContents.once('did-finish-load', r));
     await pause(900);
-    check('una copia vieja en la página no gana',
+    check('an old copy in the page does not win',
       (await $(`document.querySelector('#theme-seg .seg-btn.active').dataset.theme`)) === 'auto',
       await $(`document.querySelector('#theme-seg .seg-btn.active').dataset.theme`));
   } catch (err) {
@@ -131,6 +131,6 @@ app.whenReady().then(async () => {
   }
   nativeTheme.themeSource = 'system';
   clearTimeout(timer);
-  say(fails ? `\n${fails} fallos` : '\nPASS');
+  say(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 });

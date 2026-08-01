@@ -69,6 +69,6 @@ app.whenReady().then(async () => {
   check('the sections carry a timestamp',
     /^##\s+.+\[\d+:\d+\]\s*$/m.test(md), 'none of them carries one');
 
-  console.log(fails ? `\n${fails} fallos` : '\nPASS');
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);
 }).catch(e => { console.log('FAIL', e.stack || e.message); app.exit(1); });
