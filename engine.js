@@ -162,6 +162,25 @@ function tierConfig(name) {
   return TIERS[name] || TIERS.modest;
 }
 
+/**
+ * Can transcription run ahead of the meeting on this tier?
+ *
+ * Only where it would not fight the live transcript over the model. The two
+ * share one server and asking it for a different model restarts it — a model
+ * reload, hundreds of megabytes off disk, every time they alternate. On
+ * `steady`, where live runs `base` and the final pass runs `small`, that is a
+ * reload every few seconds: the live transcript collapses and the machine
+ * spends the meeting loading models instead of transcribing.
+ *
+ * `fast` wants the same model for both, and `modest` has no live transcript to
+ * interrupt, so both get the head start. `steady` waits until the end, which
+ * is what it did before any of this existed.
+ */
+function canGetAhead(name) {
+  const t = tierConfig(name);
+  return !t.live || t.liveModel === t.finalModel;
+}
+
 // Eleven seconds of a public-domain JFK speech, the sample that ships with
 // whisper.cpp. It has to be real speech: most of a pass is the decoder emitting
 // tokens, so a synthetic tone measures 25 ms where actual talking measures 185,
@@ -953,7 +972,7 @@ function deduplicate(lines) {
 module.exports = {
   platformKey, binDir, serverPath, isInstalled, setHome, setCalibrationWav,
   modelPath, hasModel,
-  TIERS, tierConfig, guessTier, tierFromBenchmark, hasNvidiaGpu, isAppleSilicon,
+  TIERS, tierConfig, canGetAhead, guessTier, tierFromBenchmark, hasNvidiaGpu, isAppleSilicon,
   CALIBRATION_MODEL, calibrate,
   start, stop, busy, serialize, tryExclusive, loaded, transcribeWav, transcribeFile,
   deduplicate, undoStutter, deadlineFor, setPace, progressive,

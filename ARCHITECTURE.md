@@ -105,8 +105,8 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 2531 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
-| `engine.js` | 969 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
+| `main.js` | 2549 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `engine.js` | 988 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
 | `llm.js` | 367 | Note providers (§6) behind one `generate()` call |
@@ -114,7 +114,7 @@ that ship are the files that run.
 | `actions.js` | 253 | Reading action items out of the notes, and folding duplicates together |
 | `provision.js` | 380 | First-run engine download for installed copies (Windows and macOS): resumable and retried, recording-first in its ordering, plus the version comparison behind update notices |
 | `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
-| `sysaudio.js` | 186 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
+| `sysaudio.js` | 234 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
 | `meetings.js` | 72 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
@@ -809,6 +809,7 @@ run can never touch a real meeting):
 | `test-actions-ui.js` | The action list: filters, the meeting each item came from, and completing one |
 | `test-silence-warning.js` | A microphone delivering exact zeros — the asleep wireless headset — is announced on screen within seconds, the recording keeps going, and the warning clears itself when the device wakes |
 | `test-bubble-corner.js` | Which corner the capsule appears in: measured geometrically against the display's work area rather than by reading the setting back, including that a resize keeps it in the corner instead of walking it out |
+| `test-audio-orphans.js` | The system-audio helper left behind by a run that died: it holds a tap on everything the machine plays and takes the microphone with it. Its own file because the sweep is once-per-process by design |
 | `test-progressive.js` | Transcribing while the meeting runs. Asserts the result is **identical** to a single pass at the end, byte for byte — the head start is only worth having if it changes nothing but the wait — and that it never takes the last window, which is the one the segment-dropping depends on |
 | `test-wedged-server.js` | A server that accepts a request and never answers — played by a socket, since a real wedge cannot be summoned. Asserts the request ends, names the timeout, is recognised by the retry that restarts the engine, and that a real transcript still completes afterwards |
 | `test-recording-signpost.js` | Walking away from a recording and finding the way back: the sidebar button becomes the indicator and stays the route, checked by leaving for Action items mid-recording and returning — which is exactly how the gap was found |
