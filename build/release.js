@@ -8,18 +8,31 @@
 //   npm run release
 //
 // Publishing the same version twice fails on purpose — bump package.json first.
+//
+// electron-updater ALWAYS reads the feed's most recent release, and it writes
+// one manifest per platform: latest.yml here, latest-mac.yml on a Mac. A
+// release cut from Windows therefore has to carry the previous release's mac
+// assets forward, or every installed Mac loses its manifest and quietly stops
+// seeing updates — the mirror image of what mac/build-app.sh does with the
+// Windows assets when the Mac cuts one.
 const { spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 const root = path.join(__dirname, '..');
 const version = require('../package.json').version;
 const repo = 'iamchuck504/yapper-releases';
 
-function run(cmd, args) {
+function run(cmd, args, opts = {}) {
   console.log(`\n> ${cmd} ${args.join(' ')}`);
-  const r = spawnSync(cmd, args, { cwd: root, stdio: 'inherit', shell: true });
-  if (r.status !== 0) process.exit(r.status || 1);
+  const r = spawnSync(cmd, args, { cwd: root, stdio: 'inherit', shell: true, ...opts });
+  if (r.status !== 0 && !opts.soft) process.exit(r.status || 1);
+  return r.status === 0;
+}
+
+function ghQuiet(args) {
+  return spawnSync('gh', args, { cwd: root, shell: true, windowsHide: true });
 }
 
 const assets = [
@@ -40,7 +53,34 @@ for (const a of assets) {
 run('gh', ['release', 'create', `v${version}`,
   '--repo', repo,
   '--title', `Yapper ${version}`,
-  '--notes', `Yapper ${version}. Installer below; installed copies update themselves from this feed.`,
+  '--notes', `"Yapper ${version}. Installer below; installed copies update themselves from this feed."`,
   ...assets]);
 
-console.log(`\nlisto: https://github.com/${repo}/releases/tag/v${version}`);
+// Carry the previous release's mac assets forward, so the Macs already
+// installed keep a manifest to read on the release electron-updater actually
+// looks at. Their latest-mac.yml still names the version those copies run, so
+// nobody is offered a dmg that does not exist.
+const list = ghQuiet(['release', 'list', '--repo', repo, '--limit', '30',
+  '--json', 'tagName', '--jq', '.[].tagName']);
+const prev = String(list.stdout || '').split(/\r?\n/)
+  .filter(t => t && t !== `v${version}` && !t.startsWith('engine-'))[0];
+
+if (prev) {
+  const carry = fs.mkdtempSync(path.join(os.tmpdir(), 'yapper-carry-'));
+  const dl = ghQuiet(['release', 'download', prev, '--repo', repo, '--dir', carry,
+    '--pattern', 'latest-mac.yml', '--pattern', 'Yapper-*-arm64*', '--pattern', 'install.sh']);
+  const carried = dl.status === 0 ? fs.readdirSync(carry) : [];
+  if (carried.length) {
+    for (const f of carried) {
+      run('gh', ['release', 'upload', `v${version}`, path.join(carry, f),
+        '--repo', repo, '--clobber'], { soft: true });
+    }
+    console.log(`\nmac assets inherited from ${prev}: ${carried.join(' ')}`);
+  } else {
+    console.log(`\nWARNING: ${prev} carried no mac assets — installed Macs will not`);
+    console.log('         see this feed until a release is cut from the Mac');
+  }
+  fs.rmSync(carry, { recursive: true, force: true });
+}
+
+console.log(`\ndone: https://github.com/${repo}/releases/tag/v${version}`);

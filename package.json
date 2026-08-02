@@ -1,6 +1,6 @@
 {
   "name": "yapper",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Records meetings, transcribes them on-device with Whisper, and writes structured notes with the model you choose",
   "main": "main.js",
   "scripts": {
@@ -87,7 +87,7 @@
         "NSBluetoothAlwaysUsageDescription": null,
         "NSBluetoothPeripheralUsageDescription": null,
         "NSMicrophoneUsageDescription": "Yapper records meetings with your microphone and transcribes them on this Mac.",
-        "NSAudioCaptureUsageDescription": "Yapper records the other side of your calls \u2014 the audio your Mac is playing \u2014 and transcribes it on this Mac.",
+        "NSAudioCaptureUsageDescription": "Yapper records the other side of your calls — the audio your Mac is playing — and transcribes it on this Mac.",
         "NSScreenCaptureUsageDescription": "Only used on macOS 13, where capturing system audio has no other route. No screen content is ever read: the video side is reduced to 2x2 pixels and discarded."
       }
     },

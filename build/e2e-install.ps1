@@ -6,7 +6,7 @@ param([string]$SetupExe = "dist\Yapper-Setup-0.1.0.exe")
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
-$setup = Join-Path $repo $SetupExe
+$setup = if ([IO.Path]::IsPathRooted($SetupExe)) { $SetupExe } else { Join-Path $repo $SetupExe }
 
 if (-not (Test-Path $setup)) { Write-Host "FAIL no existe $setup"; exit 1 }
 Write-Host ("instalador: {0}  {1:N1} MB" -f (Split-Path $setup -Leaf), ((Get-Item $setup).Length / 1MB))

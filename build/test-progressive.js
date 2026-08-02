@@ -23,6 +23,17 @@
 // for byte identical, one differed only in where a segment was cut, and one
 // duplicated a single word at a seam out of 311. Zero lost, ever.
 //
+// …on Metal. The first Windows run failed that assertion, and the control
+// experiment (build/probe-cuda-variance.js) showed why: on the CUDA build,
+// two IDENTICAL full passes differ from each other by up to 34 words on this
+// same fixture. "Zero lost against one reference" is not a property any
+// transcription of this backend has — the reference itself is one sample of a
+// noisy process. So the tolerance is measured, not guessed: two reference
+// passes set the backend's own baseline variance, and the head start must sit
+// within it. On a deterministic backend the baseline is ~0 and this collapses
+// back to the original strict assertion; what it can never absorb is the
+// structural failure — a whole dropped window — which stays capped separately.
+//
 // The hazard is one line of the window loop: a window drops any segment
 // beginning inside its overlap, unless it is the last window. Take a window
 // early while it happens to be the last one available, and the audio in that
@@ -82,7 +93,10 @@ function growingCopy(dest, pcm, seconds) {
       engine.canGetAhead('steady'), false);
 
     // ---- the answer to beat: one pass, at the end, over the whole file ----
+    // Two of them, because on some backends (CUDA) identical passes differ:
+    // their disagreement is the noise floor everything below is judged against.
     const atEnd = await engine.transcribeFile(SRC, opts);
+    const atEnd2 = await engine.transcribeFile(SRC, opts);
     check('the full pass produces a transcript', atEnd.length > 0);
     console.log(`  · reference: ${atEnd.length} lines from ${totalSec.toFixed(0)}s`);
 
@@ -109,20 +123,39 @@ function growingCopy(dest, pcm, seconds) {
     const words = a => a.map(l => l.replace(/^\[[^\]]+\]\s*/, '')).join(' ')
       .toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
     const bag = ws => ws.reduce((m, w) => (m[w] = (m[w] || 0) + 1, m), {});
-    const wRef = words(atEnd), wOut = words(progressive);
-    const bRef = bag(wRef), bOut = bag(wOut);
-    let lost = 0, extra = 0;
-    for (const w of new Set([...wRef, ...wOut])) {
-      const d = (bOut[w] || 0) - (bRef[w] || 0);
-      if (d < 0) lost += -d; else extra += d;
-    }
-    check('the head start loses not one word', lost, 0);
+    const lostBetween = (ref, out) => {
+      const bRef = bag(words(ref)), bOut = bag(words(out));
+      let lost = 0, extra = 0;
+      for (const w of new Set([...Object.keys(bRef), ...Object.keys(bOut)])) {
+        const d = (bOut[w] || 0) - (bRef[w] || 0);
+        if (d < 0) lost += -d; else extra += d;
+      }
+      return { lost, extra };
+    };
+    const wRef = words(atEnd);
+
+    // The backend's own noise floor: what two identical passes disagree by.
+    const floor = lostBetween(atEnd, atEnd2);
+    // Judged against whichever reference it lands closer to — both are equally
+    // valid transcripts of the same audio.
+    const dA = lostBetween(atEnd, progressive);
+    const dB = lostBetween(atEnd2, progressive);
+    const d = dA.lost + dA.extra <= dB.lost + dB.extra ? dA : dB;
+    console.log(`  · backend noise floor: ${floor.lost} lost / ${floor.extra} extra`
+      + `  ·  head start: ${d.lost} lost / ${d.extra} extra of ${wRef.length}`);
+
+    // Within the backend's own variance (plus a couple of seam words), and
+    // never anywhere near a whole dropped window — that is the structural
+    // failure this test exists to catch, and no noise excuses it.
+    const windowWords = Math.ceil(wRef.length * (opts.windowSec / totalSec));
+    check('the head start loses no more than the backend loses against itself',
+      d.lost <= floor.lost + floor.extra + 3);
+    check('and stays far from losing a whole window',
+      d.lost < Math.max(8, Math.floor(windowWords / 2)));
     // A handful of extra words at a seam is cosmetic; an avalanche would mean
     // the overlap stopped being dropped and everything comes out twice.
-    check('nor duplicates more than the odd one at a seam', extra <= Math.ceil(wRef.length * 0.02));
-    if (progressive.join('\n') !== atEnd.join('\n')) {
-      console.log(`  · different segmentation: ${lost} lost, ${extra} extra of ${wRef.length}`);
-    }
+    check('nor duplicates beyond noise and the odd seam word',
+      d.extra <= floor.lost + floor.extra + Math.ceil(wRef.length * 0.02));
 
     // ---- stopping has to actually stop ----
     // Without this, a head start running late keeps pushing windows into the

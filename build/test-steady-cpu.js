@@ -4,11 +4,20 @@ const fs = require('fs');
 const path = require('path');
 const os = require("os");
 
+// The GPU build is hidden by renaming it, and the rename MUST be undone even
+// when this process is killed rather than exits — a force-killed run once left
+// the repo's GPU build hidden, and everything after it (including an installed
+// copy sharing these binaries by junction) silently calibrated to `steady` on
+// a machine with a 4080 in it. So: restore explicitly as soon as the engine no
+// longer needs the disguise, keep the exit handler as the backstop, and if a
+// previous run died mid-disguise, undo it before starting.
 const GPU = path.join(__dirname, '..', 'bin', 'win-x64-gpu');
 const HIDDEN = GPU + '-off';
+if (!fs.existsSync(GPU) && fs.existsSync(HIDDEN)) fs.renameSync(HIDDEN, GPU);
 const hid = fs.existsSync(GPU);
 if (hid) fs.renameSync(GPU, HIDDEN);
-process.on('exit', () => { if (hid) { try { fs.renameSync(HIDDEN, GPU); } catch { /* back already */ } } });
+function restoreGpu() { if (hid) { try { fs.renameSync(HIDDEN, GPU); } catch { /* back already */ } } }
+process.on('exit', restoreGpu);
 
 const engine = require('../engine');
 const live = require('../live');
@@ -53,6 +62,7 @@ const CHUNK_MS = 200;
   await new Promise(r => setTimeout(r, cfg.cadenceMs * 2));
   await live.stop();
   await engine.stop();
+  restoreGpu();          // the server is gone; nothing needs the disguise now
 
   lags.sort((a, b) => a - b);
   const median = lags.length ? lags[Math.floor(lags.length / 2)] : 0;
@@ -68,4 +78,8 @@ const CHUNK_MS = 200;
   // the point of the tier is that it does not drift further behind as it runs
   if (worst > 12) { console.log(`FAIL  fell ${worst.toFixed(1)} s behind — steady does not hold up on this CPU`); process.exit(1); }
   console.log('PASS');
+  // Under node the loop drains and the process ends; under Electron it does
+  // not — the run reads as a hang after its own PASS, same trap the engine
+  // tests fell into on the Mac. Say it explicitly.
+  process.exit(0);
 })().catch(e => { console.log('FAIL', e.message); process.exit(1); });

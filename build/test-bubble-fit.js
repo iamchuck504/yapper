@@ -20,6 +20,9 @@ app.whenReady().then(async () => {
   ipcMain.on('bubble-resize', (_e, s) => { size = s; });
   // the bubble talks to the main window for these; swallow them
   for (const ch of ['bubble-stop', 'bubble-pause', 'bubble-focus-main']) ipcMain.on(ch, () => {});
+  // the preload reads the theme synchronously at load; without an answer the
+  // send merely warns, but the stub keeps this window honest about its shape
+  ipcMain.on('get-theme', e => { e.returnValue = 'dark'; });
 
   const w = new BrowserWindow({
     width: 470, height: 280, show: false, frame: false, transparent: true,
@@ -30,11 +33,18 @@ app.whenReady().then(async () => {
   });
   await w.loadFile(path.join(__dirname, '..', 'renderer', 'bubble.html'));
 
+  // Reloading from inside executeJavaScript can destroy the context before the
+  // promise settles, which leaves the await hanging forever — so the listener
+  // goes on first and the script is fired without awaiting it.
+  const reload = js => {
+    const done = new Promise(r => w.webContents.once('did-finish-load', r));
+    w.webContents.executeJavaScript(js).catch(() => { /* context died: expected */ });
+    return done;
+  };
+
   // a clean slate, whatever this machine's saved preference is
-  await w.webContents.executeJavaScript(
-    "localStorage.removeItem('yapper-bubble-pinned');"
+  await reload("localStorage.removeItem('yapper-bubble-pinned');"
     + "localStorage.removeItem('yapper-bubble-collapsed'); location.reload();");
-  await new Promise(r => w.webContents.once('did-finish-load', r));
   await w.webContents.executeJavaScript('document.fonts.ready');
   await new Promise(r => setTimeout(r, 250));
 
@@ -133,8 +143,7 @@ app.whenReady().then(async () => {
   check('with the pin set, leaving hover does not close it', !m.pill && size.w === 470,
     JSON.stringify({ pill: m.pill, size }));
 
-  await w.webContents.executeJavaScript('location.reload()');
-  await new Promise(r => w.webContents.once('did-finish-load', r));
+  await reload('location.reload()');
   await new Promise(r => setTimeout(r, 300));
   await applySize();
   m = await state();
@@ -147,10 +156,8 @@ app.whenReady().then(async () => {
   check('without the pin it goes back to a capsule', m.pill, JSON.stringify({ pill: m.pill, size }));
 
   // ---- the old preference maps onto the pin ----
-  await w.webContents.executeJavaScript(
-    "localStorage.removeItem('yapper-bubble-pinned');"
+  await reload("localStorage.removeItem('yapper-bubble-pinned');"
     + "localStorage.setItem('yapper-bubble-collapsed','no'); location.reload();");
-  await new Promise(r => w.webContents.once('did-finish-load', r));
   await new Promise(r => setTimeout(r, 300));
   m = await state();
   check('anyone who had it always open keeps it open (pin migrated)',

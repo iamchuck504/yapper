@@ -40,3 +40,5 @@ models
 # compiled from mac/*.swift by mac/build-app.sh, per machine
 build/mic-probe
 build/system-audio
+
+dist-up-*/
