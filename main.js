@@ -240,14 +240,28 @@ ipcMain.on('bubble-resize', (_e, size) => {
   // the setting says nothing about its surroundings, and anchoring to it made
   // a capsule dropped in the middle of the screen jump 348 px sideways to open.
   const area = screen.getDisplayMatching(b).workArea;
-  const horizontal = (b.x + b.width / 2) < (area.x + area.width / 2) ? 'left' : 'right';
-  const vertical = (b.y + b.height / 2) < (area.y + area.height / 2) ? 'top' : 'bottom';
-  bubble.setBounds({
-    x: horizontal === 'left' ? b.x : b.x + b.width - size.w,
-    y: vertical === 'top' ? b.y : b.y + b.height - size.h,
-    width: size.w,
-    height: size.h
-  });
+  // A capsule still sitting where its corner puts it is re-placed, not moved
+  // by arithmetic. Fractional display scales (first seen on a Windows machine
+  // at 1.104) round every setBounds through physical pixels, so edge
+  // arithmetic drifts a few pixels per resize — and since hovering resizes
+  // twice, a capsule would slowly walk out of its corner over a meeting.
+  const home = bubbleOrigin(b.width, b.height);
+  if (Math.abs(b.x - home.x) <= 8 && Math.abs(b.y - home.y) <= 8) {
+    const o = bubbleOrigin(size.w, size.h);
+    bubble.setBounds({ x: o.x, y: o.y, width: size.w, height: size.h });
+  } else {
+    // Dragged somewhere of its own: grow away from the nearest edges, decided
+    // by where it actually sits — anchoring to the configured corner made a
+    // capsule dropped mid-screen jump 348 px sideways to open.
+    const horizontal = (b.x + b.width / 2) < (area.x + area.width / 2) ? 'left' : 'right';
+    const vertical = (b.y + b.height / 2) < (area.y + area.height / 2) ? 'top' : 'bottom';
+    bubble.setBounds({
+      x: horizontal === 'left' ? b.x : b.x + b.width - size.w,
+      y: vertical === 'top' ? b.y : b.y + b.height - size.h,
+      width: size.w,
+      height: size.h
+    });
+  }
   keepBubbleOnScreen();   // expanding near an edge must not push it off
 });
 // Bubble -> main window controls
@@ -1802,10 +1816,13 @@ async function ensureTier() {
     const res = await engine.calibrate();
     if (!res) return s.tier || engine.guessTier();
     console.log(`[engine] calibrated: ${res.msPerPass} ms per pass -> ${res.tier} tier`);
-    s.tier = res.tier;
-    s.tierFor = flavour;
-    s.tierMs = res.msPerPass;
-    writeSettings(s);
+    // Only the keys this function owns. `s` was read before a calibration that
+    // takes seconds — on a CPU-only machine, many seconds — and writing the
+    // whole of it here replays every field as it was back then, undoing
+    // whatever the user changed while the engine was being measured. That is
+    // not hypothetical: test-theme caught a theme picked mid-calibration being
+    // reverted, on the first Windows run.
+    writeSettings({ tier: res.tier, tierFor: flavour, tierMs: res.msPerPass });
     return res.tier;
   } catch (err) {
     console.log('[engine] calibration failed:', err.message);
