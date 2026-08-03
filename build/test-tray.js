@@ -18,8 +18,8 @@ const path = require('path');
 const fs = require('fs');
 const { sandbox, logger, mainWindow, watchdog } = require('./harness');
 
-if (process.platform !== 'darwin') {
-  console.log('skip  the menu bar item is macOS-only');
+if (process.platform !== 'darwin' && process.platform !== 'win32') {
+  console.log('skip  no tray on this platform');
   process.exit(0);
 }
 
@@ -38,29 +38,62 @@ const pause = ms => new Promise(r => setTimeout(r, ms));
 app.whenReady().then(async () => {
   const timer = watchdog(say);
   try {
-    const icon1x = path.join(__dirname, 'yapper-tray-Template.png');
-    const icon2x = path.join(__dirname, 'yapper-tray-Template@2x.png');
+    if (process.platform === 'darwin') {
+      const icon1x = path.join(__dirname, 'yapper-tray-Template.png');
+      const icon2x = path.join(__dirname, 'yapper-tray-Template@2x.png');
 
-    check('the template icon exists', fs.existsSync(icon1x));
-    check('and the @2x that Retina screens draw', fs.existsSync(icon2x));
+      check('the template icon exists', fs.existsSync(icon1x));
+      check('and the @2x that Retina screens draw', fs.existsSync(icon2x));
 
-    const img = nativeImage.createFromPath(icon1x);
-    check('the icon loads as an image', !img.isEmpty());
-    check('at the height the menu bar asks for', img.getSize(), { width: 18, height: 18 });
+      const img = nativeImage.createFromPath(icon1x);
+      check('the icon loads as an image', !img.isEmpty());
+      check('at the height the menu bar asks for', img.getSize(), { width: 18, height: 18 });
 
-    // A template is carried entirely by its alpha: black artwork, transparent
-    // tile. If the amber ever survived into it, the menu bar would show a
-    // coloured square instead of a mark.
-    const px = img.toBitmap();
-    let coloured = 0, opaque = 0;
-    for (let i = 0; i < px.length; i += 4) {
-      if (px[i + 3] > 8) {
-        opaque++;
-        if (px[i] > 24 || px[i + 1] > 24 || px[i + 2] > 24) coloured++;
+      // A template is carried entirely by its alpha: black artwork, transparent
+      // tile. If the amber ever survived into it, the menu bar would show a
+      // coloured square instead of a mark.
+      const px = img.toBitmap();
+      let coloured = 0, opaque = 0;
+      for (let i = 0; i < px.length; i += 4) {
+        if (px[i + 3] > 8) {
+          opaque++;
+          if (px[i] > 24 || px[i + 1] > 24 || px[i + 2] > 24) coloured++;
+        }
       }
+      check('it has a visible mark', opaque > 30);
+      check('and not one coloured pixel: it is black artwork on alpha', coloured, 0);
+    } else {
+      // Windows is the opposite of a template: the tray wears the app icon in
+      // colour, and the recording state is a second image with an amber dot,
+      // because there is no setTitle off macOS to say it any other way.
+      const resting = nativeImage.createFromPath(path.join(__dirname, 'yapper-tray-win.png'));
+      const recording = nativeImage.createFromPath(path.join(__dirname, 'yapper-tray-win-rec.png'));
+      check('the resting icon loads', !resting.isEmpty());
+      check('the recording icon loads', !recording.isEmpty());
+      check('at tray size', resting.getSize(), { width: 32, height: 32 });
+
+      const amberish = img => {
+        const px = img.toBitmap();
+        let n = 0;
+        for (let i = 0; i < px.length; i += 4) {
+          // BGRA: the amber mark is red-heavy and green-warm, never blue-heavy
+          if (px[i + 3] > 128 && px[i + 2] > 120 && px[i + 2] > px[i] + 40) n++;
+        }
+        return n;
+      };
+      const warm = amberish(resting);
+      say(`  · amber pixels in the mark: ${warm}`);
+      check('the mark carries its amber', warm > 40);
+
+      // The dot has to be a visible difference, or the state reads as nothing.
+      const a = resting.toBitmap(); const b = recording.toBitmap();
+      let differing = 0;
+      for (let i = 0; i < a.length; i += 4) {
+        if (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2]) > 30) differing++;
+      }
+      say(`  · pixels the dot changes: ${differing}`);
+      check('the recording variant is visibly different (the dot)', differing > 80);
     }
-    check('it has a visible mark', opaque > 30);
-    check('and not one coloured pixel: it is black artwork on alpha', coloured, 0);
 
     // The rest is the app: the tray follows the renderer's recording state, so
     // a real recording is what moves it.

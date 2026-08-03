@@ -366,7 +366,9 @@ function buildAppMenu() {
   };
 
   return Menu.buildFromTemplate([
-    {
+    // The app-name menu and its roles are macOS furniture; Windows has no
+    // place to put them and renders them as oddities.
+    ...(process.platform === 'darwin' ? [{
       label: 'Yapper',
       submenu: [
         { role: 'about', label: 'About Yapper' },
@@ -379,7 +381,7 @@ function buildAppMenu() {
         { type: 'separator' },
         { role: 'quit', label: 'Quit Yapper' }
       ]
-    },
+    }] : []),
     {
       label: 'File',
       submenu: [
@@ -424,10 +426,10 @@ function buildAppMenu() {
         ])
       ]
     },
-    {
+    ...(process.platform === 'darwin' ? [{
       label: 'Window',
       submenu: [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }]
-    },
+    }] : []),
     {
       label: 'Help',
       submenu: [{
@@ -438,8 +440,14 @@ function buildAppMenu() {
   ]);
 }
 
+// On macOS the menu bar is the app's face. On Windows the window hides its
+// menu bar (autoHideMenuBar) — but "no menu of ours" does not mean "no menu":
+// Electron installs its default one, whose accelerators keep working while
+// hidden, and that default carries Reload. A stray Ctrl+R during a meeting
+// reloads the renderer with the recording in it — the exact hazard the menu
+// was rebuilt to remove on macOS, alive on Windows until this stopped
+// returning early.
 function refreshAppMenu() {
-  if (process.platform !== 'darwin') return;
   Menu.setApplicationMenu(buildAppMenu());
 }
 
@@ -483,23 +491,50 @@ function trayMenu() {
 function refreshTray() {
   if (!tray || tray.isDestroyed()) return;
   tray.setToolTip(rendererRecording ? 'Yapper — recording' : 'Yapper');
-  // A template image cannot carry colour, so the state is said with a dot
-  // beside it rather than by tinting the mark red and hoping.
-  tray.setTitle(rendererRecording ? ' ●' : '');
+  if (process.platform === 'darwin') {
+    // A template image cannot carry colour, so the state is said with a dot
+    // beside it rather than by tinting the mark red and hoping.
+    tray.setTitle(rendererRecording ? ' ●' : '');
+  } else if (trayIcons) {
+    // No setTitle off macOS: the recording state is the icon itself, the same
+    // ink tile with an amber dot burned into the corner.
+    tray.setImage(rendererRecording ? trayIcons.recording : trayIcons.resting);
+  }
   tray.setContextMenu(trayMenu());
 }
 
+let trayIcons = null;
+
 function createTray() {
-  if (process.platform !== 'darwin' || tray) return;
-  const icon = nativeImage.createFromPath(
-    path.join(__dirname, 'build', 'yapper-tray-Template.png'));
-  if (icon.isEmpty()) {
-    // Not worth failing a launch over: everything the menu bar offers is
-    // reachable from the window.
-    return console.log('[tray] icon missing; no menu bar item this run');
+  if (tray) return;
+  if (process.platform === 'darwin') {
+    const icon = nativeImage.createFromPath(
+      path.join(__dirname, 'build', 'yapper-tray-Template.png'));
+    if (icon.isEmpty()) {
+      // Not worth failing a launch over: everything the menu bar offers is
+      // reachable from the window.
+      return console.log('[tray] icon missing; no menu bar item this run');
+    }
+    icon.setTemplateImage(true);
+    tray = new Tray(icon);
+  } else if (process.platform === 'win32') {
+    // The same argument as the macOS menu bar item: a meeting is spent behind
+    // the call being recorded, and the tray is where stop lives on Windows.
+    // Colour is welcome here, so it wears the app icon rather than a template.
+    const resting = nativeImage.createFromPath(
+      path.join(__dirname, 'build', 'yapper-tray-win.png'));
+    const recording = nativeImage.createFromPath(
+      path.join(__dirname, 'build', 'yapper-tray-win-rec.png'));
+    if (resting.isEmpty() || recording.isEmpty()) {
+      return console.log('[tray] icon missing; no tray this run');
+    }
+    trayIcons = { resting, recording };
+    tray = new Tray(resting);
+    // Windows convention: a click on the tray icon brings the app up.
+    tray.on('click', showMainWindow);
+  } else {
+    return;
   }
-  icon.setTemplateImage(true);
-  tray = new Tray(icon);
   refreshTray();
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "yapper",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Records meetings, transcribes them on-device with Whisper, and writes structured notes with the model you choose",
   "main": "main.js",
   "scripts": {
@@ -40,6 +40,8 @@
       "preload.js",
       "renderer/**/*",
       "!renderer/.pdf-export.html",
+      "build/yapper-tray-win.png",
+      "build/yapper-tray-win-rec.png",
       "build/yapper-tray-Template.png",
       "build/yapper-tray-Template@2x.png",
       "build/calibration.wav",

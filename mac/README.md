@@ -66,10 +66,14 @@ are pinned explicitly in `build-app.sh`:
 `vtool -show-build build/system-audio` — it costs a second, and this is
 invisible on the machine that built it.
 
-## The icon is inverted on macOS, on purpose
+## The icon is inverted on macOS, on purpose — and Windows adopted it
 
-Windows gets the amber tile with a near-black mark. macOS gets the negative of
-it — ink tile, amber mark — from `build/yapper-icon-dark.png`.
+macOS gets the negative of the original artwork — ink tile, amber mark — from
+`build/yapper-icon-dark.png`. It began as a necessity here (below) and ended as
+the version the owner prefers, so Windows now ships the same inverted art:
+`build/icon-win-invert.js` packs it into `yapper-icon.ico` and derives the two
+Windows tray images from it. The amber original survives only as
+`icon-source.png`/`yapper-icon.png`, the input `icon-dark.js` remixes.
 
 That is not a style preference. macOS 26 runs legacy `.icns` files through an
 appearance pass: on a Mac set to dark icons it darkens the tile and keeps the

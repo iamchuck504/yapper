@@ -16,9 +16,20 @@
 > silently calibrate `steady`, and incidentally proved the flavour-change
 > recalibration live: steady/759 ms → fast/77 ms, unprompted. GitHub
 > Releases answers 206 to Range requests, so resumes work against the real
-> engine source. Still open: §3's System-meter regression glance, §4's two
-> platform-parity questions, and nothing here has run at 125 % display
-> scaling or with the taskbar docked top or left.
+> engine source.
+>
+> **Second pass, 2026-08-02:** §3's System-meter glance done (both meters
+> move with real capture, 1454→1475 px frame to frame), and §4's two open
+> questions are closed as features: **Windows has the tray** (same menu as
+> the macOS menu bar item, wearing the app icon, recording state shown by an
+> amber-dot variant since setTitle is macOS-only), and the application menu
+> is now set on **both** platforms — the early return on Windows had left
+> Electron's *default* menu installed under the hidden bar, whose Ctrl+R
+> accelerator still worked and would have reloaded the renderer
+> mid-recording. Windows also adopted the inverted icon (ink tile, amber
+> mark) by preference: `build/icon-win-invert.js` packs the mac artwork into
+> the .ico and the tray images. Still unexercised: 125 % display scaling,
+> and the taskbar docked top or left.
 
 Everything below was written and verified on a Mac. Some of it is
 platform-neutral code that Windows runs too, some of it changes what Windows

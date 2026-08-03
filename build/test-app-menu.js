@@ -8,13 +8,20 @@
 // So what is pinned here is that the menu is this app's: the two actions that
 // matter are in it, they say which one is available right now, and the
 // developer items are only present where a developer is.
+// On Windows the menu bar is hidden — but its accelerators are not. Electron's
+// DEFAULT menu (what a window has when nobody sets one) carries Reload, so a
+// hidden default menu still lets a stray Ctrl+R reload the renderer with a
+// recording in it. That is why this runs on both platforms: the app has to set
+// its OWN menu everywhere, and the developer items have to be gated out of
+// packaged builds everywhere.
 const { app, Menu } = require('electron');
 const { sandbox, logger, mainWindow, watchdog } = require('./harness');
 
-if (process.platform !== 'darwin') {
-  console.log('skip  the application menu is macOS-only');
+if (process.platform !== 'darwin' && process.platform !== 'win32') {
+  console.log('skip  no application menu worth pinning on this platform');
   process.exit(0);
 }
+const mac = process.platform === 'darwin';
 
 const ROOT = sandbox('app-menu');
 const say = logger(ROOT);
@@ -40,11 +47,19 @@ app.whenReady().then(async () => {
     const win = await mainWindow();
     await pause(600);
 
-    check('there is an application menu', !!menu());
-    check('with the name capitalised, not package.json\'s', !!top('Yapper'),
-      menu() ? menu().items.map(i => i.label).join(', ') : '');
-    check('and the menus any macOS app is expected to have',
-      ['File', 'Edit', 'View', 'Window', 'Help'].every(l => !!top(l)));
+    check('there is an application menu — ours, not Electron\'s default', !!menu());
+    if (mac) {
+      check('with the name capitalised, not package.json\'s', !!top('Yapper'),
+        menu() ? menu().items.map(i => i.label).join(', ') : '');
+      check('and the menus any macOS app is expected to have',
+        ['File', 'Edit', 'View', 'Window', 'Help'].every(l => !!top(l)));
+    } else {
+      check('with the menus that make sense on Windows',
+        ['File', 'Edit', 'View', 'Help'].every(l => !!top(l)),
+        menu() ? menu().items.map(i => i.label).join(', ') : '');
+      check('and none of the macOS furniture', !top('Yapper') && !top('Window'),
+        menu() ? menu().items.map(i => i.label).join(', ') : '');
+    }
 
     // Editing roles: without them the text fields cannot cut, copy or paste
     // by keyboard, which people notice immediately in a title field.
