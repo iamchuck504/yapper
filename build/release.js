@@ -50,9 +50,11 @@ for (const a of assets) {
   }
 }
 
+// shell: true re-joins these into one command line, so anything with a space
+// has to carry its own quotes or gh reads the second word as a file name.
 run('gh', ['release', 'create', `v${version}`,
   '--repo', repo,
-  '--title', `Yapper ${version}`,
+  '--title', `"Yapper ${version}"`,
   '--notes', `"Yapper ${version}. Installer below; installed copies update themselves from this feed."`,
   ...assets]);
 

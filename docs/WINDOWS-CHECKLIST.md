@@ -1,5 +1,25 @@
 # What still has to be checked on Windows
 
+> **Run on Windows, 2026-08-02 — nearly all of it holds.** The cross-built
+> 0.1.4 installs, finds the engine, calibrates and answers its update check
+> correctly; the full Electron battery passes; and **0.1.6 is the first
+> release cut from Windows since 0.1.1**, verified end to end on the live
+> feed: an installed 0.1.4 noticed it, downloaded it in the background and
+> was 0.1.6 on disk after quitting. Four real problems surfaced and were
+> fixed at the cause — the "zero words lost" assertion is unsound on CUDA
+> (the backend disagrees with *itself* by up to 34 words; the test now
+> measures that floor), `ensureTier` still had the settings race §6 warned
+> about (a theme picked mid-calibration was reverted), the capsule drifted
+> out of its corner on fractional display scales (1.104 here; it re-places
+> from the corner's origin now), and `test-steady-cpu` could be killed with
+> the GPU build still hidden — which then made everything on the machine
+> silently calibrate `steady`, and incidentally proved the flavour-change
+> recalibration live: steady/759 ms → fast/77 ms, unprompted. GitHub
+> Releases answers 206 to Range requests, so resumes work against the real
+> engine source. Still open: §3's System-meter regression glance, §4's two
+> platform-parity questions, and nothing here has run at 125 % display
+> scaling or with the taskbar docked top or left.
+
 Everything below was written and verified on a Mac. Some of it is
 platform-neutral code that Windows runs too, some of it changes what Windows
 does specifically, and some is macOS-only and needs nothing. The point of this
