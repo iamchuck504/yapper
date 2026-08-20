@@ -767,7 +767,20 @@ async function transcribeWindow(fd, at, len, isLast, o) {
   const size = Math.ceil((len + (isLast ? 0 : o.overlapSec)) * BYTES_PER_SEC);
   const pcm = Buffer.alloc(size);
   const read = fs.readSync(fd, pcm, 0, size, WAV_HEADER + from);
-  const wav = wavFromPcm(pcm.subarray(0, read));
+  // A window with nothing in it is not worth an inference — Whisper handed
+  // pure silence tends to hallucinate a polite "Thank you." rather than say
+  // nothing. Per-side call tracks are exactly this most of the time: the far
+  // side's file is digital silence whenever nobody remote is speaking.
+  //
+  // And a window that *begins* with silence gets it trimmed off, because
+  // Whisper stamps sloppily across leading silence: handed 5 s of nothing and
+  // then speech, it reports the speech at second 0, and the transcript's
+  // timestamps — which order the two sides of a call against each other —
+  // inherit the lie. The trim is whole seconds, keeping up to a second of
+  // pre-roll so no word loses its onset, and the stamps get the offset back.
+  const trimSec = leadingSilentSeconds(pcm.subarray(0, read));
+  if (trimSec === null) return [];
+  const wav = wavFromPcm(pcm.subarray(trimSec * BYTES_PER_SEC, read));
 
   let res;
   try {
@@ -784,19 +797,61 @@ async function transcribeWindow(fd, at, len, isLast, o) {
   }
 
   const out = [];
+  const data = pcm.subarray(0, read);
   for (const seg of res.segments || []) {
-    const startSec = typeof seg.start === 'number'
+    const relStart = typeof seg.start === 'number'
       ? seg.start
       : parseOffset(seg.offsets && seg.offsets.from);
+    const relEnd = typeof seg.end === 'number'
+      ? seg.end
+      : parseOffset(seg.offsets && seg.offsets.to);
+    const startSec = trimSec + relStart;
     if (startSec >= len && !isLast) continue;
     const text = (seg.text || '').trim();
-    if (text) out.push(`[${fmtStamp(at + startSec)}] ${text}`);
+    if (!text) continue;
+    // Trimming the window's head is not enough: handed twenty seconds of
+    // speech and then silence to the end, Whisper still conjures a word out
+    // of the dead air. So each segment is held against the audio it claims to
+    // transcribe — widened by a second each way, since Whisper's stamps can
+    // sit slightly off the speech they belong to — and a segment whose whole
+    // region is digital silence is a hallucination, not a quiet word.
+    if (relEnd > relStart) {
+      const a = Math.max(0, Math.floor((trimSec + relStart - 1) * BYTES_PER_SEC)) & ~1;
+      const b = Math.min(data.length, Math.ceil((trimSec + relEnd + 1) * BYTES_PER_SEC));
+      if (isSilentPcm(data.subarray(a, b))) continue;
+    }
+    out.push(`[${fmtStamp(at + startSec)}] ${text}`);
   }
   return out;
 }
 
 function audioSecondsIn(file) {
   return Math.max(0, fs.statSync(file).size - WAV_HEADER) / BYTES_PER_SEC;
+}
+
+// At or below ≈ -60 dBFS. Real speech, however quiet, sits far above this; the
+// padding a track writes while its side is silent is exact zeros. The scan
+// bails on the first loud sample, so a window with speech at its start costs
+// almost nothing to check.
+const SILENCE_PEAK = 32;
+
+function isSilentPcm(pcm) {
+  return leadingSilentSeconds(pcm) === null;
+}
+
+/**
+ * Whole seconds of silence before the first sound, floored — so up to a second
+ * of pre-roll survives ahead of the first word. null when the whole buffer is
+ * silent.
+ */
+function leadingSilentSeconds(pcm) {
+  for (let i = 0; i + 1 < pcm.length; i += 2) {
+    const v = pcm.readInt16LE(i);
+    if (v > SILENCE_PEAK || v < -SILENCE_PEAK) {
+      return Math.floor(i / BYTES_PER_SEC);
+    }
+  }
+  return null;
 }
 
 async function transcribeFileNow(file, { language = 'auto', model, prompt = '', windowSec = 120,
@@ -969,13 +1024,39 @@ function deduplicate(lines) {
   return out;
 }
 
+// ---------------------------------------------------------------- two tracks
+//
+// The two sides of a call, interleaved by time and labelled by which file the
+// words came from. "Me" is the microphone — the person recording — and "Them"
+// is the system audio, which may be several different people. Physical
+// separation, not inference: a word is labelled by which stream carried it.
+//
+// When the far side produced no text the labels would say nothing worth
+// reading into the transcript: a silent far side makes this the same
+// one-sided recording it always was, so it comes back unlabelled.
+
+function mergeSpeakerTracks(micLines, sysLines) {
+  if (!sysLines.length) return micLines;
+  const tag = (lines, who) => lines.map(line => {
+    const m = line.match(/^(\[[\d:]+\])\s*(.*)$/);
+    return {
+      sec: stampSeconds(line) || 0,
+      line: m ? `${m[1]} ${who}: ${m[2]}` : `${who}: ${line}`
+    };
+  });
+  return [...tag(micLines, 'Me'), ...tag(sysLines, 'Them')]
+    .sort((a, b) => a.sec - b.sec)          // stable: ties keep mic first
+    .map(e => e.line);
+}
+
 module.exports = {
   platformKey, binDir, serverPath, isInstalled, setHome, setCalibrationWav,
   modelPath, hasModel,
   TIERS, tierConfig, canGetAhead, guessTier, tierFromBenchmark, hasNvidiaGpu, isAppleSilicon,
   CALIBRATION_MODEL, calibrate,
   start, stop, busy, serialize, tryExclusive, loaded, transcribeWav, transcribeFile,
-  deduplicate, undoStutter, deadlineFor, setPace, progressive,
+  deduplicate, undoStutter, deadlineFor, setPace, progressive, isSilentPcm,
+  mergeSpeakerTracks,
   wavFromPcm, openWav, finishWav, repairWav, WAV_HEADER, BYTES_PER_SEC,
 
   // Test seam, and the only one in this file. A wedged server — the failure

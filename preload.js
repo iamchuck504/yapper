@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld('yapper', {
   ask: question => invoke('ask', question),
   dailyDigest: day => invoke('daily-digest', day),
   weeklySummary: opts => invoke('weekly-summary', opts),
+  onWeeklyWritten: cb => ipcRenderer.on('weekly-written', (_e, info) => cb(info)),
   addReminder: (text, source) => invoke('add-reminder', text, source),
   updateReminder: (id, fields) => invoke('update-reminder', id, fields),
   deleteReminder: id => invoke('delete-reminder', id),

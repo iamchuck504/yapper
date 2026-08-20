@@ -214,6 +214,19 @@ recording.wav ─► engine.transcribeFile()  (windowed, 120 s + 2 s overlap)
                                      └─► generate-title ─► title.txt
 ```
 
+On macOS a call is transcribed as two files instead of one: the microphone
+track and the system-audio track each get their own `transcribeFile()` pass
+(and their own head start), and the lines are interleaved by timestamp with
+`Me:`/`Them:` labels — which side of the call spoke is a fact of which stream
+carried the words, not an inference. Windows whose PCM is digital silence are
+skipped before reaching the server, a window's leading silence is trimmed (and
+its stamps corrected back) because Whisper stamps sloppily across it, and a
+segment whose claimed audio region is silence is dropped as a hallucination —
+Whisper conjures words out of dead air, and per-side tracks are mostly dead
+air. So the far-side track costs file reads, not inferences. A meeting whose
+system track never carried signal deletes both tracks at stop and is
+transcribed from the mix, unlabelled, as before.
+
 Windowing keeps memory flat on a two-hour meeting and lets the UI show progress.
 Segments that begin inside the overlap are dropped, which avoids both a repeated
 phrase and a word lost on the seam.
@@ -267,11 +280,20 @@ cannot become a task list even if the model tried — the input does not contain
 one. Its bullets must cite meetings by title, and `parseWeekly()` drops any
 bullet whose citation does not resolve to a meeting in that week.
 
+The model call never blocks the view. `weekly-summary` answers immediately with
+the facts and whatever review is on disk — fresh, or stale while a rewrite runs
+in the background — and `weekly-written` tells the renderer when to re-read. A
+library refresh that changed any meeting queues that write early, so by the
+time the week view is opened the review is usually already on disk. A failed
+write is remembered against the fingerprint it failed for, so a reload shows
+the error instead of re-dialing the model; only an explicit rewrite, or notes
+that actually changed, try again.
+
 ---
 
 ## 5. IPC surface
 
-77 channels, all declared in `preload.js` — that file is the complete list of
+78 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
@@ -297,10 +319,12 @@ frame, so there is no round trip to wait for), `recording-state`,
 `autodetect-set`, `mark-shortcut`, `sys-gain` (macOS: the system meter's slider,
 since the mixing it controls happens in main), and five bubble messages.
 
-**Main → renderer (14)** — `transcribe-progress`, `live-transcript`,
+**Main → renderer (15)** — `transcribe-progress`, `live-transcript`,
 `meeting-detected`, `meeting-ended`, `start-recording`, `mark-moment`,
 `remote-stop`, `remote-pause`, `bubble-state`, `keep-audio-changed`,
 `engine-setup-progress`, `update-ready`, `system-audio-status`,
+`weekly-written` (the weekly review is written in the background; this is how
+the week on screen learns it can re-read the cache),
 `system-wave` (macOS: the samples the System meter draws, which never reach
 the renderer any other way).
 
@@ -550,7 +574,11 @@ Nothing is in a database; everything is a file the user can open.
 ```
 Documents\Meetings\YYYY-MM-DD_HHMM\
   recording.wav      16 kHz mono PCM, written as it arrives
-  transcript.txt     "[hh:mm:ss] text" per line
+  recording.mic.wav  macOS only: the microphone alone, same clock as the mix
+  recording.sys.wav  macOS only: system audio alone; both deleted at stop when
+                     the system side stayed silent the whole meeting
+  transcript.txt     "[hh:mm:ss] text" per line; when the per-side tracks
+                     existed, "[hh:mm:ss] Me: text" / "[hh:mm:ss] Them: text"
   notes.md           the generated notes
   title.txt          absent when naming was not possible
   participants.txt   attendees, for name biasing and attribution
@@ -781,6 +809,8 @@ three groups.
 | `test-provider-keys.js` | Each provider keeps its own key, model and endpoint; switching neither inherits nor loses one; a legacy single-slot profile migrates |
 | `test-live-logic.js` | The confirmation rules — prefix agreement, repeat stripping, degenerate-output detection |
 | `test-dedup.js` | Transcript cleanup: which repeats are removed, which survive, and the time window that separates a seam artefact from a person restating something |
+| `test-two-track.js` | Per-side call tracks: the silence detector that spares the far-side track its inferences, and the merge that interleaves both sides by time with Me:/Them: labels without inventing, dropping or reordering a word |
+| `test-two-track-app.js` | The two-track branch through the real app: a folder with per-side tracks comes back labelled, ordered, free of words hallucinated into the silent stretches, and with its audio released |
 | `test-library.js` | The meeting index: what counts as content, day and week selection, and the stamp that decides when a cached entry can be reused |
 | `test-actions.js` | Extraction and deduplication: only what the notes actually say becomes an item, `URGENT:` is not an owner, an undated item never gains a date, and restating a task merges instead of duplicating |
 | `test-search.js` | Retrieval end to end without a model: passages, query parsing in English and Spanish, ranking, and the two orderings that matter — a decision outranks a transcript line that merely mentions the word, and a period with no keyword still lists its meetings |
@@ -864,7 +894,12 @@ the doc cannot quietly drift away from the code.
   what was asked for.
 - Apple Silicon only. An Intel or universal build needs a second engine compile
   and doubles the artifact size.
-- No speaker diarisation. Attendees are typed by hand; they bias name spelling
-  and help attribution, but the app does not know who said what.
+- Speaker separation is by side of the call, not by person. On macOS the
+  microphone and the system audio are kept as separate tracks and transcribed
+  separately, so lines carry "Me:"/"Them:" labels — but everyone on the far
+  side is one "Them". Telling remote speakers apart needs real diarisation
+  (voice embeddings), which the app does not do. On Windows the streams arrive
+  already mixed, so there are no labels at all; attendees are typed by hand and
+  bias name spelling, and the notes model attributes from labels and context.
 - No playback from the timestamps in the notes.
 - `renderer/app.js` is 2,647 lines in one module.

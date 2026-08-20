@@ -1998,6 +1998,14 @@ async function loadWeek(opts = {}) {
   }
 }
 
+// The written half lands in the background; when it does, the week on screen
+// is the only one that cares. Any other week reads the fresh cache when opened.
+window.yapper.onWeeklyWritten(info => {
+  if (viewHome.classList.contains('hidden') || homeScope !== 'week') return;
+  if (homeWeekOf && info.from !== homeWeekOf) return;
+  loadWeek();
+});
+
 function renderWeek(w) {
   homeWeekOf = w.from;
   $('home-title').textContent = 'This week';
@@ -2021,7 +2029,7 @@ function renderWeek(w) {
       + 'other, so there is nothing to connect yet.');
     return offerPreviousWeek(w);
   }
-  if (w.error) {
+  if (w.error && !w.sections) {
     setStatus(status, `The written review failed: ${w.error}`, true);
     $('week-foot').classList.remove('hidden');
     $('btn-week-refresh').classList.remove('hidden');   // retrying is the useful move here
@@ -2029,7 +2037,23 @@ function renderWeek(w) {
     return;
   }
 
-  status.classList.add('hidden');
+  // The first write of the week: nothing to show under the facts yet, but the
+  // reply came back instantly and the writing is already under way.
+  if (w.writing && !w.sections) {
+    setStatus(status, 'Writing the review from this week\'s notes…');
+    $('week-foot').classList.add('hidden');
+    return;
+  }
+
+  if (w.error) {
+    setStatus(status, `The rewrite failed: ${w.error} — this is the previous review.`, true);
+  } else if (w.writing) {
+    setStatus(status, w.stale
+      ? 'The notes changed — writing an updated review. This one is from before the change.'
+      : 'Writing it again…');
+  } else {
+    status.classList.add('hidden');
+  }
   const host = $('week-sections');
   host.innerHTML = '';
   let shown = 0;
@@ -2068,14 +2092,16 @@ function renderWeek(w) {
     host.appendChild(block);
   }
 
-  if (!shown) {
+  if (!shown && !w.writing && !w.error) {
     setStatus(status, 'The notes from this week did not support any cross-meeting points.');
   }
 
   $('week-foot').classList.remove('hidden');
-  $('btn-week-refresh').classList.remove('hidden');
+  // While a rewrite is running, offering to start another reads as a broken button.
+  $('btn-week-refresh').classList.toggle('hidden', !!w.writing);
   const notes = [];
-  if (w.cached) notes.push('Written earlier from the same notes');
+  if (w.stale) notes.push('From the notes as they were before the last change');
+  else if (w.cached) notes.push('Written earlier from the same notes');
   notes.push(`from ${count(w.fromMeetings || 0, 'meeting')}`);
   if (w.dropped) notes.push(`${count(w.dropped, 'line')} left out for not naming a meeting`);
   if (w.truncated) notes.push(`${count(w.truncated, 'long note')} shortened`);
@@ -2442,56 +2468,42 @@ $('btn-save-notes').addEventListener('click', async () => {
   }
 });
 
-// print palette: neutral slate, with the accent reserved for what needs doing
-const SECTION_PDF_COLORS = {
-  'sec-summary': '#7A8A96', 'sec-key': '#7A8A96', 'sec-decision': '#7A8A96',
-  'sec-action': '#C0392B', 'sec-question': '#7A8A96', 'sec-risk': '#C0392B',
-  'sec-next': '#7A8A96', 'sec-neutral': '#7A8A96'
-};
-
-function buildPdfHtml(title) {
-  // Same chapter structure on paper: a rule carrying the minute, then the section.
+function buildPdfHtml(title, mode) {
+  // The page is the app's own notes view: the same markup, the same
+  // stylesheet, the same theme variables — light or dark as asked. Only the
+  // interactive bits come out, and a small print sheet turns the app chrome
+  // (a locked flex viewport) back into a flowing document.
   let body = '';
   for (const sec of notesEl.querySelectorAll('.note-sec')) {
-    const hot = sec.classList.contains('sec-action') || sec.classList.contains('sec-risk');
-    const head = sec.querySelector('.note-head');
-    const at = sec.querySelector('.note-rule .at');
     const clone = sec.cloneNode(true);
-    clone.querySelectorAll('.li-add, button, .note-rule, .note-head').forEach(el => el.remove());
-
-    body += `<section class="${hot ? 'hot' : ''}">`
-      + `<div class="rule">${at ? `<span class="at">${escapeHtml(at.textContent)}</span>` : ''}</div>`
-      + (head ? `<h2>${escapeHtml(head.textContent.trim())}</h2>` : '')
-      + clone.innerHTML
-      + '</section>';
+    clone.querySelectorAll('.li-add, button').forEach(el => el.remove());
+    body += clone.outerHTML;
   }
-  const css = `
-    @font-face { font-family: 'Geist'; src: url('fonts/Geist-latin.woff2') format('woff2'); font-weight: 400; }
-    @font-face { font-family: 'Geist'; src: url('fonts/Geist-latin.woff2') format('woff2'); font-weight: 600; }
-    @font-face { font-family: 'Geist'; src: url('fonts/Geist-latin.woff2') format('woff2'); font-weight: 700; }
-    * { box-sizing: border-box; }
-    body { font-family: 'Geist', system-ui, sans-serif; color: #1A1815; margin: 0; font-size: 10.5pt; }
-    h1 { font-size: 17pt; margin: 0 0 3px; font-weight: 600; letter-spacing: -0.2px; }
-    .date { color: #918D83; font-size: 9pt; margin-bottom: 6px; }
-    section { page-break-inside: avoid; }
-    .rule { position: relative; height: 1px; background: #E4E0D8; margin: 20px 0 11px; }
-    .at { position: absolute; left: 0; top: -6px; background: #fff; padding-right: 9px;
-          font-family: Consolas, monospace; font-size: 8pt; color: #918D83; }
-    section.hot .rule { background: #EBD9BF; }
-    section.hot .at { color: #A66A1E; }
-    h2 { font-size: 11.5pt; font-weight: 600; margin: 0 0 5px; letter-spacing: -0.01em; }
-    section.hot h2 { color: #A66A1E; }
-    ul { list-style: none; padding: 0; margin: 4px 0; }
-    li { position: relative; padding-left: 13px; margin-bottom: 4px; line-height: 1.5; color: #3D3A34; }
-    li::before { content: ''; position: absolute; left: 0; top: 6px; width: 3.5px; height: 3.5px; background: #918D83; }
-    section.hot li::before { background: #A66A1E; }
-    p { margin: 4px 0; line-height: 1.55; color: #3D3A34; }
-    strong { color: #1A1815; font-weight: 600; }
-    h3 { font-size: 10.5pt; margin: 9px 0 4px; color: #1A1815; }
-    .foot { margin-top: 26px; color: #A8A49A; font-size: 8pt; border-top: 1px solid #E4E0D8; padding-top: 8px; }`;
-  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${css}</style></head>` +
-    `<body><h1>${escapeHtml(title)}</h1><div class="date">${escapeHtml(resultDateStr)}</div>` +
-    `${body}<div class="foot">Generated with Yapper</div></body></html>`;
+  // The print margins are zero so the theme color reaches the edge of every
+  // sheet (a margin set at print time cannot be painted). The frame is body
+  // padding instead, and each section carries its gap as padding rather than
+  // margin, because a margin is discarded at a page break and padding is not —
+  // that gap is what keeps page two from starting flush against the edge.
+  const print = `
+    html { background: var(--bg); }
+    body {
+      display: block; height: auto; overflow: visible;
+      padding: 0.55in 0.65in;
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    .note-sec { page-break-inside: avoid; padding-top: 28px; }
+    .note-sec .note-rule { margin-top: 0; }
+    .pdf-date + .note-sec { padding-top: 14px; }
+    .pdf-title { font-size: 22px; font-weight: 600; letter-spacing: -0.2px; color: var(--text); margin-bottom: 4px; }
+    .pdf-date { font-size: 11px; color: var(--text-3); }
+    .pdf-foot { margin-top: 30px; padding-top: 9px; border-top: 1px solid var(--rule); font-size: 10px; color: var(--text-3); }`;
+  return '<!DOCTYPE html><html><head><meta charset="utf-8">'
+    + `<link rel="stylesheet" href="style.css"><style>${print}</style></head>`
+    + `<body${mode === 'light' ? ' class="light"' : ''}>`
+    + `<h1 class="pdf-title">${escapeHtml(title)}</h1>`
+    + `<div class="pdf-date">${escapeHtml(resultDateStr)}</div>`
+    + body
+    + '<div class="pdf-foot">Generated with Yapper</div></body></html>';
 }
 
 // ---------- export menu ----------
@@ -2503,10 +2515,28 @@ function closeExportMenu() { exportMenu.classList.add('hidden'); }
 
 btnExport.addEventListener('click', e => {
   e.stopPropagation();
+  paintPdfThemeSeg();
   exportMenu.classList.toggle('hidden');
 });
 document.addEventListener('click', closeExportMenu);
 exportMenu.addEventListener('click', e => e.stopPropagation());
+
+// Which appearance the PDF gets. Until the user picks one it follows the app,
+// so by default the export looks like what is on screen.
+let pdfTheme = localStorage.getItem('yapper-pdf-theme') || '';
+const pdfThemeNow = () => (pdfTheme === 'light' || pdfTheme === 'dark') ? pdfTheme : resolvedTheme();
+
+function paintPdfThemeSeg() {
+  document.querySelectorAll('#pdf-theme-seg .seg-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.pdfTheme === pdfThemeNow()));
+}
+
+document.querySelectorAll('#pdf-theme-seg .seg-btn').forEach(b =>
+  b.addEventListener('click', () => {
+    pdfTheme = b.dataset.pdfTheme;
+    localStorage.setItem('yapper-pdf-theme', pdfTheme);
+    paintPdfThemeSeg();
+  }));
 
 function exportHeader() {
   const title = resultTitle.textContent || 'Meeting';
@@ -2561,7 +2591,7 @@ async function runExport(kind) {
   try {
     if (kind === 'pdf') {
       if (!currentNotesMd) throw new Error('This meeting has no notes yet.');
-      return await window.yapper.exportPdf(buildPdfHtml(title), title);
+      return await window.yapper.exportPdf(buildPdfHtml(title, pdfThemeNow()), title);
     }
     if (kind === 'md') {
       if (!currentNotesMd) throw new Error('This meeting has no notes yet.');

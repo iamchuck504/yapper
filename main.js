@@ -1049,6 +1049,37 @@ let recFd = null;
 let recFolder = null;
 let recBytes = 0;
 
+// macOS also keeps each side of the call as its own file, because mixing
+// destroys the one fact the recorder had for free: which side a word came
+// from. The microphone track is the person recording, the system track is
+// everyone else on the call — so the final pass can label lines Me:/Them:
+// instead of guessing. The mixed recording.wav stays: the live transcript,
+// crash recovery and every older meeting read it, and at 32 KB/s per extra
+// file the writes cost nothing. The names start with "recording." on purpose,
+// so releaseAudio and heldAudio treat them as the audio they are.
+const MIC_TRACK = 'recording.mic.wav';
+const SYS_TRACK = 'recording.sys.wav';
+let recTracks = null;     // { micFd, sysFd, micBytes, sysBytes, sysSignal }
+
+/** The same samples the mix just consumed, kept apart. Always the same length
+ *  on both sides, so the tracks stay aligned with the mixed file's clock. */
+function writeTracks(mic, sys) {
+  if (!recTracks) return;
+  try {
+    fs.writeSync(recTracks.micFd, mic, 0, mic.length, engine.WAV_HEADER + recTracks.micBytes);
+    recTracks.micBytes += mic.length;
+  } catch (err) {
+    console.error('[recording] mic track write failed:', err.message);
+  }
+  try {
+    fs.writeSync(recTracks.sysFd, sys, 0, sys.length, engine.WAV_HEADER + recTracks.sysBytes);
+    recTracks.sysBytes += sys.length;
+  } catch (err) {
+    console.error('[recording] sys track write failed:', err.message);
+  }
+  if (!recTracks.sysSignal && sys.some(b => b !== 0)) recTracks.sysSignal = true;
+}
+
 // macOS records both sides of a call the only way it can: a native helper
 // captures system audio and its samples are added to the microphone's here.
 // On Windows the renderer has already done this in its audio graph, so this
@@ -1108,6 +1139,11 @@ function closeRecFile() {
   holdDisplayAwake(false);
   stopSoloDrain();
   sysAudio.stop();          // whether or not a file is open, stop capturing
+  if (recTracks) {
+    try { engine.finishWav(recTracks.micFd, recTracks.micBytes); } catch { /* disk gone */ }
+    try { engine.finishWav(recTracks.sysFd, recTracks.sysBytes); } catch { /* disk gone */ }
+    recTracks = null;
+  }
   if (recFd === null) return;
   try { engine.finishWav(recFd, recBytes); } catch { /* disk gone */ }
   recFd = null;
@@ -1126,6 +1162,11 @@ ipcMain.handle('recording-start', async (_e, participants) => {
   // as it arrives, so the cost of being wrong is a fraction of a second of
   // one-sided audio rather than a delayed start.
   if (process.platform === 'darwin') {
+    recTracks = {
+      micFd: engine.openWav(path.join(recFolder, MIC_TRACK)),
+      sysFd: engine.openWav(path.join(recFolder, SYS_TRACK)),
+      micBytes: 0, sysBytes: 0, sysSignal: false
+    };
     holdDisplayAwake(true);
     lastMicChunkAt = Date.now();     // give the renderer its grace period
     sysAudio.start();
@@ -1147,7 +1188,7 @@ ipcMain.handle('recording-start', async (_e, participants) => {
 // `transcribe` does the whole file exactly as it always did.
 
 const HEAD_START_EVERY_MS = 15000;
-let headStart = null;          // { folder, run }
+let headStart = null;          // { folder, runs: [{ key, run }] }
 let headStartTimer = null;
 
 function startHeadStart(folder, participants) {
@@ -1162,16 +1203,26 @@ function startHeadStart(folder, participants) {
     console.log(`[transcribe] no head start on the ${tierName} tier: it would fight live over the model`);
     return;
   }
+  const opts = {
+    model: tier.finalModel,
+    language: process.env.YAPPER_LANG || 'auto',
+    prompt: transcriptionHint(participants)
+  };
+  // When the recording keeps per-side tracks, the head start works on those —
+  // they are what the final pass will transcribe. The mixed file gets no run of
+  // its own then: transcribing the same minutes a third time would buy nothing.
+  // Most windows of the system track are digital silence and cost a file read,
+  // not an inference (see the silent-window skip in engine.transcribeWindow).
+  const files = recTracks
+    ? [{ key: 'mic', file: path.join(folder, MIC_TRACK) },
+       { key: 'sys', file: path.join(folder, SYS_TRACK) }]
+    : [{ key: 'mixed', file: path.join(folder, 'recording.wav') }];
   headStart = {
     folder,
-    run: engine.progressive(path.join(folder, 'recording.wav'), {
-      model: tier.finalModel,
-      language: process.env.YAPPER_LANG || 'auto',
-      prompt: transcriptionHint(participants)
-    })
+    runs: files.map(({ key, file }) => ({ key, run: engine.progressive(file, opts) }))
   };
   headStartTimer = setInterval(() => {
-    if (headStart) headStart.run.advance();
+    if (headStart) for (const r of headStart.runs) r.run.advance();
   }, HEAD_START_EVERY_MS);
 }
 
@@ -1180,10 +1231,12 @@ function stopHeadStart() {
   headStartTimer = null;
   // Not awaited here: this runs from an IPC message the renderer does not wait
   // on. `transcribe` awaits it below, which is where it matters.
-  if (headStart) headStart.settled = headStart.run.settle();
+  if (headStart) headStart.settled = Promise.all(headStart.runs.map(r => r.run.settle()));
 }
 
-/** What is already done for this meeting, if anything. */
+/** What is already done for this meeting, if anything: snapshots keyed by
+ *  track ('mixed', or 'mic' + 'sys'), with tracks that never got a window
+ *  left out. */
 async function headStartFor(folder) {
   if (!headStart || headStart.folder !== folder) return null;
   // Collecting it settles it, and settling is permanent — so a transcription
@@ -1196,10 +1249,14 @@ async function headStartFor(folder) {
   // recording has ended" in our own terms rather than reading a flag other
   // code also writes.
   if (!headStart.settled) return null;
-  // Let the window in flight land first, or the final pass redoes it.
-  await (headStart.settled || headStart.run.settle());
-  const snap = headStart.run.snapshot();
-  return snap.at > 0 ? snap : null;
+  // Let the windows in flight land first, or the final pass redoes them.
+  await headStart.settled;
+  const out = {};
+  for (const { key, run } of headStart.runs) {
+    const snap = run.snapshot();
+    if (snap.at > 0) out[key] = snap;
+  }
+  return out;
 }
 
 function writeRecorded(buf) {
@@ -1230,8 +1287,11 @@ ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
   if (sys) {
     sys = applySysGain(sys);
     sendSysWave(sys);
-    buf = sysaudio.mixPcm(buf, sys);
   }
+  // Silence stands in for a side that produced nothing, so both tracks keep
+  // the same clock as the mix.
+  if (buf.length) writeTracks(buf, sys || Buffer.alloc(buf.length));
+  if (sys) buf = sysaudio.mixPcm(buf, sys);
   writeRecorded(buf);
 });
 
@@ -1319,6 +1379,7 @@ function startSoloDrain() {
         soloWrote = true;
         console.log('[audio] the microphone is silent — writing system audio on its own');
       }
+      writeTracks(Buffer.alloc(sys.length), sys);
       writeRecorded(sys);
     }
   }, 500);
@@ -1330,12 +1391,21 @@ function stopSoloDrain() {
 }
 
 ipcMain.handle('recording-finish', async (_e, title, markers) => {
+  const tracks = recTracks;              // closeRecFile forgets them
   closeRecFile();
   const folder = recFolder;
   const bytes = recBytes;
   recFolder = null;
   recBytes = 0;
   if (!folder) return null;
+  // A meeting with no far side — nothing ever played, or no permission — has a
+  // silent system track, and the mix IS the microphone then. Two passes over
+  // the same audio would only cost time, so the tracks go and the mix stays.
+  if (tracks && !tracks.sysSignal) {
+    for (const f of [MIC_TRACK, SYS_TRACK]) {
+      try { fs.unlinkSync(path.join(folder, f)); } catch { /* already gone */ }
+    }
+  }
   if (title) fs.writeFileSync(path.join(folder, 'title.txt'), title, 'utf8');
   if (markers && markers.length) {
     fs.writeFileSync(path.join(folder, 'markers.txt'), markers.join('\n'), 'utf8');
@@ -1456,6 +1526,16 @@ ipcMain.handle('transcribe', async (_e, folder) => {
   // a meeting cut short by a crash still has a placeholder header
   if (engine.repairWav(wav)) console.log('[transcribe] repaired an interrupted recording');
 
+  // Both per-side tracks, or the mixed file alone — never a mixture of the
+  // two, since a lone track can only be half a meeting.
+  const micWav = path.join(folder, MIC_TRACK);
+  const sysWav = path.join(folder, SYS_TRACK);
+  const twoTrack = fs.existsSync(micWav) && fs.existsSync(sysWav);
+  if (twoTrack) {
+    engine.repairWav(micWav);
+    engine.repairWav(sysWav);
+  }
+
   const tier = engine.tierConfig(readSettings().tier || engine.guessTier());
   const send = text => {
     if (win && !win.isDestroyed()) win.webContents.send('transcribe-progress', text);
@@ -1476,21 +1556,32 @@ ipcMain.handle('transcribe', async (_e, folder) => {
     await ensureModel(tier.finalModel);
   }
 
+  const opts = {
+    model: tier.finalModel,
+    language: process.env.YAPPER_LANG || 'auto',
+    prompt: transcriptionHint(readParticipants(folder))
+  };
+  // Whatever was transcribed while the meeting ran, per track. Its windows are
+  // identical to the ones this pass would have produced for them, so only the
+  // tail is left — and if there is nothing, this is the same full pass it
+  // always was.
+  const head = await headStartFor(folder);
+  const progress = (base, span) => ({ done, total }) => {
+    send(`\rTranscribing… ${Math.round(base + done / total * span)}%`);
+  };
+
   let lines;
   try {
-    lines = await engine.transcribeFile(wav, {
-      model: tier.finalModel,
-      language: process.env.YAPPER_LANG || 'auto',
-      prompt: transcriptionHint(readParticipants(folder)),
-      // Whatever was transcribed while the meeting ran. Its windows are
-      // identical to the ones this pass would have produced for them, so only
-      // the tail is left — and if there is nothing, this is the same full pass
-      // it always was.
-      from: await headStartFor(folder),
-      onProgress: ({ done, total }) => {
-        send(`\rTranscribing… ${Math.round(done / total * 100)}%`);
-      }
-    });
+    if (twoTrack) {
+      const micLines = await engine.transcribeFile(micWav,
+        { ...opts, from: head && head.mic, onProgress: progress(0, 50) });
+      const sysLines = await engine.transcribeFile(sysWav,
+        { ...opts, from: head && head.sys, onProgress: progress(50, 50) });
+      lines = engine.mergeSpeakerTracks(micLines, sysLines);
+    } else {
+      lines = await engine.transcribeFile(wav,
+        { ...opts, from: head && head.mixed, onProgress: progress(0, 100) });
+    }
   } catch (err) {
     if (!liveOn) await engine.stop();
     // The same race as above, but lost later: both callers found the wav, the
@@ -1750,6 +1841,7 @@ function buildPrompt(options = {}) {
   // "Bullet points of…") came back with no timestamps at all — see
   // build/test-styles.js, which is what caught it.
   let prompt = `What you receive is a meeting transcript (it may mix English and Spanish and contain transcription errors).
+Lines may carry a speaker label: "Me:" is the person who recorded the meeting, and "Them:" is everyone on the other side of the call — "Them:" may be several different people. These labels come from which audio stream carried the words, so they are reliable. A transcript may also have no labels at all.
 Write meeting notes in English, in markdown, with exactly these sections:
 
 ${sections}
@@ -1764,7 +1856,7 @@ Rules, all of which apply regardless of what the section descriptions above say:
   if (options.participants && options.participants.trim()) {
     const people = options.participants.trim().replace(/\n/g, ', ');
     prompt += `\n\nThe participants in this meeting are: ${people}.
-Attribute discussion points, decisions, and action items to specific people by name when the transcript makes it reasonably clear who said or owns what. The transcript has no speaker labels, so infer from context and do not guess when it is ambiguous. Correct obvious mis-transcriptions of these names.`;
+Attribute discussion points, decisions, and action items to specific people by name when the transcript makes it reasonably clear who said or owns what. When lines carry Me:/Them: labels, use them: work out from context which participant is "Me" (the recorder) and which names are behind "Them", and only then attribute by name. Without labels, infer from context alone. Either way, do not guess when it is ambiguous. Correct obvious mis-transcriptions of these names.`;
   }
   if (options.markers && options.markers.length) {
     prompt += `\n\nDuring the meeting the note-taker flagged these moments as important: `
@@ -2344,6 +2436,10 @@ function refreshLibrary() {
   });
   libraryCache = meetings;
 
+  // Changed notes also age the current week's written review, so its rewrite
+  // starts now rather than when the user next opens the week view.
+  if (changed.length) queueWeeklyPrewarm();
+
   // Only meetings whose files actually changed can have new tasks in them, so
   // an unchanged library costs nothing.
   const incoming = changed.flatMap(m => m.items);
@@ -2453,10 +2549,9 @@ function digestFile(name) {
   return path.join(app.getPath('userData'), 'digests', `${name}.json`);
 }
 
-function readDigest(name, key) {
+function readDigest(name) {
   try {
-    const saved = JSON.parse(fs.readFileSync(digestFile(name), 'utf8'));
-    return saved.key === key ? saved : null;
+    return JSON.parse(fs.readFileSync(digestFile(name), 'utf8'));
   } catch { return null; }
 }
 
@@ -2486,9 +2581,50 @@ function previousDayWith(list, day) {
 }
 
 /**
- * The week: the facts first, then the written part. They are returned together
- * and the facts never depend on the model, so a failed call still leaves the
- * view with something true on screen.
+ * The written half runs in the background, one job per week at a time, so the
+ * view never waits on a model. When a job lands (or fails) the renderer is
+ * told and asks again; by then the answer is on disk and comes back instantly.
+ *
+ * A failed key is remembered so a reload does not turn into a retry loop —
+ * only an explicit rewrite, or notes that actually changed, try again.
+ */
+const weeklyJobs = new Map();     // week label -> in-flight promise
+const weeklyFailed = new Map();   // week label -> { key, error }
+
+function writeWeeklyInBackground(week, inWeek, input, key) {
+  if (weeklyJobs.has(week.label)) return;
+  const job = (async () => {
+    try {
+      const text = await llm.generate(llmConfig(), {
+        system: digest.WEEKLY_PROMPT,
+        input: input.text,
+        maxTokens: 1200
+      });
+      const parsed = digest.parseWeekly(text, inWeek);
+      const summary = {
+        sections: parsed.sections,
+        dropped: parsed.dropped.length,
+        truncated: input.truncated,
+        fromMeetings: input.meetings
+      };
+      writeDigest(`weekly-${week.label}`, { key, summary });
+      weeklyFailed.delete(week.label);
+      if (win && !win.isDestroyed()) win.webContents.send('weekly-written', { from: week.from });
+    } catch (err) {
+      weeklyFailed.set(week.label, { key, error: err.message });
+      if (win && !win.isDestroyed()) win.webContents.send('weekly-written', { from: week.from, error: err.message });
+    } finally {
+      weeklyJobs.delete(week.label);
+    }
+  })();
+  weeklyJobs.set(week.label, job);
+}
+
+/**
+ * The week: the facts first, then the written part. The facts never depend on
+ * the model, and the written part is whatever is on disk right now — fresh,
+ * stale while a rewrite runs, or absent while the first write runs. The reply
+ * is immediate in every one of those states.
  */
 ipcMain.handle('weekly-summary', async (_e, opts = {}) => {
   const list = meetings();
@@ -2509,28 +2645,51 @@ ipcMain.handle('weekly-summary', async (_e, opts = {}) => {
   if (facts.thin) return { ...base, reason: 'thin' };
 
   const key = digest.digestKey(inWeek);
-  const cached = opts.refresh ? null : readDigest(`weekly-${week.label}`, key);
-  if (cached) return { ...base, ...cached.summary, cached: true };
+  const saved = readDigest(`weekly-${week.label}`);
+  const fresh = !!saved && saved.key === key;
+  const stale = saved && !fresh ? { ...saved.summary, stale: true } : null;
 
-  try {
-    const text = await llm.generate(llmConfig(), {
-      system: digest.WEEKLY_PROMPT,
-      input: input.text,
-      maxTokens: 1200
-    });
-    const parsed = digest.parseWeekly(text, inWeek);
-    const summary = {
-      sections: parsed.sections,
-      dropped: parsed.dropped.length,
-      truncated: input.truncated,
-      fromMeetings: input.meetings
-    };
-    writeDigest(`weekly-${week.label}`, { key, summary });
-    return { ...base, ...summary };
-  } catch (err) {
-    return { ...base, error: err.message };
+  if (fresh && !opts.refresh) return { ...base, ...saved.summary, cached: true };
+
+  if (opts.refresh) weeklyFailed.delete(week.label);
+  const failed = weeklyFailed.get(week.label);
+  if (failed && failed.key === key && !weeklyJobs.has(week.label)) {
+    return { ...base, ...(fresh ? saved.summary : stale || {}), error: failed.error };
   }
+
+  writeWeeklyInBackground(week, inWeek, input, key);
+  if (fresh) return { ...base, ...saved.summary, cached: true, writing: true };
+  if (stale) return { ...base, ...stale, cached: true, writing: true };
+  return { ...base, writing: true };
 });
+
+/**
+ * Pre-write the current week's review while its notes are still warm, so that
+ * by the time the user opens the week view the answer is already on disk.
+ * Debounced, because one recording ends in several library refreshes in a row.
+ */
+let weeklyPrewarmTimer = null;
+function queueWeeklyPrewarm() {
+  clearTimeout(weeklyPrewarmTimer);
+  weeklyPrewarmTimer = setTimeout(() => {
+    try {
+      const list = meetings();
+      const week = library.weekOf(library.today());
+      const inWeek = library.inRange(list, week.from, week.to);
+      if (inWeek.filter(m => m.hasNotes).length < 2) return;   // the view calls this "thin"
+      const input = digest.weeklyInput(inWeek);
+      if (!input.meetings) return;
+      const key = digest.digestKey(inWeek);
+      const saved = readDigest(`weekly-${week.label}`);
+      if (saved && saved.key === key) return;
+      const failed = weeklyFailed.get(week.label);
+      if (failed && failed.key === key) return;
+      writeWeeklyInBackground(week, inWeek, input, key);
+    } catch (err) {
+      console.log(`[digest] weekly pre-write skipped: ${err.message}`);
+    }
+  }, 5000);
+}
 
 /**
  * The last week that actually had a meeting, or '' if there is nothing earlier.
@@ -2828,9 +2987,12 @@ ipcMain.handle('export-pdf', async (_e, html, suggestedName) => {
     fs.writeFileSync(tmpHtml, doc, 'utf8');
     await pdfWin.loadFile(tmpHtml);
     await new Promise(r => setTimeout(r, 250));   // let the webfont settle
+    // Margins are zero on purpose: Chromium cannot paint the page background
+    // into a print margin, and the notes come themed. The document brings its
+    // own frame as body padding instead.
     const data = await pdfWin.webContents.printToPDF({
       printBackground: true,
-      margins: { marginType: 'custom', top: 0.6, bottom: 0.6, left: 0.6, right: 0.6 },
+      margins: { marginType: 'custom', top: 0, bottom: 0, left: 0, right: 0 },
       pageSize: 'Letter'
     });
     fs.writeFileSync(res.filePath, data);
