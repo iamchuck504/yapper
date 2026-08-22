@@ -2533,9 +2533,23 @@ function chunkText(text) {
   return chunks;
 }
 
+/** The notes as spoken text: the cards without their controls. innerText keeps
+ *  hover-only buttons (opacity, not display), so "+ my list" and "Copy" would
+ *  be read out after every heading. */
+function spokenNotesText() {
+  const clone = notesEl.cloneNode(true);
+  clone.querySelectorAll('button').forEach(el => el.remove());
+  // off-screen but attached: innerText needs layout to honour line breaks
+  clone.style.cssText = 'position:absolute;left:-99999px;top:0;';
+  document.body.appendChild(clone);
+  const text = clone.innerText.trim();
+  clone.remove();
+  return text;
+}
+
 btnSpeak.addEventListener('click', () => {
   if (speaking) { stopSpeak(); return; }
-  const text = notesEl.innerText.trim();
+  const text = spokenNotesText();
   if (!text) return;
   const voice = voices.find(v => v.voiceURI === voiceSelect.value);
   const chunks = chunkText(text); // chunked to dodge the long-utterance cutoff bug

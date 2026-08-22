@@ -193,9 +193,10 @@ function weeklyFacts({ meetings = [], items = [], from, to, today = '' }) {
   const days = new Map();
   for (const m of week) days.set(m.date, (days.get(m.date) || 0) + 1);
 
-  const folders = new Set(week.map(m => m.folder));
+  const folders = new Set(week.map(m => folderKey(m.folder)));
   const open = items.filter(i => !i.done);
-  const raised = open.filter(i => [i.folder, ...(i.sources || [])].some(f => folders.has(f)));
+  // same real-location comparison as the day (see dailyDigest)
+  const raised = open.filter(i => [i.folder, ...(i.sources || [])].some(f => folders.has(folderKey(f))));
 
   return {
     from, to,

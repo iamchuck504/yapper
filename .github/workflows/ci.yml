@@ -31,6 +31,11 @@ jobs:
         run: |
           swiftc -O -target arm64-apple-macos14.4 mac/mic-probe.swift -o build/mic-probe
           swiftc -O -target arm64-apple-macos13.0 mac/system-audio.swift -o build/system-audio
+          # verify-package requires the diarizer inside the app, the same way
+          # mac/build-app.sh produces it
+          swift build -c release --package-path mac/speaker-diarize --product speaker-diarize
+          cp "$(swift build -c release --package-path mac/speaker-diarize --show-bin-path)/speaker-diarize" build/speaker-diarize
+          ./build/speaker-diarize --self-test >/dev/null
       - name: Exercise the real renderer
         if: runner.os == 'macOS'
         run: npx electron build/test-smoke.js

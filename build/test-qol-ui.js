@@ -110,6 +110,8 @@ app.whenReady().then(async () => {
       JSON.stringify(copied));
     check('and says so on the button',
       (await $("[...document.querySelectorAll('#notes .sec-copy')].some(b => b.textContent === 'Copied')")));
+    const spoken = await $('spokenNotesText()');
+    check('Read aloud does not read the buttons', !/Copy|my list/.test(spoken) && /contract to legal/.test(spoken), spoken);
     const exported = await $(`(() => { const c = document.getElementById('notes').cloneNode(true);
       c.querySelectorAll('.li-add, button').forEach(el => el.remove()); return c.textContent; })()`);
     check('the copy buttons never reach an export', !/Copy/.test(exported));
