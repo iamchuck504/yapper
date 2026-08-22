@@ -892,7 +892,7 @@ function refreshShortcutIcons() {
 function migrateLlmSettings(s) {
   if (!s.llmByProvider) s.llmByProvider = {};
   if (s.llmKey === undefined && s.llmModel === undefined && s.llmBaseUrl === undefined) return false;
-  const owner = s.llmProvider || 'claude-cli';
+  const owner = defaultProvider(s);
   const slot = s.llmByProvider[owner] || {};
   if (s.llmKey && !slot.key) slot.key = s.llmKey;
   if (s.llmModel && !slot.model) slot.model = s.llmModel;
@@ -913,7 +913,7 @@ function llmSlot(s, id) {
 function llmConfig() {
   const s = readSettings();
   migrateLlmSettings(s);              // in memory is enough on the read path
-  const provider = s.llmProvider || 'claude-cli';
+  const provider = defaultProvider(s);
   const slot = llmSlot(s, provider);
   return {
     provider,
@@ -929,7 +929,7 @@ ipcMain.handle('get-llm-settings', async () => {
   // migrate first, and persist it, so the old single slot does not linger in
   // the file where later code could read it by mistake
   if (migrateLlmSettings(s)) writeSettings(s, LEGACY_LLM_KEYS);
-  const provider = s.llmProvider || 'claude-cli';
+  const provider = defaultProvider(s);
   const slot = llmSlot(s, provider);
   return {
     providers: llm.providerList(),
@@ -975,7 +975,7 @@ ipcMain.handle('test-llm', async (_e, override) => {
   // another one entirely.
   const provider = (typeof o.provider === 'string' && llm.PROVIDERS[o.provider])
     ? o.provider
-    : (s.llmProvider || 'claude-cli');
+    : defaultProvider(s);
   const slot = llmSlot(s, provider);
   const typed = typeof o.apiKey === 'string' ? o.apiKey.trim() : '';
   const pick = (given, saved) =>
@@ -1202,6 +1202,18 @@ function requireMeetingFolder(folder) {
 
 function resolveClaude() {
   return CLAUDE_FALLBACKS.find(p => fs.existsSync(p)) || 'claude';
+}
+
+// The provider a fresh install starts on. Claude Code is the best deal for
+// whoever has it, and a dead end for everyone else: a friend installing from
+// the dmg does not have the CLI, and "Claude Code was not found" at the end of
+// their first meeting is the wrong moment to learn that. Without the CLI on
+// disk the default is Gemini — free, no card — so the only thing missing is a
+// key, and the app says so from the first screen. Nothing is persisted: the
+// choice is the user's the moment they pick one.
+function defaultProvider(s) {
+  if (s && s.llmProvider) return s.llmProvider;
+  return CLAUDE_FALLBACKS.some(p => fs.existsSync(p)) ? 'claude-cli' : 'gemini';
 }
 
 function writeParticipants(folder, participants) {
@@ -2333,6 +2345,10 @@ async function notesReady() {
 ipcMain.handle('style-sections', async () => ({ ...SECTION_SETS }));
 
 ipcMain.handle('check-environment', async () => checkEnvironment());
+// Just the provider half, uncached: the Today banner asks again after a key
+// is saved or a connection test passes, so it can go away the moment it is
+// no longer true.
+ipcMain.handle('notes-ready', async () => notesReady());
 
 // ---------- first-run engine download ----------
 // A fresh install has the app shell and nothing to transcribe with. The

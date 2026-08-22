@@ -532,6 +532,7 @@ async function saveLlm() {
     ...(typed ? { apiKey: typed } : {})
   });
   if (typed) { llmHasKey = true; llmKeyInput.value = ''; }
+  refreshSetupBanner();
   syncLlmControls();
 }
 
@@ -589,7 +590,7 @@ $('btn-llm-test').addEventListener('click', async () => {
     model: llmModelInput.value.trim(),
     baseUrl: llmBaseInput.value.trim()
   });
-  if (res.ok) setLlmStatus(`Working — replied in ${res.ms} ms.`, 'ok');
+  if (res.ok) { setLlmStatus(`Working — replied in ${res.ms} ms.`, 'ok'); refreshSetupBanner(); }
   else setLlmStatus(res.error, 'error');
   btn.disabled = false;
 });
@@ -710,6 +711,29 @@ function showView(name) {
 $('btn-settings').addEventListener('click', () => {
   stopSpeak();
   showView('settings');
+});
+
+// ---------- "notes need a provider", on the first screen ----------
+// The record view has always reported a provider that cannot work, but a new
+// install opens on Today, where nobody saw it until the end of the first
+// meeting. Same check, shown where the eyes are; gone the moment it is fixed.
+const homeSetupEl = $('home-setup');
+
+async function refreshSetupBanner(notes) {
+  try {
+    const n = notes || await window.yapper.notesReady();
+    const missing = !!(n && n.ok === false);
+    $('home-setup-reason').textContent = missing ? (n.reason || '') : '';
+    homeSetupEl.classList.toggle('hidden', !missing);
+  } catch { /* a failed check never blocks the day */ }
+}
+
+$('home-setup-open').addEventListener('click', () => {
+  stopSpeak();
+  showView('settings');
+  const provider = $('llm-provider');
+  provider.scrollIntoView({ block: 'center' });
+  provider.focus();
 });
 
 function setStatus(el, text, isError = false) {
@@ -3432,6 +3456,7 @@ refreshReminders();
     const issues = [];
     if (!env.whisper) issues.push('• The transcription engine could not be set up — check the connection and restart Yapper to retry.');
     if (env.notes && !env.notes.ok) issues.push(`• ${env.notes.reason} Recording and transcription still work.`);
+    refreshSetupBanner(env.notes);
     if (issues.length) {
       setStatus(statusEl, 'Setup needed:\n' + issues.join('\n'), true);
     } else if (env.tier === 'modest') {

@@ -9,8 +9,11 @@ const ROOT = sandbox('byok-shot');
 const OUT = path.join(app.getPath('temp'), 'yapper-byok');
 fs.mkdirSync(OUT, { recursive: true });
 
-// pretend Claude Code is not installed, which is the coworker's situation
+// pretend Claude Code is not installed, which is the coworker's situation:
+// off PATH, and off the fixed places main.js checks on disk (the first of
+// those lives under the home directory, so point that at the sandbox)
 process.env.PATH = '';
+app.setPath('home', ROOT);
 require('../main.js');
 
 app.whenReady().then(async () => {
@@ -23,9 +26,17 @@ app.whenReady().then(async () => {
     console.log(`${name}.png`);
   };
 
-  // 1. first launch: what does it say about notes?
+  // 1. first launch: what does it say about notes? The app opens on Today, so
+  // the banner there is what the friend actually sees; the record view's
+  // status line is the older report of the same check.
+  const banner = async () => $(`(() => { const b = document.getElementById('home-setup');
+    return { shown: !b.classList.contains('hidden'),
+      reason: document.getElementById('home-setup-reason').textContent.trim() }; })()`);
+  const first = await banner();
+  console.log(`\nToday banner on first launch: ${first.shown ? 'SHOWN' : 'MISSING'}\n  "${first.reason}"`);
+  if (!first.shown) throw new Error('the Today banner did not appear on a fresh install without a provider');
   const warning = await $(`document.getElementById('status').textContent`);
-  console.log(`\nstartup warning:\n  "${warning.trim()}"\n`);
+  console.log(`startup warning (record view):\n  "${warning.trim()}"\n`);
   await shot('1-primer-arranque');
 
   // 2. the friend opens the "Notes by" dropdown and picks the free one
@@ -64,6 +75,9 @@ app.whenReady().then(async () => {
   }))()`);
   console.log('\nafter pasting it:');
   for (const [k, v] of Object.entries(after)) console.log(`  ${k.padEnd(12)} ${JSON.stringify(v)}`);
+  const afterKey = await banner();
+  console.log(`  banner       ${afterKey.shown ? 'still shown' : 'gone'}`);
+  if (afterKey.shown) throw new Error('the Today banner stayed after the key was saved');
 
   // 4. Test connection, with a key that is not real: the error has to be useful
   await $(`document.getElementById('btn-llm-test').click()`);

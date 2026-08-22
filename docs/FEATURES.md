@@ -330,6 +330,14 @@ place rather than copied.
 
 ### Providers, keys and privacy
 
+**A new install starts on Claude Code only if the CLI is on the machine;
+otherwise on Google Gemini**, so the one thing missing is a free key rather
+than a whole product. While the chosen provider cannot write notes — no key
+yet, or a Claude Code that is not installed — **Today carries a banner saying
+so**, with a button straight to the provider settings; it goes away the moment
+a key is saved or *Test connection* passes. Recording and transcription never
+depend on it.
+
 Six options for who writes the notes, from a Claude Code session to a fully
 local Ollama model. Details in the install guides.
 

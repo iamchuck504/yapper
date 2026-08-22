@@ -65,6 +65,7 @@ contextBridge.exposeInMainWorld('yapper', {
   openFolder: folder => invoke('open-folder', folder),
   openExternal: url => invoke('open-external', url),
   checkEnvironment: () => invoke('check-environment'),
+  notesReady: () => invoke('notes-ready'),
   engineSetup: () => invoke('engine-setup'),
   onEngineSetup: cb => ipcRenderer.on('engine-setup-progress', (_e, p) => cb(p)),
   updateRestart: () => invoke('update-restart'),

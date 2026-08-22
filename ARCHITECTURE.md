@@ -326,18 +326,18 @@ that actually changed, try again.
 
 ## 5. IPC surface
 
-85 channels, all declared in `preload.js` — that file is the complete list of
+86 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
 
-**Request/response (56)** — recording lifecycle (`recording-start`,
+**Request/response (57)** — recording lifecycle (`recording-start`,
 `recording-finish`), import (`import-audio`, `import-read`, `import-open`,
 `import-close`, `legacy-audio`), processing (`transcribe`, `summarize`,
 `generate-notes`, `regenerate`, `cancel-notes`, `generate-title`, `save-notes`), meetings (`list-meetings`,
 `load-meeting`, `set-speaker-map`, `rename-meeting`, `delete-meeting`, `open-folder`), reminders (5, including the bulk `update-reminders`), settings
 (`get/set-open-at-login`, `get/set-bubble-corner`, `get/set-llm-settings`, `test-llm`, `style-sections`,
-`check-environment`), first-run and updates (`engine-setup`, `update-restart`,
+`check-environment`, `notes-ready`), first-run and updates (`engine-setup`, `update-restart`,
 `open-releases-page`), the two halves of the macOS Screen Recording grant the
 app can perform on the user's behalf (`open-screen-settings`, `relaunch-app`),
 the library (`refresh-library`, `list-actions`), retrieval

@@ -1763,6 +1763,25 @@ details summary:hover { color: var(--text); border-color: var(--border-2); }
 }
 .options-card.collapsed { display: none; }
 #settings-host .options-card { margin-top: 4px; }
+
+/* the provider banner on Today: amber, like the folded "API key needed" flag */
+.home-setup {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 18px;
+  padding: 12px 16px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-md);
+  font-size: 13px;
+  color: var(--text);
+  animation: fadeUp 0.26s ease;
+}
+.home-setup-text { flex: 1; min-width: 0; line-height: 1.5; }
+.home-setup-text strong { color: var(--accent-text, var(--accent)); margin-right: 4px; }
+.home-setup-soft { color: var(--text-2); }
+.home-setup .btn-primary { flex-shrink: 0; }
 #view-settings { animation: fadeUp 0.26s ease; }
 
 /* Start and Import are unusable mid-meeting; the microphone picker is not, and

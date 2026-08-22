@@ -443,6 +443,17 @@
         <p class="view-sub" id="home-sub"></p>
       </div>
 
+      <!-- Shown while the notes provider cannot work: the same check the
+           record view reports, but on the screen a new install opens on. -->
+      <div id="home-setup" class="home-setup hidden" role="status">
+        <div class="home-setup-text">
+          <strong>Notes need a provider.</strong>
+          <span id="home-setup-reason"></span>
+          <span class="home-setup-soft">Recording and transcription work without one; the notes are what would fail.</span>
+        </div>
+        <button id="home-setup-open" class="btn-primary">Open Settings</button>
+      </div>
+
       <div class="opt-row filter-row">
         <div id="home-scope" class="seg">
           <button class="seg-btn active" data-scope="day">Today</button>
