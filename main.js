@@ -499,6 +499,8 @@ function buildAppMenu() {
       submenu: [
         { role: 'about', label: 'About Yapper' },
         { type: 'separator' },
+        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: command('settings') },
+        { type: 'separator' },
         { role: 'services' },
         { type: 'separator' },
         { role: 'hide', label: 'Hide Yapper' },
@@ -525,6 +527,11 @@ function buildAppMenu() {
         },
         { type: 'separator' },
         { label: 'Export…', accelerator: 'CmdOrCtrl+E', click: command('export') },
+        // macOS keeps Settings in the app menu above; Windows has no such menu
+        ...(process.platform === 'darwin' ? [] : [
+          { type: 'separator' },
+          { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: command('settings') }
+        ]),
         { type: 'separator' },
         { role: 'close' }
       ]

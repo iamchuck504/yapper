@@ -177,6 +177,43 @@ app.whenReady().then(async () => {
     check('nothing was re-transcribed', fs.statSync(path.join(bare, 'transcript.txt')).mtimeMs === transcriptMtime);
     check('no recording was touched', !fs.existsSync(path.join(bare, 'recording.wav')));
 
+    // ---- settings view ----
+    // One card, two homes: it lives folded in the record view and is hosted,
+    // unfolded, by the settings view while that is open.
+    await $(`document.getElementById('btn-settings').click()`);
+    await pause(300);
+    check('Settings opens its own view',
+      await $("!document.getElementById('view-settings').classList.contains('hidden')"));
+    check('hosting the options card, unfolded',
+      await $("document.getElementById('options-card').parentElement.id === 'settings-host' && !document.getElementById('options-card').classList.contains('collapsed')"));
+    check('with every group on it',
+      (await $("document.querySelectorAll('#settings-host .opt-group-title').length")) === 4);
+    await $(`document.querySelector('#lang-seg .seg-btn[data-lang="es"]').click()`);
+    await pause(100);
+    check('a change made there is saved like any other',
+      /"lang":"es"/.test(await $("localStorage.getItem('yapper-options')")));
+    await $(`document.getElementById('btn-new').click()`);
+    await pause(300);
+    check('leaving puts the card back in the record view, folded',
+      await $("document.getElementById('options-card').parentElement.id === 'view-record' && document.getElementById('options-card').classList.contains('collapsed')"));
+    check('right under its toggle',
+      await $("document.getElementById('opts-toggle').nextElementSibling.id === 'options-card'"));
+    check('and the folded line reflects the change',
+      /Español/.test(await $("document.getElementById('opts-sum').textContent")),
+      await $("document.getElementById('opts-sum').textContent"));
+    await $(`document.getElementById('opts-toggle').click()`);
+    check('the fold still opens in place',
+      await $("!document.getElementById('options-card').classList.contains('collapsed') && document.getElementById('options-card').parentElement.id === 'view-record'"));
+    await $(`document.querySelector('#lang-seg .seg-btn[data-lang="en"]').click()`);
+    const menuSettings = (Menu.getApplicationMenu().items.find(i => i.label === (process.platform === 'darwin' ? 'Yapper' : 'File')) || {}).submenu;
+    const settingsItem = menuSettings && menuSettings.items.find(i => i.label === 'Settings…');
+    check('the menu carries Settings… on Cmd+,', !!settingsItem && settingsItem.accelerator === 'CmdOrCtrl+,');
+    settingsItem.click();
+    await pause(300);
+    check('and it opens the view', await $("!document.getElementById('view-settings').classList.contains('hidden')"));
+    await $(`openMeetingByFolder(${JSON.stringify(folder)})`);
+    await pause(300);
+
     // ---- Escape ----
     await $(`openMeetingByFolder(${JSON.stringify(folder)})`);
     await pause(300);

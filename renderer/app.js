@@ -679,16 +679,38 @@ regenLang.addEventListener('change', () => { options.lang = regenLang.value; sav
 
 // ---------- helpers ----------
 
+// The settings view hosts the record view's options card rather than a copy of
+// it: one element, one set of listeners, nothing to keep in sync. Opening the
+// view moves the card in and unfolds it; leaving moves it back and folds it,
+// so the record view still opens on the button, not on the wall of settings.
+function hostOptionsCard(inSettings) {
+  if (inSettings) {
+    $('settings-host').appendChild(optionsCardEl);
+    optionsCardEl.classList.remove('collapsed');
+  } else if (optionsCardEl.parentElement !== viewRecordEl) {
+    optsToggleEl.insertAdjacentElement('afterend', optionsCardEl);
+    setOptionsOpen(false);
+  }
+}
+
 function showView(name) {
   viewRecord.classList.toggle('hidden', name !== 'record');
   viewMeeting.classList.toggle('hidden', name !== 'meeting');
   viewReminders.classList.toggle('hidden', name !== 'reminders');
   viewSearch.classList.toggle('hidden', name !== 'search');
   $('view-home').classList.toggle('hidden', name !== 'home');
+  $('view-settings').classList.toggle('hidden', name !== 'settings');
   $('btn-reminders').classList.toggle('active', name === 'reminders');
   $('btn-search-view').classList.toggle('active', name === 'search');
   $('btn-home').classList.toggle('active', name === 'home');
+  $('btn-settings').classList.toggle('active', name === 'settings');
+  hostOptionsCard(name === 'settings');
 }
+
+$('btn-settings').addEventListener('click', () => {
+  stopSpeak();
+  showView('settings');
+});
 
 function setStatus(el, text, isError = false) {
   el.classList.remove('hidden');
@@ -3365,6 +3387,7 @@ window.yapper.onUiCommand(name => {
     case 'home': $('btn-home').click(); break;
     case 'actions': btnReminders.click(); break;
     case 'search': $('btn-search-view').click(); break;
+    case 'settings': $('btn-settings').click(); break;
     case 'export': if (inMeeting && !btnExport.disabled) btnExport.click(); break;
     case 'copy-notes': if (inMeeting && !btnCopy.disabled) btnCopy.click(); break;
     case 'rename': if (inMeeting) beginRename(); break;

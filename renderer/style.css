@@ -1762,6 +1762,8 @@ details summary:hover { color: var(--text); border-color: var(--border-2); }
   font-weight: 600;
 }
 .options-card.collapsed { display: none; }
+#settings-host .options-card { margin-top: 4px; }
+#view-settings { animation: fadeUp 0.26s ease; }
 
 /* Start and Import are unusable mid-meeting; the microphone picker is not, and
    stays. */

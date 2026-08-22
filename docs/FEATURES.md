@@ -322,6 +322,12 @@ system trash — never an irreversible delete.
 
 ## Settings and behaviour
 
+**Settings** in the sidebar (or **⌘,** / Ctrl+,) opens every option on its own
+page — provider and key, note style and language, recording, bubble,
+auto-detection, theme, start at login — without starting a meeting. It is the
+same card the record view folds away under *Meeting options*, shown in one
+place rather than copied.
+
 ### Providers, keys and privacy
 
 Six options for who writes the notes, from a Claude Code session to a fully
@@ -379,7 +385,7 @@ The rules around it:
   people look for them (and they keep working on Windows, where the bar is
   hidden): **⌘N** new meeting, **⌘.** stop, **⌘K** search, **⌘1** Today,
   **⌘2** Action items, **⌘E** export, **⌘⇧C** copy the notes as Markdown,
-  **⌘⇧R** rename, **⌘⇧M** mark a moment while recording. **Escape** closes
+  **⌘⇧R** rename, **⌘,** settings, **⌘⇧M** mark a moment while recording. **Escape** closes
   the export menu, cancels a rename, or dismisses the detected-meeting prompt.
   Ctrl instead of ⌘ on Windows.
 
