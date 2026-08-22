@@ -18,6 +18,7 @@ const os = require('os');
 const path = require('path');
 
 const TIMEOUT_MS = 180000;
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 // ---------------------------------------------------------------- providers
 
@@ -113,7 +114,7 @@ function providerList() {
  * Produce text. `config` is { provider, apiKey, model, baseUrl, claudePath }.
  * Throws with a message meant to be shown to the user.
  */
-async function generate(config, { system, input, maxTokens = 8000 }) {
+async function generate(config, { system, input, maxTokens = 8000, onDelta = null, signal = null }) {
   const p = PROVIDERS[config && config.provider];
   if (!p) throw new Error('No note provider is configured. Open Settings and pick one.');
   if (p.needsKey && !(config.apiKey || '').trim()) {
@@ -124,7 +125,8 @@ async function generate(config, { system, input, maxTokens = 8000 }) {
   }
   let out;
   try {
-    out = await p.run(config, { system, input, maxTokens });
+    if (signal && signal.aborted) throw new Error('Note generation canceled.');
+    out = await p.run(config, { system, input, maxTokens, onDelta, signal });
   } catch (err) {
     // Providers quote the Authorization header back in rejection messages, and
     // that message is shown in the UI and could end up in a screenshot or a
@@ -204,7 +206,7 @@ function cliWorkDir() {
   return fs.existsSync(dir) ? dir : os.tmpdir();
 }
 
-function runClaudeCli(config, { system, input }) {
+function runClaudeCli(config, { system, input, onDelta, signal }) {
   return new Promise((resolve, reject) => {
     const bin = config.claudePath || 'claude';
     const proc = spawn(bin, ['-p', system, '--output-format', 'text'],
@@ -216,10 +218,12 @@ function runClaudeCli(config, { system, input }) {
     // notes step hanging with nothing on screen to act on. Same budget as the
     // others, and the process is killed rather than left behind.
     let settled = false;
+    let onAbort = null;
     const finish = fn => (...args) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      if (signal && onAbort) signal.removeEventListener('abort', onAbort);
       fn(...args);
     };
     const timer = setTimeout(() => {
@@ -228,9 +232,23 @@ function runClaudeCli(config, { system, input }) {
         `Claude Code did not answer within ${Math.round(TIMEOUT_MS / 1000)}s. `
         + 'It may be waiting to be signed in — run `claude` once in a terminal.'));
     }, TIMEOUT_MS);
+    onAbort = () => {
+      try { proc.kill(); } catch { /* already gone */ }
+      finish(reject)(new Error('Note generation canceled.'));
+    };
+    if (signal) {
+      if (signal.aborted) return onAbort();
+      signal.addEventListener('abort', onAbort, { once: true });
+    }
 
     let out = '', errOut = '';
-    proc.stdout.on('data', d => { out += d.toString('utf8'); });
+    proc.stdout.on('data', d => {
+      const chunk = d.toString('utf8');
+      out += chunk;
+      if (onDelta) {
+        try { onDelta(chunk, out); } catch { /* progress must never break the answer */ }
+      }
+    });
     proc.stderr.on('data', d => { errOut += d.toString('utf8'); });
     proc.on('error', () => finish(reject)(new Error(
       'Claude Code was not found. Install it from claude.com/code and sign in, or switch to an API key in Settings.')));
@@ -248,19 +266,36 @@ function runClaudeCli(config, { system, input }) {
 // ---------------------------------------------------------------- http
 
 function getJson(url, headers) {
-  return request('GET', url, headers, null);
+  return request('GET', url, headers, null, null);
 }
 
-function postJson(url, headers, body) {
-  return request('POST', url, headers, body);
+function postJson(url, headers, body, signal = null) {
+  return request('POST', url, headers, body, signal);
 }
 
-function request(method, url, headers, body) {
+function endpointTarget(url) {
+  let u;
+  try { u = new URL(url); } catch { throw new Error(`That endpoint is not a valid URL: ${url}`); }
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') {
+    throw new Error('The endpoint must use HTTPS, or HTTP on this computer.');
+  }
+  const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1'
+    || u.hostname === '[::1]' || u.hostname === '::1';
+  if (u.protocol === 'http:' && !local) {
+    throw new Error('Remote model endpoints must use HTTPS so transcripts and API keys are encrypted.');
+  }
+  if (u.username || u.password) {
+    throw new Error('Put credentials in the API key field, not in the endpoint URL.');
+  }
+  return { u, mod: u.protocol === 'http:' ? http : https };
+}
+
+function request(method, url, headers, body, signal = null) {
   return new Promise((resolve, reject) => {
-    let u;
-    try { u = new URL(url); } catch { return reject(new Error(`That endpoint is not a valid URL: ${url}`)); }
+    let target;
+    try { target = endpointTarget(url); } catch (err) { return reject(err); }
+    const { u, mod } = target;
     const payload = body === null ? null : Buffer.from(JSON.stringify(body), 'utf8');
-    const mod = u.protocol === 'http:' ? http : https;
 
     const req = mod.request({
       protocol: u.protocol,
@@ -273,9 +308,22 @@ function request(method, url, headers, body) {
         : { ...headers }
     }, res => {
       let raw = '';
+      let bytes = 0;
+      let overflow = false;
       res.setEncoding('utf8');
-      res.on('data', c => { raw += c; });
+      res.on('data', c => {
+        if (overflow) return;
+        bytes += Buffer.byteLength(c, 'utf8');
+        if (bytes > MAX_RESPONSE_BYTES) {
+          overflow = true;
+          res.destroy();
+          reject(new Error('The model endpoint returned an unexpectedly large response.'));
+          return;
+        }
+        raw += c;
+      });
       res.on('end', () => {
+        if (overflow) return;
         let parsed = null;
         try { parsed = JSON.parse(raw); } catch { /* not JSON; the text is the error */ }
         if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -285,13 +333,112 @@ function request(method, url, headers, body) {
         if (!parsed) return reject(new Error(`Unexpected reply: ${raw.slice(0, 200)}`));
         resolve(parsed);
       });
+      res.on('error', err => { if (!overflow) reject(new Error(err.message)); });
     });
 
     req.setTimeout(TIMEOUT_MS, () => {
       req.destroy(new Error('The request timed out. The transcript may be very long, or the network is down.'));
     });
-    req.on('error', err => reject(new Error(err.message)));
-    req.end(payload || undefined);
+    const onAbort = () => req.destroy(new Error('Note generation canceled.'));
+    const detach = () => { if (signal) signal.removeEventListener('abort', onAbort); };
+    req.on('close', detach);
+    req.on('error', err => { detach(); reject(new Error(err.message)); });
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
+    if (!signal || !signal.aborted) req.end(payload || undefined);
+  });
+}
+
+/**
+ * Read Server-Sent Events without waiting for the entire model response. If a
+ * compatible endpoint ignores `stream: true` and returns ordinary JSON, that
+ * JSON is returned so the provider can fall back without losing the answer.
+ */
+function postEventStream(url, headers, body, onEvent, signal = null) {
+  return new Promise((resolve, reject) => {
+    let target;
+    try { target = endpointTarget(url); } catch (err) { return reject(err); }
+    const { u, mod } = target;
+    const payload = Buffer.from(JSON.stringify(body), 'utf8');
+    const req = mod.request({
+      protocol: u.protocol,
+      hostname: u.hostname,
+      port: u.port || (u.protocol === 'http:' ? 80 : 443),
+      path: u.pathname + u.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'text/event-stream',
+        'Content-Length': payload.length,
+        ...headers
+      }
+    }, res => {
+      const isStream = /text\/event-stream/i.test(String(res.headers['content-type'] || ''));
+      let raw = '';
+      let bytes = 0;
+      let overflow = false;
+      res.setEncoding('utf8');
+
+      const consume = block => {
+        const data = block.split(/\r?\n/)
+          .filter(line => line.startsWith('data:'))
+          .map(line => line.slice(5).trimStart()).join('\n').trim();
+        if (!data || data === '[DONE]') return;
+        try { onEvent(JSON.parse(data)); } catch { /* comments and provider keep-alives */ }
+      };
+
+      res.on('data', chunk => {
+        if (overflow) return;
+        bytes += Buffer.byteLength(chunk, 'utf8');
+        if (bytes > MAX_RESPONSE_BYTES) {
+          overflow = true;
+          res.destroy();
+          reject(new Error('The model endpoint returned an unexpectedly large response.'));
+          return;
+        }
+        raw += chunk;
+        if (!isStream || res.statusCode < 200 || res.statusCode >= 300) return;
+        let boundary;
+        while ((boundary = raw.match(/\r?\n\r?\n/))) {
+          const block = raw.slice(0, boundary.index);
+          raw = raw.slice(boundary.index + boundary[0].length);
+          consume(block);
+        }
+      });
+
+      res.on('end', () => {
+        if (overflow) return;
+        let parsed = null;
+        if (raw.trim()) {
+          if (isStream && res.statusCode >= 200 && res.statusCode < 300) consume(raw);
+          else { try { parsed = JSON.parse(raw); } catch { /* error text below */ } }
+        }
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          const msg = errorText(parsed, raw, res.statusCode);
+          return reject(new Error(httpHint(res.statusCode, msg) + msg));
+        }
+        if (!isStream && !parsed) {
+          return reject(new Error(`Unexpected reply: ${raw.slice(0, 200)}`));
+        }
+        resolve(isStream ? null : parsed);
+      });
+      res.on('error', err => { if (!overflow) reject(new Error(err.message)); });
+    });
+
+    req.setTimeout(TIMEOUT_MS, () => {
+      req.destroy(new Error('The request timed out. The transcript may be very long, or the network is down.'));
+    });
+    const onAbort = () => req.destroy(new Error('Note generation canceled.'));
+    const detach = () => { if (signal) signal.removeEventListener('abort', onAbort); };
+    req.on('close', detach);
+    req.on('error', err => { detach(); reject(new Error(err.message)); });
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
+    if (!signal || !signal.aborted) req.end(payload);
   });
 }
 
@@ -326,16 +473,33 @@ function httpHint(status, msg = '') {
 
 // ---------------------------------------------------------------- anthropic
 
-async function runAnthropic(config, { system, input, maxTokens }) {
-  const res = await postJson('https://api.anthropic.com/v1/messages', {
+async function runAnthropic(config, { system, input, maxTokens, onDelta, signal }) {
+  const headers = {
     'x-api-key': config.apiKey.trim(),
     'anthropic-version': '2023-06-01'
-  }, {
+  };
+  const body = {
     model: config.model || PROVIDERS.anthropic.defaultModel,
     max_tokens: maxTokens,
     system,
     messages: [{ role: 'user', content: input }]
-  });
+  };
+  if (onDelta) {
+    let out = '';
+    const fallback = await postEventStream('https://api.anthropic.com/v1/messages', headers,
+      { ...body, stream: true }, event => {
+        const text = event && event.type === 'content_block_delta'
+          && event.delta && event.delta.type === 'text_delta' ? event.delta.text : '';
+        if (!text) return;
+        out += text;
+        try { onDelta(text, out); } catch { /* display-only callback */ }
+      }, signal);
+    if (!fallback) return out;
+    const text = (fallback.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
+    if (text) { try { onDelta(text, text); } catch { /* display-only callback */ } }
+    return text;
+  }
+  const res = await postJson('https://api.anthropic.com/v1/messages', headers, body, signal);
   return (res.content || []).filter(c => c.type === 'text').map(c => c.text).join('');
 }
 
@@ -346,20 +510,41 @@ function baseUrlFor(config) {
   return (config.baseUrl || p.defaultBaseUrl || '').trim().replace(/\/+$/, '');
 }
 
-async function runOpenAiCompatible(config, { system, input, maxTokens }) {
+async function runOpenAiCompatible(config, { system, input, maxTokens, onDelta, signal }) {
   const base = baseUrlFor(config);
   const key = (config.apiKey || '').trim();
-  const res = await postJson(`${base}/chat/completions`, {
+  const headers = {
     // a model running on this machine has nothing to authenticate
     ...(key ? { Authorization: `Bearer ${key}` } : {})
-  }, {
+  };
+  const body = {
     model: config.model || PROVIDERS[config.provider].defaultModel,
     max_tokens: maxTokens,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: input }
     ]
-  });
+  };
+  if (onDelta) {
+    let out = '';
+    const fallback = await postEventStream(`${base}/chat/completions`, headers,
+      { ...body, stream: true }, event => {
+        const content = event && event.choices && event.choices[0]
+          && event.choices[0].delta && event.choices[0].delta.content;
+        const text = Array.isArray(content)
+          ? content.map(part => part && (part.text || part.content) || '').join('')
+          : String(content || '');
+        if (!text) return;
+        out += text;
+        try { onDelta(text, out); } catch { /* display-only callback */ }
+      }, signal);
+    if (!fallback) return out;
+    const choice = (fallback.choices || [])[0];
+    const text = (choice && choice.message && choice.message.content) || '';
+    if (text) { try { onDelta(text, text); } catch { /* display-only callback */ } }
+    return text;
+  }
+  const res = await postJson(`${base}/chat/completions`, headers, body, signal);
   const choice = (res.choices || [])[0];
   return (choice && choice.message && choice.message.content) || '';
 }

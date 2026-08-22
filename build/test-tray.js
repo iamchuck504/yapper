@@ -35,6 +35,10 @@ function check(name, got, want = true) {
 
 const pause = ms => new Promise(r => setTimeout(r, ms));
 
+// main.js registers its app:// scheme as privileged at module level, which
+// Electron only allows before the app is ready — so it is loaded up front.
+require('../main.js');
+
 app.whenReady().then(async () => {
   const timer = watchdog(say);
   try {
@@ -97,7 +101,6 @@ app.whenReady().then(async () => {
 
     // The rest is the app: the tray follows the renderer's recording state, so
     // a real recording is what moves it.
-    require('../main.js');
     const win = await mainWindow();
     await pause(600);
 

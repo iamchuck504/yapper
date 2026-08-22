@@ -226,18 +226,19 @@ app.whenReady().then(async () => {
   fs.writeFileSync(path.join(folder, 'transcript.txt'), real.text, 'utf8');
 
   const t4 = Date.now();
-  const notes = await within(
-    $(`window.yapper.summarize(${JSON.stringify(folder)}, ${JSON.stringify(real.text)},
+  const draft = await within(
+    $(`window.yapper.generateNotes(${JSON.stringify(folder)},
       { style: 'general', detail: 'concise', custom: '',
-        participants: 'Maya, Chuck, Richard', markers: ['00:12:30', '01:05:00'] })
-      .then(n => n, e => 'err:' + e.message)`),
-    'generating notes from two hours', 10 * 60 * 1000);
+        participants: 'Maya, Chuck, Richard', markers: ['00:12:30', '01:05:00'] }, true)
+      .then(n => n, e => ({ error: e.message }))`),
+    'generating notes and title from two hours', 10 * 60 * 1000);
+  const notes = draft && draft.summary;
   const t4s = (Date.now() - t4) / 1000;
   say(`  ${t4s.toFixed(0)} s, ${String(notes).length} caracteres`);
   check('generates notes from a transcript that long',
-    typeof notes === 'string' && !notes.startsWith('err:') && notes.length > 500,
-    String(notes).slice(0, 200));
-  if (typeof notes === 'string' && !notes.startsWith('err:')) {
+    typeof notes === 'string' && notes.length > 500,
+    draft && draft.error ? draft.error : String(notes).slice(0, 200));
+  if (typeof notes === 'string') {
     const heads = [...notes.matchAll(/^##\s+(.+)$/gm)].map(m => m[1]);
     say(`  secciones: ${heads.map(h => h.replace(/\s*\[[\d:]+\]$/, '')).join(' | ')}`);
     check('with all its sections', heads.length >= 4, heads.join(' | '));
@@ -249,10 +250,9 @@ app.whenReady().then(async () => {
       Math.max(...late) > MINUTES * 60 * 0.4, `the latest at ${Math.max(...late)} s`);
   }
 
-  // ---- 5. the automatic title ----
-  say('\n--- 5. auto-title ---');
-  const title = await within($(`window.yapper.generateTitle(${JSON.stringify(folder)})`),
-    'titular', 3 * 60 * 1000);
+  // ---- 5. the automatic title from that same response ----
+  say('\n--- 5. auto-title (same model request) ---');
+  const title = draft && draft.title;
   say(`  "${title}"`);
   if (real.real) {
     check('names a two-hour meeting with real content',

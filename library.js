@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { atomicWriteFileSync, readMeetingText } = require('./storage');
 const actions = require('./actions');
 
 const INDEX_VERSION = 1;
@@ -18,7 +19,7 @@ const INDEX_VERSION = 1;
 /** Everything known about one meeting, cheap to hold in memory. */
 function readMeeting(folder) {
   const read = f => {
-    try { return fs.readFileSync(path.join(folder, f), 'utf8'); } catch { return ''; }
+    try { return readMeetingText(folder, f); } catch { return ''; }
   };
   const name = path.basename(folder);
   const notes = read('notes.md');
@@ -58,7 +59,8 @@ function stampOf(folder) {
   let stamp = '';
   try {
     for (const f of fs.readdirSync(folder).sort()) {
-      const s = fs.statSync(path.join(folder, f));
+      const s = fs.lstatSync(path.join(folder, f));
+      if (s.isSymbolicLink()) { stamp += `${f}:link;`; continue; }
       stamp += `${f}:${s.size}:${Math.round(s.mtimeMs)};`;
     }
   } catch { /* the folder went away mid-scan */ }
@@ -116,7 +118,7 @@ function load(indexFile) {
 function save(indexFile, meetings) {
   try {
     fs.mkdirSync(path.dirname(indexFile), { recursive: true });
-    fs.writeFileSync(indexFile, JSON.stringify({ version: INDEX_VERSION, meetings }), 'utf8');
+    atomicWriteFileSync(indexFile, JSON.stringify({ version: INDEX_VERSION, meetings }));
   } catch (err) {
     console.log(`[library] could not save the index: ${err.message}`);
   }

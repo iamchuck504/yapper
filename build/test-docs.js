@@ -90,10 +90,13 @@ check('the document describes the audio policy',
 
 // --- the security claims ---
 const main = read('main.js');
+const windows = (main.match(/new BrowserWindow\(/g) || []).length;
 check('contextIsolation is on in every window',
-  (main.match(/contextIsolation: true/g) || []).length === 3, 'not in all three');
+  (main.match(/contextIsolation: true/g) || []).length === windows, `not in all ${windows}`);
 check('nodeIntegration is off in all of them',
-  (main.match(/nodeIntegration: false/g) || []).length === 3, 'not in all three');
+  (main.match(/nodeIntegration: false/g) || []).length === windows, `not in all ${windows}`);
+check('the Chromium sandbox is on in every window',
+  (main.match(/sandbox: true/g) || []).length === windows, `not in all ${windows}`);
 for (const page of ['index.html', 'bubble.html', 'splash.html']) {
   check(`${page} declares a CSP`,
     /Content-Security-Policy/.test(read(path.join('renderer', page))), 'does not carry it');
@@ -102,8 +105,8 @@ for (const page of ['index.html', 'bubble.html', 'splash.html']) {
 // electron-builder to develop, exactly electron-updater at runtime. Anything
 // new showing up here has to be argued for in ARCHITECTURE.md first.
 const pkg = JSON.parse(read('package.json'));
-check('the devDependencies are still exactly electron and electron-builder',
-  JSON.stringify(Object.keys(pkg.devDependencies).sort()) === '["electron","electron-builder"]',
+check('the devDependencies are still the documented build tools',
+  JSON.stringify(Object.keys(pkg.devDependencies).sort()) === '["@electron/asar","electron","electron-builder"]',
   JSON.stringify(Object.keys(pkg.devDependencies)));
 check('the only runtime dependency is still electron-updater',
   JSON.stringify(Object.keys(pkg.dependencies || {})) === '["electron-updater"]',

@@ -35,27 +35,19 @@ which installs a 0.1.0, serves it a 0.1.1, and checks that what is on disk
 afterwards is 0.1.1.
 
 **macOS** — `Yapper-<version>-arm64.dmg` (~95 MB), Apple Silicon, macOS 13 or
-newer. Three differences from the Windows path, all of them consequences of
-having no Apple Developer certificate:
+newer. Release builds use the Developer ID identity for team `54H77VDNJY`,
+hardened runtime and Apple's notarization service. Gatekeeper can verify a
+normal dmg install, and signed updates download and install from inside the
+app. The alternate `install.sh` checks the feed hash and then independently
+requires the expected signature, Team ID, stapled ticket and Gatekeeper
+acceptance; it never removes quarantine to bypass a failed check.
 
-- **The first open is blocked — unless it is installed with curl.** The build
-  is signed ad-hoc, so Gatekeeper refuses the dmg, and since macOS 15 the old
-  right-click → Open shortcut no longer clears that. What triggers the block is
-  `com.apple.quarantine`, which a *browser* attaches to a download and curl
-  does not, so the one-line installer sidesteps it entirely:
-  `curl -fsSL .../install.sh | bash`. It verifies the download against the
-  sha512 in the release manifest, which catches a corrupt or tampered file but
-  is not a signature and does not pretend to be. Taking the dmg instead means
-  *Open Anyway* in System Settings → Privacy & Security, or
-  `xattr -dr com.apple.quarantine /Applications/Yapper.app`.
-- **Updates notify rather than install themselves** — Squirrel.Mac refuses
-  unsigned updates, so the pill copies the one-line installer to the clipboard
-  instead of opening a page that ends in the dmg and the Gatekeeper detour all
-  over again. The engine is not re-downloaded, so an update costs ~95 MB rather
-  than another 650 MB, and meetings survive it. Permissions do **not**: an
-  ad-hoc signature changes identity with every build, so macOS treats each
-  update as a new app and asks again. A stable self-signed certificate would
-  fix that; a Developer ID one would fix all of it.
+- **The release process is deliberately strict.** A build is not uploaded
+  unless its packaged modules, Electron fuses, signature, Team ID,
+  notarization ticket and Gatekeeper assessment all pass.
+- **Updates install themselves.** The engine is not re-downloaded, so an
+  update costs ~95 MB rather than another 650 MB; meetings and permissions
+  survive because the bundle identity is stable.
 - **A system-audio permission has to be granted** on the first recording, on
   top of the microphone. It is what captures what the Mac is *playing* — the
   other side of the call. On macOS 14.4+ that is **System Audio Recording
@@ -183,12 +175,17 @@ calendar integration.
 ![A meeting](img/06-meeting.png)
 
 Stop, and the pipeline runs: full transcription (windowed, so memory stays
-flat), then notes, then an auto-title. A two-hour meeting takes about **115
+flat), then notes and the auto-title in one request. As soon as transcription
+finishes, the meeting opens and the note cards fill in while the model writes.
+A small line under the date shows locally measured time for transcription,
+first notes, and completion. A two-hour meeting takes about **115
 seconds to transcribe and 73 seconds to summarize** on an RTX 4080 — measured,
 not estimated. Notes are grouped into colored sections with timestamps back
 into the transcript, editable in place, regenerable in any style, exportable as
 Markdown, plain text, or PDF, and readable aloud. The full transcript is always
-there under the notes, and exports as Markdown too.
+there under the notes, and exports as Markdown too. While notes are being
+written, **Regenerate** becomes **Cancel**; canceling stops the model job, never
+saves a partial response, and restores the prior notes during a rewrite.
 
 **The audio's job ends with the transcript.** Once a real transcript exists,
 the recording is deleted — the transcript is the record. A per-meeting toggle
@@ -200,12 +197,14 @@ meetings costs megabytes, not gigabytes.
 
 ![Action items](img/04-actions.png)
 
-Every meeting's action items are collected into one list, with owner, due date
-and priority — **only when those were actually said**. A blank owner means
-nobody was named; the app never guesses. `URGENT:` is understood as a priority
-label, not a person. The same task restated in a later meeting folds into the
-existing entry instead of duplicating, and every item links to the meetings it
-came from.
+The notes can contain work for everyone in the meeting, so the personal list is
+manual: use **+ my list** beside only the individual Action items or Next steps
+you want to keep. Merely opening, indexing, or regenerating a meeting adds
+nothing. For a chosen item, owner, due date and priority are preserved **only
+when those were actually said**. A blank owner means nobody was named; the app
+never guesses. `URGENT:` is understood as a priority label, not a person. The
+same chosen task from a later meeting folds into the existing entry instead of
+duplicating, and keeps links to the source meetings.
 
 ### Search and Ask
 
@@ -251,7 +250,7 @@ transcript, notes, title. Useful for phone recordings and voice memos.
 | Auto-title, participants, markers | Working |
 | Import audio files | Working |
 | Today digest / This week review | Working |
-| Action items across meetings | Working |
+| Manually selected action items across meetings | Working |
 | Search + grounded Q&A | Working |
 | Exports (MD, TXT, PDF, transcript MD) | Working |
 | Meeting auto-detection + notification | Working, heuristic (mic usage) |
@@ -259,12 +258,12 @@ transcript, notes, title. Useful for phone recordings and voice memos.
 | BYOK providers + OS-keystore key storage | Working (6 providers) |
 | Dark/light theme, read-aloud, start at login | Working |
 | Windows installer (per-user NSIS) | Working, unsigned |
-| macOS build (dmg + zip, arm64) | Working, ad-hoc signed, **not notarised** |
+| macOS build (dmg + zip, arm64) | Developer ID signed, hardened and notarized release path |
 | First-run engine download with progress | Working |
-| Auto-update from the release feed | Working, proven end to end (Windows; on macOS it notifies and links the download) |
-| macOS | Working: Metal engine, system audio, meeting detection, notifications. Apple Silicon only, unsigned |
+| Auto-update from the release feed | Working on Windows and signed macOS builds |
+| macOS | Working: Metal engine, system audio, meeting detection, notifications. Apple Silicon only |
 | Mobile | **Missing** |
-| Speaker labels | **Missing** |
+| Speaker labels | macOS 14+: `Me:` plus separated remote voices and user name mapping; macOS 13: `Me:`/`Them:`; Windows: missing |
 | Calendar integration | **Missing** |
 | Sync, sharing, team features | **Missing** |
 
@@ -281,25 +280,20 @@ than assert (empty profile, notifications, dead waveforms).
 These are the true costs of the current build. None of them is hidden by the
 UI; several are deliberate trade-offs, marked as such.
 
-1. **The installer is unsigned.** A code-signing certificate costs money and
+1. **The Windows installer is unsigned.** A code-signing certificate costs money and
    identity paperwork; without one, SmartScreen warns on first install and some
    corporate policies block unsigned executables outright. The auto-updater
    works unsigned, but signing is what "install without a scary screen" costs.
-2. **macOS works, but is not signed.** Recording both sides, meeting detection,
-   notifications and the Metal engine all run there now — the first build was
-   done on an M4 Pro and the gaps that mattered were closed: system audio comes
-   from a ScreenCaptureKit helper rather than the Windows-only loopback, and
-   detection asks CoreAudio instead of the registry. What is left all traces
-   back to one missing thing, an Apple Developer certificate: Gatekeeper asks
-   on first open — though the one-line installer avoids that, since curl
-   attaches no quarantine — updates notify instead of self-installing, and
-   there is no notarised build to hand someone. System audio also depends on
-   the user granting System Audio Recording Only; refused, it records the
-   microphone alone and says so. Apple Silicon only. No mobile.
-3. **No speaker labels.** The transcript does not say who spoke. Typed
-   participants improve name spelling only. (The mic and system channels are
-   already separate internally, so "You:" vs "Them:" attribution is reachable —
-   see §7 — but today it does not exist.)
+2. **macOS is Apple Silicon only and still needs capture permission.** System
+   Audio Recording Only is required on 14.4+; macOS 13 uses the broader Screen
+   Recording fallback. Refused, Yapper records the microphone alone and says
+   so. A publish remains an explicit, audited release action: local builds are
+   not silently uploaded.
+3. **Speaker labels differ by platform.** macOS keeps microphone and system
+   tracks apart. On 14+ an additional local Core ML pass separates the remote
+   side into `Speaker 1`, `Speaker 2`, and so on; the user can map those labels
+   to attendee names. macOS 13 falls back to `Me:`/`Them:`. Windows receives an
+   already mixed stream and still has no reliable speaker labels.
 4. **Transcription ceiling is whisper `small`.** On clean audio it is very
    good; a managed cloud ASR pipeline is generally stronger on heavy accents,
    crosstalk and bad microphones. `medium` was measured against `small` on real
@@ -398,11 +392,11 @@ local capture client; Yapper is a local application, full stop.**
 ### Where another meeting-notes app is genuinely ahead
 
 1. **It installs without a warning.** Both now install and self-update, but
-   another meeting-notes app's binaries are code-signed and notarized; Yapper's installer trips
-   SmartScreen until it is signed, and Yapper's first run still downloads the
-   engine where another meeting-notes app is ready immediately.
+   another meeting-notes app's Windows binary is code-signed; Yapper's Windows installer still
+   trips SmartScreen. Yapper's macOS path is signed and notarized, but its first
+   run still downloads the engine where another meeting-notes app is ready immediately.
 2. **Platforms and sync.** Mac + Windows + iPhone, notes following the user.
-   Yapper is one Windows machine.
+   Yapper is one desktop machine with no sync.
 3. **Speaker attribution.** "You said / they said" changes how useful a
    transcript is, and Yapper has none of it.
 4. **Calendar awareness.** another meeting-notes app knows a meeting is coming, its title and
@@ -426,18 +420,16 @@ Neutral estimates of shape, not commitments; ordered by leverage.
   full loop proven by `build/e2e-update.ps1`.
 - **Code signing** — a certificate (or Azure Trusted Signing) to stop the
   SmartScreen warning; now the highest-leverage item for sharing.
-- **"You vs Them" speaker attribution** — mic and system audio already travel
-  on separate buses internally; recording them as two channels (or two files)
-  and tagging transcript segments by channel would deliver the 80% case
-  without diarization models.
+- ~~**"You vs Them" speaker attribution**~~ — **done on macOS**, then extended
+  with local remote-speaker diarization and explicit name mapping on macOS 14+.
 - **Calendar integration** — Google/Microsoft OAuth, read-only calendar scope;
   would turn detection from "a mic is in use" into "the 10:00 with Ana is
   starting", with titles and attendees prefilled.
 - **Semantic search** — a small local embedding model beside BM25, keeping the
   no-cloud promise while closing the synonym gap.
-- **macOS notarization** — the Metal build and the ScreenCaptureKit capture are
-  done; what remains is the Apple Developer certificate, which is also what
-  unlocks self-installing updates there.
+- ~~macOS notarization~~ — **done in the release path**: Developer ID, hardened
+  runtime, notarization, stapling and Gatekeeper checks are mandatory before
+  upload. Publishing a newly remediated build remains an explicit action.
 - **True diarization** — heavier (tinydiarize / pyannote class models); the
   channel split above is the cheap first step.
 - **Renderer split** — mechanical refactor of the 2,500-line file into

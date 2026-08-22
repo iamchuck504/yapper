@@ -1,19 +1,22 @@
 {
   "name": "yapper",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Records meetings, transcribes them on-device with Whisper, and writes structured notes with the model you choose",
+  "author": "Carlos Lopez",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node build/test-llm.js && node build/test-keystore.js && node build/test-single-flight.js && node build/test-wedged-server.js && node build/test-progressive.js && node build/test-live-logic.js && node build/test-dedup.js && node build/test-two-track.js && node build/test-actions.js && node build/test-library.js && node build/test-search.js && node build/test-digest.js && node build/test-provision.js && node build/test-bounds.js && node build/test-meetings.js && node build/test-meeting-detect.js && node build/test-platform-parity.js && node build/test-sysaudio.js && node build/test-audio-orphans.js && node build/test-section-coverage.js && node build/test-ipc-wiring.js && node build/test-docs.js",
+    "test": "node build/test-llm.js && node build/test-keystore.js && node build/test-single-flight.js && node build/test-wedged-server.js && node build/test-progressive.js && node build/test-live-logic.js && node build/test-dedup.js && node build/test-two-track.js && node build/test-speakers.js && node build/test-actions.js && node build/test-library.js && node build/test-search.js && node build/test-digest.js && node build/test-provision.js && node build/test-bounds.js && node build/test-security.js && node build/verify-package.js && node build/test-meetings.js && node build/test-meeting-detect.js && node build/test-platform-parity.js && node build/test-sysaudio.js && node build/test-audio-orphans.js && node build/test-section-coverage.js && node build/test-ipc-wiring.js && node build/test-docs.js",
+    "verify-package": "node build/verify-package.js",
     "dist": "electron-builder --win",
     "release": "node build/release.js"
   },
   "dependencies": {
-    "electron-updater": "^6.3.9"
+    "electron-updater": "^6.8.9"
   },
   "devDependencies": {
-    "electron": "^33.0.0",
+    "@electron/asar": "^3.4.1",
+    "electron": "^43.4.1",
     "electron-builder": "^26.15.3"
   },
   "build": {
@@ -37,6 +40,9 @@
       "provision.js",
       "meetings.js",
       "sysaudio.js",
+      "speaker-diarizer.js",
+      "security.js",
+      "storage.js",
       "preload.js",
       "renderer/**/*",
       "!renderer/.pdf-export.html",
@@ -46,12 +52,25 @@
       "build/yapper-tray-Template@2x.png",
       "build/calibration.wav",
       "build/mic-probe",
-      "build/system-audio"
+      "build/system-audio",
+      "build/speaker-diarize"
     ],
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "loadBrowserProcessSpecificV8Snapshot": true,
+      "resetAdHocDarwinSignature": true,
+      "grantFileProtocolExtraPrivileges": false
+    },
     "asarUnpack": [
       "build/calibration.wav",
       "build/mic-probe",
-      "build/system-audio"
+      "build/system-audio",
+      "build/speaker-diarize"
     ],
     "win": {
       "target": [
@@ -81,8 +100,10 @@
       ],
       "icon": "build/yapper-icon-dark.png",
       "category": "public.app-category.productivity",
-      "identity": "-",
-      "hardenedRuntime": false,
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "notarize": true,
       "minimumSystemVersion": "13.0",
       "extendInfo": {
         "NSCameraUsageDescription": null,

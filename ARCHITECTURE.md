@@ -33,10 +33,11 @@ Reading order for a review, shortest useful path first:
 yapper/
 ├── main.js  engine.js  live.js  llm.js  keystore.js  bounds.js  preload.js
 ├── sysaudio.js          macOS system audio: helper lifecycle, buffer, mixing
+├── speaker-diarizer.js  optional diarization, time alignment and name maps
 ├── meetings.js          which running app counts as a meeting, per platform
 ├── renderer/            all three windows, plus fonts and the audio worklet
 ├── build/               tests, icon pipeline, and the calibration sample
-├── mac/                 the two Swift helpers and the macOS build scripts
+├── mac/                 the Swift helpers and the macOS build scripts
 ├── setup.ps1            Windows provisioning: engine, models, Electron, shortcut
 ├── bin/    models/      downloaded, gitignored
 ├── README.md            user guide
@@ -53,7 +54,7 @@ These shaped most of the decisions below, so they are worth stating first.
 |---|---|
 | **Audio never leaves the machine** | Transcription is local (whisper.cpp). The only thing that goes out is the transcript, to generate notes. |
 | **Never lose a transcript** | Audio is written to disk as it arrives, already in the format the transcriber reads, so a power cut costs the tail of a meeting rather than the meeting. Once a transcript exists the audio has done its job and is released (§9b). Deleting a meeting goes to the recycle bin. |
-| **Nothing to compile on the user's machine** | No native Node modules, no Python, no bundler, no transpiler. One npm devDependency. |
+| **Nothing to compile on the user's machine** | No native Node modules, no Python, no bundler, no transpiler. Build-time npm dependencies never ship as runtime code. |
 | **It has to work on a laptop, not just a workstation** | The app measures the machine on first launch and picks what it can promise from the result (§7). |
 
 ---
@@ -98,27 +99,30 @@ These shaped most of the decisions below, so they are worth stating first.
 
 ## 3. Module map
 
-Application code, 6,900 lines total. No framework, no build step — the files
+Application code, about 12,700 lines total. No framework, no build step — the files
 that ship are the files that run.
 
 ### Main process
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 2843 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
-| `engine.js` | 988 | whisper.cpp lifecycle, the tier table, calibration, WAV read/write, full-file transcription |
+| `main.js` | 3402 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `engine.js` | 1113 | whisper.cpp lifecycle, the tier table, calibration, Metal-to-CPU fallback, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
-| `llm.js` | 367 | Note providers (§6) behind one `generate()` call |
+| `llm.js` | 552 | Note providers (§6), including streamed and cancelable responses, behind one `generate()` call |
 | `live.js` | 310 | Live transcription: rolling window, LocalAgreement-2 confirmation |
-| `actions.js` | 253 | Reading action items out of the notes, and folding duplicates together |
-| `provision.js` | 380 | First-run engine download for installed copies (Windows and macOS): resumable and retried, recording-first in its ordering, plus the version comparison behind update notices |
+| `actions.js` | 253 | Parsing user-selected action items from notes, and folding duplicates together |
+| `provision.js` | 505 | First-run engine download for installed copies (Windows and macOS): pinned, SHA-256 verified, size-bounded, resumable and retried |
 | `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
 | `sysaudio.js` | 234 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
+| `speaker-diarizer.js` | 223 | Optional macOS Core ML diarization, timestamp alignment, stable labels and per-meeting name maps |
 | `meetings.js` | 72 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
-| `preload.js` | 118 | The only bridge between renderer and main |
+| `security.js` | 99 | Canonical meeting and import paths; blocks traversal and folder/file symlink escapes |
+| `storage.js` | 77 | Atomic bounded meeting-file access plus replacement for settings, reminders, caches and indexes |
+| `preload.js` | 121 | The only bridge between renderer and main |
 
 `keystore.js` and `bounds.js` are separate files for one reason: they are pure
 functions, so they can be tested without booting Electron, and `keystore.js`
@@ -129,9 +133,9 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 2964 | Main window: capture graph, views, notes rendering, exports, reminders, search, digests, settings |
-| `renderer/style.css` | 1661 | Everything visual, light and dark |
-| `renderer/index.html` | 503 | Main window markup |
+| `renderer/app.js` | 3472 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
+| `renderer/style.css` | 1782 | Everything visual, light and dark |
+| `renderer/index.html` | 554 | Main window markup |
 | `renderer/bubble.html` | 198 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
 | `renderer/bubble.js` | 174 | Its behaviour, including sizing itself to its own contents |
 | `renderer/splash.html` | 116 | Boot screen, including the first-run calibration status; follows the theme |
@@ -141,18 +145,19 @@ reachable in a test.
 organised in labelled sections (capture, live preview, recording, meeting view,
 exports, reminders, settings) but it is one module.
 
-### The two native helpers (macOS)
+### The native helpers (macOS)
 
-Two facts Windows reads straight out of the OS have no JavaScript equivalent on
-macOS, so each is a small Swift binary compiled by `mac/build-app.sh` and
+The macOS capture APIs and the local Core ML diarizer have no JavaScript equivalent,
+so each is a small Swift binary compiled by `mac/build-app.sh` and
 unpacked from the asar — nothing can be executed from inside one.
 
 | Helper | Lines | Answers |
 |---|---:|---|
 | `mac/system-audio.swift` | 339 | What the machine is playing, as 16 kHz mono PCM on stdout (a Core Audio process tap, falling back to ScreenCaptureKit) |
 | `mac/mic-probe.swift` | 58 | Which processes hold the microphone right now, as bundle ids (CoreAudio) |
+| `mac/speaker-diarize/` | SwiftPM executable | Distinct remote voices and their time ranges, using FluidAudio's offline Core ML pipeline on macOS 14+ |
 
-They are deliberately dumb: they answer one question on stdout and exit codes
+The capture helpers are deliberately dumb: they answer one question on stdout and exit codes
 carry the only nuance (`2` from the audio helper means a permission is missing,
 which is recoverable — and since there are two routes there are two
 permissions, so it names which one on stderr first: sending someone to Screen
@@ -162,8 +167,13 @@ JavaScript — buffering, mixing, which bundle id counts as a meeting — stays 
 `sysaudio.js` and `meetings.js`, where it can be tested without a Mac in the
 loop.
 
-Neither is required. Without the audio helper the app records the microphone
-alone and says so; without the mic probe, auto-detection stays off. That is the
+The diarizer similarly returns only bounded JSON time ranges. FluidAudio's
+models run locally through Core ML; `speaker-diarizer.js` owns the fallbacks,
+stable display numbering, alignment to Whisper lines and user name mapping.
+
+None is required. Without the audio helper the app records the microphone
+alone and says so; without the mic probe, auto-detection stays off; without the
+diarizer, remote lines keep the `Them:` track label. That is the
 same shape as the CUDA build on Windows: better when present, never fatal when
 absent.
 
@@ -211,14 +221,35 @@ recording.wav ─► engine.transcribeFile()  (windowed, 120 s + 2 s overlap)
                      ▼
               transcript.txt ─► llm.generate() ─► notes.md
                                      │
-                                     └─► generate-title ─► title.txt
+                                     └─► title metadata ─► title.txt
 ```
+
+The normal stop and import paths ask for the notes and automatic title in that
+single model response. Older versions waited for a second provider request to
+name the meeting before showing notes that were already ready. `generate-title`
+remains as a best-effort compatibility path, not part of the normal flow.
+HTTP providers use server-sent events, and the Claude CLI forwards stdout as it
+arrives. `notes-progress` paints the safe partial draft without action-list
+buttons; the final response is the only one written to disk. The meeting view
+also shows locally measured transcription, first-text and completion times, so
+a slow transcription and a slow provider are distinguishable.
+
+The final transcriber is already doing 120-second windows during the meeting,
+so stop normally leaves only its tail. Starting a speculative note request from
+that prefix would duplicate provider cost and then require a second correction
+request to cover the ending, for only a few seconds of overlap. Yapper keeps one
+note request instead; it streams that request and makes it cancelable. Canceling
+aborts the CLI process or HTTP connection, never writes a partial response, and
+restores the last complete notes during regeneration.
 
 On macOS a call is transcribed as two files instead of one: the microphone
 track and the system-audio track each get their own `transcribeFile()` pass
 (and their own head start), and the lines are interleaved by timestamp with
-`Me:`/`Them:` labels — which side of the call spoke is a fact of which stream
-carried the words, not an inference. Windows whose PCM is digital silence are
+`Me:` plus remote labels. On macOS 14+, FluidAudio diarizes the system track on
+the Neural Engine in parallel with Whisper and `speaker-diarizer.js` aligns its
+time ranges to Whisper's lines as stable `Speaker 1`, `Speaker 2`, etc. A
+failure is non-fatal and falls back to `Them:`. Which side of the call spoke is
+still a fact of which stream carried the words, not an inference. Windows whose PCM is digital silence are
 skipped before reaching the server, a window's leading silence is trimmed (and
 its stamps corrected back) because Whisper stamps sloppily across it, and a
 segment whose claimed audio region is silence is dropped as a hallucination —
@@ -237,10 +268,11 @@ Everything that looks at more than one meeting reads the same index, and none of
 it stores a second copy of anything:
 
 ```
-Meetings/*/  ─► library.refresh() ─► library.json      (one entry per meeting)
+Meetings/*/  ─► library.refresh() ─► index.json        (one entry per meeting)
                      │                    │
-                     ├─► actions.parseActionItems() ─► reminders.json
-                     │        (owner, due date, priority — only if written down)
+                     ├─► user chooses one note bullet
+                     │        └─► actions.parseActionItems() ─► reminders.json
+                     │             (owner, due date, priority — only if written)
                      │
                      ├─► search.buildIndex() ─► passages, in memory only
                      │            │
@@ -283,8 +315,9 @@ bullet whose citation does not resolve to a meeting in that week.
 The model call never blocks the view. `weekly-summary` answers immediately with
 the facts and whatever review is on disk — fresh, or stale while a rewrite runs
 in the background — and `weekly-written` tells the renderer when to re-read. A
-library refresh that changed any meeting queues that write early, so by the
-time the week view is opened the review is usually already on disk. A failed
+library refresh that changed any meeting queues that write after 30 seconds of
+idle time, never during recording or foreground note generation, so by the time
+the week view is opened the review is usually already on disk. A failed
 write is remembered against the fingerprint it failed for, so a reload shows
 the error instead of re-dialing the model; only an explicit rewrite, or notes
 that actually changed, try again.
@@ -293,16 +326,16 @@ that actually changed, try again.
 
 ## 5. IPC surface
 
-78 channels, all declared in `preload.js` — that file is the complete list of
+85 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
 
-**Request/response (51)** — recording lifecycle (`recording-start`,
+**Request/response (56)** — recording lifecycle (`recording-start`,
 `recording-finish`), import (`import-audio`, `import-read`, `import-open`,
 `import-close`, `legacy-audio`), processing (`transcribe`, `summarize`,
-`regenerate`, `generate-title`, `save-notes`), meetings (`list-meetings`,
-`load-meeting`, `delete-meeting`, `open-folder`), reminders (4), settings
+`generate-notes`, `regenerate`, `cancel-notes`, `generate-title`, `save-notes`), meetings (`list-meetings`,
+`load-meeting`, `set-speaker-map`, `rename-meeting`, `delete-meeting`, `open-folder`), reminders (5, including the bulk `update-reminders`), settings
 (`get/set-open-at-login`, `get/set-bubble-corner`, `get/set-llm-settings`, `test-llm`, `style-sections`,
 `check-environment`), first-run and updates (`engine-setup`, `update-restart`,
 `open-releases-page`), the two halves of the macOS Screen Recording grant the
@@ -319,7 +352,8 @@ frame, so there is no round trip to wait for), `recording-state`,
 `autodetect-set`, `mark-shortcut`, `sys-gain` (macOS: the system meter's slider,
 since the mixing it controls happens in main), and five bubble messages.
 
-**Main → renderer (15)** — `transcribe-progress`, `live-transcript`,
+**Main → renderer (17)** — `ui-command` (a menu accelerator naming what it wants: search, export, rename…; the page decides what that means right now), `transcribe-progress`, `notes-progress` (partial
+notes plus first-text timing), `live-transcript`,
 `meeting-detected`, `meeting-ended`, `start-recording`, `mark-moment`,
 `remote-stop`, `remote-pause`, `bubble-state`, `keep-audio-changed`,
 `engine-setup-progress`, `update-ready`, `system-audio-status`,
@@ -333,8 +367,9 @@ the renderer any other way).
 ## 6. Note providers
 
 Notes need a model, and different people pay for one differently. Everything
-goes through `llm.generate(config, {system, input})`; the three places that
-produce text (summarize, regenerate, auto-title) do not know who answers.
+goes through `llm.generate(config, {system, input})`; note generation,
+regeneration, search answers, weekly writing and the compatibility auto-title
+path do not know who answers.
 
 | Provider | Transport | Credential |
 |---|---|---|
@@ -398,8 +433,7 @@ pipeline was run at that length rather than extrapolated to it
 | Live transcript | 2.2 s median lag, no drift over the session |
 | Final transcription | 115 s — 63x real time — for +19 MB of memory |
 | Transcript | 84 KB, 2,040 timestamped lines, last stamp at 1h59m |
-| Notes | 73 s from a real 159 KB transcript, all sections, timestamps out to 208 min |
-| Automatic title | produced from the full transcript |
+| Notes + automatic title | 73 s from a real 159 KB transcript, one model request, all sections, timestamps out to 208 min |
 | Opening the meeting | 512 ms |
 | Exports | .md 8 KB, .txt 159 KB, transcript .md 161 KB, PDF 133 KB in 497 ms |
 | Process memory | 107 MB → 125 MB across the entire run |
@@ -578,7 +612,10 @@ Documents\Meetings\YYYY-MM-DD_HHMM\
   recording.sys.wav  macOS only: system audio alone; both deleted at stop when
                      the system side stayed silent the whole meeting
   transcript.txt     "[hh:mm:ss] text" per line; when the per-side tracks
-                     existed, "[hh:mm:ss] Me: text" / "[hh:mm:ss] Them: text"
+                     existed, carries Me / Speaker N / mapped-name labels
+  transcript.raw.txt immutable machine labels, before user name mapping
+  speaker-map.json   per-meeting Speaker N -> name choices
+  speaker-segments.json  local diarization time ranges (when available)
   notes.md           the generated notes
   title.txt          absent when naming was not possible
   participants.txt   attendees, for name biasing and attribution
@@ -587,7 +624,7 @@ Documents\Meetings\YYYY-MM-DD_HHMM\
 %APPDATA%\yapper\
   settings.json      theme, startup, measured tier, chosen provider, and
                      llmByProvider: a sealed key, model and endpoint per provider
-  reminders.json     action items across all meetings
+  reminders.json     action items the user selected across meetings
   index.json         the meeting index — a cache, safe to delete
   digests\
     weekly-YYYY-Www.json   one written review per week, with the fingerprint of
@@ -639,14 +676,13 @@ audio so it can be retried, which is the whole reason to have it.
 
 ## 10. Dependencies and supply chain
 
-**npm: two devDependencies, one runtime dependency.** To develop: `electron@^33`
-and `electron-builder@^25` (the installer). Shipping inside the app: exactly one
-package, `electron-updater` — updates from the release feed cannot be done from
-plain Node without reimplementing signature checks and differential downloads,
-and that is the one job worth buying a dependency for. Everything else is still
-plain Electron and Node: no bundler, no transpiler, no test framework. This
-footprint is asserted by `test-docs.js` — a new dependency has to change this
-paragraph to get in.
+**npm: three devDependencies, one runtime dependency.** To develop and package:
+`electron@^43`, `electron-builder@^26`, and `@electron/asar@^3` for inspecting
+the exact archive before release. Shipping inside the app: exactly one package,
+`electron-updater` — updates from the release feed cannot be done from plain
+Node without reimplementing signature checks and differential downloads. The
+rest is plain Electron and Node: no bundler, transpiler or test framework. This
+footprint is asserted by `test-docs.js`.
 
 **Downloaded by `setup.ps1`, never committed:**
 
@@ -727,51 +763,35 @@ why:
 **macOS** ships a dmg built by `mac/build-app.sh` on Apple Silicon. The platform
 branches live in the same files: `provision.js` downloads a self-hosted Metal
 engine from the feed (ggml-org publishes no mac binary — `mac/build-engine.sh`
-compiles and publishes it once per engine version), and the two native helpers
+compiles and publishes it once per engine version), and the native helpers
 are compiled alongside the app.
 
-**And a zip, plus `mac/install.sh`.** Without a Developer ID certificate the dmg
-route ends in a Gatekeeper block, and since macOS 15 the right-click → Open
-escape is gone — the user has to find *Open Anyway* in System Settings. The
-block is not macOS judging the app, though: it is `com.apple.quarantine`, which
-the *browser* attaches to a download. `curl` attaches none, so a one-line
-installer that fetches the zip and unpacks it into `/Applications` lands a copy
-that opens normally. It is not a stand-in for signing — Apple vouches for
-nothing either way — so what the script puts in place of a signature is a
-sha512 check against `latest-mac.yml`: enough to catch a corrupt or tampered
-download, not enough to survive a compromised feed, and it says so. `ditto`
-rather than `unzip`, because the Electron framework's `Versions/Current`
-symlink does not survive the latter. `mac/e2e-install.sh` proves all of it
-against a local feed. When the certificate arrives this becomes a footnote and
-notarization takes over.
+**And a zip, plus `mac/install.sh`.** This is retained as an alternate scripted
+install, with its sha512 check against `latest-mac.yml`. New release builds use
+the Developer ID Application certificate for team `54H77VDNJY`, hardened
+runtime and Apple notarization, so the dmg is now the normal route. `ditto`
+rather than `unzip` remains important because the Electron framework's
+`Versions/Current` symlink does not survive the latter.
 
 Three constraints are worth knowing before touching that build, all learned the
 hard way and all documented in `mac/README.md`:
 
-- **The signature identity is not cosmetic.** electron-builder leaves Electron's
-  own ad-hoc signature unless told otherwise, so the bundle claimed
-  `com.yapper.meetingnotes` while its signature said `Electron`. macOS keys
-  notification authorisation on the signature, so the app was never registered
-  and never got to ask — notifications simply did not exist, silently.
-  `identity: "-"` fixes it; `hardenedRuntime` is off beside it, since without a
-  certificate it buys nothing and would demand a microphone entitlement the
-  defaults omit.
+- **The signature identity is not cosmetic.** `mac/build-app.sh` requires the
+  exact Developer ID identity, validates the `yapper-notary` keychain profile,
+  and the build enables hardened runtime with explicit child-process
+  entitlements. A local ad-hoc fallback is not permitted in the release script.
 - **Deployment targets must be pinned.** `swiftc` defaults to the SDK's version,
   so building on a beta produces helpers that run on that beta and nowhere else,
   while the Electron app opens fine — an install that looks healthy and quietly
   has neither system audio nor meeting detection.
-- **Updates only notify.** Squirrel.Mac refuses unsigned updates, so the pill
-  opens the download page instead of promising a restart it cannot deliver. The
-  check reads `latest-mac.yml` and falls back to `latest.yml`: electron-builder
-  writes one manifest per platform, so a release cut on a Mac leaves the Windows
-  manifest at its old version, and reading only that one announces nothing.
-  `mac/build-app.sh` uploads the mac manifest with the dmg — it used to stay in
-  `dist/`, which is why the feed had never carried one.
+- **Updates self-install on signed builds.** `electron-updater` reads
+  `latest-mac.yml`, downloads the signed zip in the background and applies it
+  on quit or when the sidebar offers a restart. `mac/build-app.sh` uploads the
+  mac manifest and zip with the dmg.
 
-Gatekeeper still rejects the ad-hoc signature on someone else's machine, and
-since macOS 15 right-click → Open no longer clears it. That, and self-installing
-updates, and notarisation, are all the same missing item: an Apple Developer
-certificate.
+The remaining release gate is procedural: build, verify and then explicitly
+authorize submission to Apple's notary service. No current public release is
+implicitly replaced by these local changes.
 
 ---
 
@@ -779,8 +799,9 @@ certificate.
 
 | Surface | Position |
 |---|---|
-| Renderer privileges | `contextIsolation: true`, `nodeIntegration: false` on all three windows. No Node in any page. |
-| Renderer → main | Only the channels in `preload.js` (§5). No `ipcRenderer` exposure. |
+| Renderer privileges | `contextIsolation: true`, `nodeIntegration: false`, Chromium sandbox and web security on all three visible windows and the offscreen PDF renderer. No Node in any page. |
+| Renderer → main | Only the channels in `preload.js` (§5). Every call verifies the exact top frame, page URL and owning window; the bubble gets only its theme read and four control channels. |
+| Navigation and permissions | Visible windows load from the privileged `yapper://` protocol, which serves only bundled renderer files; Electron's extra `file://` privileges are fused off. Every window is locked to its page, new windows/webviews are denied, and browser media permissions are granted only to the main page. |
 | CSP | `default-src 'self'` on every page; `index.html` additionally `style-src 'self'` (no inline styles) and `media-src blob:` |
 | API key at rest | Sealed with `safeStorage` (DPAPI on Windows, Keychain on macOS), never in plaintext `settings.json`. Where a platform has no keystore, the UI says the key is stored unencrypted rather than implying protection it does not have. |
 | One key per provider | Keys are stored under the provider they were issued for. A single shared slot meant switching from Gemini to OpenRouter would have sent Google's key to OpenRouter's servers, and the UI would have called that provider configured. |
@@ -788,7 +809,9 @@ certificate.
 | Keys in error text | Provider rejection messages are shown to the user, and some providers quote the Authorization header back. The key is redacted out of any message before it is displayed. |
 | API key in the renderer | Never sent. The renderer learns only whether one is set. |
 | Opening URLs | `shell.openExternal` accepts only the provider sign-up pages the app itself offers — an allowlist, not an arbitrary URL from the renderer. |
-| Deleting files | The delete handler refuses any path that is not a child of the meetings folder; tested against eight ways of trying to escape it. |
+| Meeting files | Every renderer-supplied meeting path must be a real, direct, non-symlink child of the library. Imports can read only the exact file granted by the native picker. |
+| Downloads | Engine archives and pinned model revisions have fixed SHA-256 digests and size limits; HTTPS redirects cannot downgrade to HTTP. |
+| Model endpoints | Remote endpoints require HTTPS and responses are bounded; loopback HTTP remains available for Ollama and local test servers. |
 | Audio | Never transmitted. The transcript is sent only to the configured provider. |
 | Free-tier data use | Surfaced in the UI: free tiers generally train on what is sent, and a meeting transcript is not always the user's to share. |
 
@@ -809,7 +832,8 @@ three groups.
 | `test-provider-keys.js` | Each provider keeps its own key, model and endpoint; switching neither inherits nor loses one; a legacy single-slot profile migrates |
 | `test-live-logic.js` | The confirmation rules — prefix agreement, repeat stripping, degenerate-output detection |
 | `test-dedup.js` | Transcript cleanup: which repeats are removed, which survive, and the time window that separates a seam artefact from a person restating something |
-| `test-two-track.js` | Per-side call tracks: the silence detector that spares the far-side track its inferences, and the merge that interleaves both sides by time with Me:/Them: labels without inventing, dropping or reordering a word |
+| `test-two-track.js` | Per-side call tracks: the silence detector that spares the far-side track its inferences, and the merge that interleaves both sides by time with Me/remote labels without inventing, dropping or reordering a word |
+| `test-speakers.js` | Diarization JSON bounds, timestamp overlap, stable Speaker N numbering, safe name mapping and the native helper self-test |
 | `test-two-track-app.js` | The two-track branch through the real app: a folder with per-side tracks comes back labelled, ordered, free of words hallucinated into the silent stretches, and with its audio released |
 | `test-library.js` | The meeting index: what counts as content, day and week selection, and the stamp that decides when a cached entry can be reused |
 | `test-actions.js` | Extraction and deduplication: only what the notes actually say becomes an item, `URGENT:` is not an owner, an undated item never gains a date, and restating a task merges instead of duplicating |
@@ -829,6 +853,7 @@ run can never touch a real meeting):
 | Test | Covers |
 |---|---|
 | `test-record-cycle.js` | The whole recording cycle: audio in through the real IPC, paused halfway, stopped, every artefact checked |
+| `test-notes-cancel.js` | Cancel reaches the actual model job, exits the busy state, restores the previous complete notes and leaves `notes.md` byte-for-byte unchanged |
 | `test-record-recovery.js` | Capture refused, and the audio device vanishing mid-start |
 | `test-faults.js` | Fault injection: the transcription server killed mid-pass, two transcriptions at once, a meeting deleted under a running job, a missing model, and file handles or child processes left behind across repeated cycles |
 | `test-extremes.js` | Boundary values and scale: the clock past an hour, a 75-minute recording transcribed for real, accents and emoji and HTML-looking text, an empty WAV, notes with no headings, 300 meetings in the sidebar, and the live loop given 20 minutes of audio at once |
@@ -838,6 +863,7 @@ run can never touch a real meeting):
 | `test-search-ui.js` | The search view against a real model: results carry their meeting, date, timestamp and participants, a result opens its meeting, nothing-found says so, and a question about something never discussed returns no answer rather than an invented one |
 | `test-home-ui.js` | The day and the week against a real model: only today's meetings and decisions appear, every line opens its source, an empty day offers the last one that had something, the weekly review cites real meetings and does not repeat the task list, and a week with one set of notes is explained rather than written |
 | `test-actions-ui.js` | The action list: filters, the meeting each item came from, and completing one |
+| `test-speakers-ui.js` | The speaker-matching panel through the real IPC: participant suggestions, immediate transcript update, immutable raw labels and names surviving reopen |
 | `test-silence-warning.js` | A microphone delivering exact zeros — the asleep wireless headset — is announced on screen within seconds, the recording keeps going, and the warning clears itself when the device wakes |
 | `test-bubble-corner.js` | Which corner the capsule appears in: measured geometrically against the display's work area rather than by reading the setting back, including that a resize keeps it in the corner instead of walking it out |
 | `test-app-menu.js` | macOS: the menu bar is this app's rather than Electron's default — the two actions that matter are in File and say which is available right now, Edit carries the editing roles the text fields need, and Reload and the developer tools ship only to unpackaged builds |
@@ -883,23 +909,18 @@ the doc cannot quietly drift away from the code.
 
 ## 14. Known gaps
 
-- Neither build is code-signed by an authority — SmartScreen warns on first
-  install on Windows (§11), Gatekeeper asks on first open on macOS. The macOS
-  build is ad-hoc signed under its own bundle id, which is not a trust
-  statement but is what makes the OS deliver its notifications at all.
-- macOS updates notify instead of installing themselves: Squirrel.Mac refuses
-  unsigned updates. Same certificate, same gap.
-- macOS system audio depends on the user granting Screen Recording. Refused,
-  the recording is the microphone alone — degraded, and said out loud, but not
-  what was asked for.
+- Windows is not yet code-signed, so SmartScreen still warns on first install.
+  macOS now has a Developer ID + notarization release path, but the remediated
+  build has not yet been published.
+- macOS system audio depends on System Audio Recording permission on 14.4+ and
+  Screen Recording on macOS 13. Refused, the recording is the microphone alone
+  — degraded, and said out loud, but not what was asked for.
 - Apple Silicon only. An Intel or universal build needs a second engine compile
   and doubles the artifact size.
-- Speaker separation is by side of the call, not by person. On macOS the
-  microphone and the system audio are kept as separate tracks and transcribed
-  separately, so lines carry "Me:"/"Them:" labels — but everyone on the far
-  side is one "Them". Telling remote speakers apart needs real diarisation
-  (voice embeddings), which the app does not do. On Windows the streams arrive
-  already mixed, so there are no labels at all; attendees are typed by hand and
-  bias name spelling, and the notes model attributes from labels and context.
+- Speaker separation is person-level only on macOS 14+, where the remote track
+  is diarized locally. It is meeting-local: `Speaker 1` in one meeting is not
+  recognized as the same voice in another, and names require explicit user
+  mapping. macOS 13 falls back to `Me:`/`Them:`. On Windows the streams arrive
+  already mixed, so there are no reliable labels.
 - No playback from the timestamps in the notes.
-- `renderer/app.js` is 2,647 lines in one module.
+- `renderer/app.js` is about 3,000 lines in one module.

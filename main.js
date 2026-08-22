@@ -1,6 +1,6 @@
-﻿const { app, BrowserWindow, ipcMain, session, desktopCapturer, shell, dialog, screen,
+﻿const { app, BrowserWindow, ipcMain: electronIpcMain, session, desktopCapturer, shell, dialog, screen,
   Notification, globalShortcut, safeStorage, powerSaveBlocker,
-  Tray, Menu, nativeImage, systemPreferences, nativeTheme } = require('electron');
+  Tray, Menu, nativeImage, systemPreferences, nativeTheme, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
@@ -16,9 +16,70 @@ const search = require('./search');
 const digest = require('./digest');
 const provision = require('./provision');
 const sysaudio = require('./sysaudio');
+const speakerDiarizer = require('./speaker-diarizer');
 const { pathToFileURL } = require('url');
+const { resolveDirectChild, resolveRegularFile, resolveDirectFile,
+  resolveDirectFileForWrite } = require('./security');
+const { atomicWriteFileSync, readMeetingText, writeMeetingText,
+  meetingFileExists } = require('./storage');
 
 const MEETINGS_DIR = path.join(app.getPath('documents'), 'Meetings');
+const RENDERER_DIR = path.join(__dirname, 'renderer');
+const APP_SCHEME = 'yapper';
+const appPageUrl = name => `${APP_SCHEME}://app/${name}`;
+const MAIN_PAGE_URL = appPageUrl('index.html');
+const BUBBLE_PAGE_URL = appPageUrl('bubble.html');
+const SPLASH_PAGE_URL = appPageUrl('splash.html');
+
+protocol.registerSchemesAsPrivileged([{
+  scheme: APP_SCHEME,
+  privileges: { standard: true, secure: true, supportFetchAPI: true }
+}]);
+
+function pageUrl(url) {
+  try {
+    const parsed = new URL(url);
+    parsed.hash = '';
+    parsed.search = '';
+    return parsed.href;
+  } catch {
+    return '';
+  }
+}
+
+/** Keep a privileged renderer on the one local document it was built for. */
+function lockWindowToPage(browserWindow, allowedUrl) {
+  const allowed = pageUrl(allowedUrl);
+  const contents = browserWindow.webContents;
+  contents.on('will-navigate', (event, url) => {
+    if (pageUrl(url) !== allowed) event.preventDefault();
+  });
+  contents.on('will-redirect', (event, url) => {
+    if (pageUrl(url) !== allowed) event.preventDefault();
+  });
+  contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  contents.on('will-attach-webview', event => event.preventDefault());
+}
+
+/** Serve only bundled renderer assets, with no file:// privileges. */
+function registerAppProtocol() {
+  return protocol.handle(APP_SCHEME, request => {
+    let url;
+    try { url = new URL(request.url); } catch { return new Response('Not found', { status: 404 }); }
+    if (url.host !== 'app' || url.username || url.password || url.port) {
+      return new Response('Not found', { status: 404 });
+    }
+    let relative;
+    try { relative = decodeURIComponent(url.pathname).replace(/^\/+/, ''); } catch {
+      return new Response('Not found', { status: 404 });
+    }
+    const file = path.resolve(RENDERER_DIR, relative);
+    if (!relative || (file !== RENDERER_DIR && !file.startsWith(RENDERER_DIR + path.sep))) {
+      return new Response('Not found', { status: 404 });
+    }
+    return net.fetch(pathToFileURL(file).href);
+  });
+}
 
 // An installed copy runs from a read-only asar and cannot keep the 1.3 GB
 // engine next to its code the way a development checkout does. It lives in a
@@ -85,6 +146,50 @@ const CLAUDE_FALLBACKS = process.platform === 'win32'
 
 let win;
 let bubble = null;
+
+const BUBBLE_IPC = new Set([
+  'get-theme', 'bubble-resize', 'bubble-stop', 'bubble-pause', 'bubble-focus-main'
+]);
+
+function trustedRenderer(event, channel) {
+  const frame = event && event.senderFrame;
+  if (!frame || frame !== event.sender.mainFrame) return false;
+  const current = pageUrl(frame.url);
+  if (win && !win.isDestroyed()
+      && event.sender === win.webContents && current === MAIN_PAGE_URL) return true;
+  return BUBBLE_IPC.has(channel)
+    && bubble && !bubble.isDestroyed()
+    && event.sender === bubble.webContents && current === BUBBLE_PAGE_URL;
+}
+
+function assertTrustedRenderer(event, channel) {
+  if (trustedRenderer(event, channel)) return;
+  const source = event && event.senderFrame && event.senderFrame.url || 'unknown frame';
+  console.warn(`[security] blocked IPC ${channel} from ${source}`);
+  throw new Error('This request did not come from a trusted Yapper window.');
+}
+
+// Every renderer-to-main channel passes through this gate. This includes
+// sendSync (the initial theme), ordinary sends and request/response handlers.
+const ipcMain = {
+  handle(channel, listener) {
+    return electronIpcMain.handle(channel, (event, ...args) => {
+      assertTrustedRenderer(event, channel);
+      return listener(event, ...args);
+    });
+  },
+  on(channel, listener) {
+    return electronIpcMain.on(channel, (event, ...args) => {
+      try {
+        assertTrustedRenderer(event, channel);
+      } catch {
+        if (channel === 'get-theme') event.returnValue = null;
+        return;
+      }
+      return listener(event, ...args);
+    });
+  }
+};
 
 function broadcast(channel, payload) {
   for (const w of [win, bubble]) {
@@ -159,12 +264,15 @@ function createBubble() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true
     }
   });
+  lockWindowToPage(bubble, BUBBLE_PAGE_URL);
   bubble.setAlwaysOnTop(true, 'screen-saver');
   bubble.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  bubble.loadFile(path.join(__dirname, 'renderer', 'bubble.html'));
+  bubble.loadURL(BUBBLE_PAGE_URL);
   bubble.once('ready-to-show', () => { bubble.showInactive(); keepBubbleOnScreen(); });
   bubble.on('moved', keepBubbleOnScreen);          // after the user drags it
   bubble.on('closed', () => { bubble = null; stopBubbleHoverWatch(); });
@@ -364,6 +472,12 @@ function buildAppMenu() {
     showMainWindow();
     if (win && !win.isDestroyed()) win.webContents.send(channel);
   };
+  // One channel for the rest: the renderer owns the views, so the menu only
+  // names what it wants and the page decides what that means right now.
+  const command = name => () => {
+    showMainWindow();
+    if (win && !win.isDestroyed()) win.webContents.send('ui-command', name);
+  };
 
   return Menu.buildFromTemplate([
     // The app-name menu and its roles are macOS furniture; Windows has no
@@ -398,6 +512,8 @@ function buildAppMenu() {
           click: send('remote-stop')
         },
         { type: 'separator' },
+        { label: 'Export…', accelerator: 'CmdOrCtrl+E', click: command('export') },
+        { type: 'separator' },
         { role: 'close' }
       ]
     },
@@ -407,7 +523,18 @@ function buildAppMenu() {
         { role: 'undo' }, { role: 'redo' },
         { type: 'separator' },
         { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
-        { role: 'selectAll' }
+        { role: 'selectAll' },
+        { type: 'separator' },
+        { label: 'Copy notes as Markdown', accelerator: 'CmdOrCtrl+Shift+C', click: command('copy-notes') },
+        { label: 'Rename meeting', accelerator: 'CmdOrCtrl+Shift+R', click: command('rename') }
+      ]
+    },
+    {
+      label: 'Go',
+      submenu: [
+        { label: 'Today', accelerator: 'CmdOrCtrl+1', click: command('home') },
+        { label: 'Action items', accelerator: 'CmdOrCtrl+2', click: command('actions') },
+        { label: 'Search', accelerator: 'CmdOrCtrl+K', click: command('search') }
       ]
     },
     {
@@ -568,23 +695,45 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true
     }
   });
+  lockWindowToPage(win, MAIN_PAGE_URL);
 
   // Belt and braces for the taskbar: running unpackaged, the process is
   // electron.exe, and Windows will happily show its icon for the button unless
   // the window says otherwise.
   try { win.setIcon(appIconPath()); } catch { /* the constructor already tried */ }
 
-  // Windows loopback: hands over system audio when the renderer calls getDisplayMedia
+  // Chromium permissions are denied unless the request comes from the main,
+  // top-level Yapper document. The bubble and any unexpected navigation get
+  // no microphone, camera, screen or other browser capability.
+  const allowedPermissions = new Set(['media', 'display-capture']);
+  const trustedMainContents = contents => win && !win.isDestroyed()
+    && contents === win.webContents && pageUrl(contents.getURL()) === MAIN_PAGE_URL;
+  session.defaultSession.setPermissionCheckHandler((contents, permission) =>
+    allowedPermissions.has(permission) && trustedMainContents(contents));
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback) => {
+    callback(allowedPermissions.has(permission) && trustedMainContents(contents));
+  });
+
+  // Windows loopback: hands over system audio only when the trusted main frame
+  // calls getDisplayMedia.
   session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
+    const frame = request && request.frame;
+    if (!frame || frame !== win.webContents.mainFrame || pageUrl(frame.url) !== MAIN_PAGE_URL) {
+      callback({});
+      return;
+    }
     desktopCapturer.getSources({ types: ['screen'] }).then(sources => {
-      callback({ video: sources[0], audio: 'loopback' });
+      if (!sources.length) callback({});
+      else callback({ video: sources[0], audio: 'loopback' });
     }).catch(() => callback({}));
   }, { useSystemPicker: false });
 
-  win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+  win.loadURL(MAIN_PAGE_URL);
 }
 
 // ---------- app settings (kept in userData, not in the renderer) ----------
@@ -612,7 +761,7 @@ function writeSettings(s, drop = []) {
   // it on purpose: the legacy single key slot and an old keepAudio that must
   // not linger. They say so rather than relying on absence.
   for (const k of drop) delete merged[k];
-  fs.writeFileSync(settingsFile(), JSON.stringify(merged, null, 2), 'utf8');
+  atomicWriteFileSync(settingsFile(), JSON.stringify(merged, null, 2));
 }
 const LEGACY_LLM_KEYS = ['llmKey', 'llmModel', 'llmBaseUrl'];
 
@@ -899,10 +1048,16 @@ async function bootWithSplash() {
       show: false,
       title: 'Yapper',
       icon: appIconPath(),
-      webPreferences: { contextIsolation: true, nodeIntegration: false }
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webSecurity: true
+      }
     });
+    lockWindowToPage(splash, SPLASH_PAGE_URL);
     splash.setMenuBarVisibility(false);
-    await splash.loadFile(path.join(__dirname, 'renderer', 'splash.html'));
+    await splash.loadURL(SPLASH_PAGE_URL);
     // Same theme as the window about to open behind it.
     if (!darkNow()) {
       await splash.webContents
@@ -980,7 +1135,8 @@ async function bootWithSplash() {
   }, MAX_SPLASH_MS);
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await registerAppProtocol();
   if (process.platform === 'win32') {
     app.setAppUserModelId(APP_ID);
     refreshShortcutIcons();
@@ -1018,7 +1174,11 @@ function newMeetingFolder() {
   let folder = base;
   for (let i = 2; fs.existsSync(folder); i++) folder = `${base}_${i}`;
   fs.mkdirSync(folder, { recursive: true });
-  return folder;
+  return fs.realpathSync(folder);
+}
+
+function requireMeetingFolder(folder) {
+  return resolveDirectChild(MEETINGS_DIR, folder);
 }
 
 function resolveClaude() {
@@ -1026,13 +1186,23 @@ function resolveClaude() {
 }
 
 function writeParticipants(folder, participants) {
-  const p = path.join(folder, 'participants.txt');
-  if (participants && participants.trim()) fs.writeFileSync(p, participants.trim(), 'utf8');
+  const text = typeof participants === 'string' ? participants.trim().slice(0, 10000) : '';
+  if (text) writeMeetingText(folder, 'participants.txt', text, { maxBytes: 10000 });
 }
 
 function readParticipants(folder) {
-  const p = path.join(folder, 'participants.txt');
-  return fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim() : '';
+  return readMeetingText(folder, 'participants.txt', { maxBytes: 10000 }).trim();
+}
+
+function readSpeakerMap(folder) {
+  const text = readMeetingText(folder, 'speaker-map.json', { maxBytes: 64 * 1024 });
+  if (!text) return {};
+  try { return speakerDiarizer.normalizeSpeakerMap(JSON.parse(text)); } catch { return {}; }
+}
+
+function rawMeetingTranscript(folder) {
+  const name = meetingFileExists(folder, 'transcript.raw.txt') ? 'transcript.raw.txt' : 'transcript.txt';
+  return readMeetingText(folder, name, { maxBytes: 64 * 1024 * 1024 });
 }
 
 // ---------- recording to disk ----------
@@ -1048,6 +1218,7 @@ function readParticipants(folder) {
 let recFd = null;
 let recFolder = null;
 let recBytes = 0;
+let pendingImport = null;  // capability granted by the native file picker
 
 // macOS also keeps each side of the call as its own file, because mixing
 // destroys the one fact the recorder had for free: which side a word came
@@ -1059,6 +1230,7 @@ let recBytes = 0;
 // so releaseAudio and heldAudio treat them as the audio they are.
 const MIC_TRACK = 'recording.mic.wav';
 const SYS_TRACK = 'recording.sys.wav';
+const MAX_AUDIO_CHUNK_BYTES = 1024 * 1024;
 let recTracks = null;     // { micFd, sysFd, micBytes, sysBytes, sysSignal }
 
 /** The same samples the mix just consumed, kept apart. Always the same length
@@ -1151,10 +1323,11 @@ function closeRecFile() {
 
 ipcMain.handle('recording-start', async (_e, participants) => {
   closeRecFile();
+  pendingImport = null;
   recFolder = newMeetingFolder();
   recBytes = 0;
   writeParticipants(recFolder, participants);
-  recFd = engine.openWav(path.join(recFolder, 'recording.wav'));
+  recFd = engine.openWav(resolveDirectFileForWrite(recFolder, path.join(recFolder, 'recording.wav')));
   // Deliberately not awaited. The helper is usually live in a few hundred
   // milliseconds, but a machine that is refusing the permission takes seconds
   // to say so, and blocking on that would mean pressing Record and watching
@@ -1163,8 +1336,8 @@ ipcMain.handle('recording-start', async (_e, participants) => {
   // one-sided audio rather than a delayed start.
   if (process.platform === 'darwin') {
     recTracks = {
-      micFd: engine.openWav(path.join(recFolder, MIC_TRACK)),
-      sysFd: engine.openWav(path.join(recFolder, SYS_TRACK)),
+      micFd: engine.openWav(resolveDirectFileForWrite(recFolder, path.join(recFolder, MIC_TRACK))),
+      sysFd: engine.openWav(resolveDirectFileForWrite(recFolder, path.join(recFolder, SYS_TRACK))),
       micBytes: 0, sysBytes: 0, sysSignal: false
     };
     holdDisplayAwake(true);
@@ -1214,9 +1387,9 @@ function startHeadStart(folder, participants) {
   // Most windows of the system track are digital silence and cost a file read,
   // not an inference (see the silent-window skip in engine.transcribeWindow).
   const files = recTracks
-    ? [{ key: 'mic', file: path.join(folder, MIC_TRACK) },
-       { key: 'sys', file: path.join(folder, SYS_TRACK) }]
-    : [{ key: 'mixed', file: path.join(folder, 'recording.wav') }];
+    ? [{ key: 'mic', file: resolveDirectFile(folder, path.join(folder, MIC_TRACK)) },
+       { key: 'sys', file: resolveDirectFile(folder, path.join(folder, SYS_TRACK)) }]
+    : [{ key: 'mixed', file: resolveDirectFile(folder, path.join(folder, 'recording.wav')) }];
   headStart = {
     folder,
     runs: files.map(({ key, file }) => ({ key, run: engine.progressive(file, opts) }))
@@ -1275,6 +1448,10 @@ function writeRecorded(buf) {
 let lastMicChunkAt = 0;
 
 ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
+  if (!(arrayBuffer instanceof ArrayBuffer) || arrayBuffer.byteLength > MAX_AUDIO_CHUNK_BYTES) {
+    console.warn('[security] ignored an invalid recording chunk');
+    return;
+  }
   let buf = Buffer.from(arrayBuffer);
   // Empty chunks still arrive when the audio graph is running but producing
   // nothing, and counting those as "the microphone is driving" is what let a
@@ -1403,12 +1580,14 @@ ipcMain.handle('recording-finish', async (_e, title, markers) => {
   // the same audio would only cost time, so the tracks go and the mix stays.
   if (tracks && !tracks.sysSignal) {
     for (const f of [MIC_TRACK, SYS_TRACK]) {
-      try { fs.unlinkSync(path.join(folder, f)); } catch { /* already gone */ }
+      try { fs.unlinkSync(resolveDirectFile(folder, path.join(folder, f))); } catch { /* already gone */ }
     }
   }
-  if (title) fs.writeFileSync(path.join(folder, 'title.txt'), title, 'utf8');
-  if (markers && markers.length) {
-    fs.writeFileSync(path.join(folder, 'markers.txt'), markers.join('\n'), 'utf8');
+  title = typeof title === 'string' ? title.trim().slice(0, 500) : '';
+  if (title) writeMeetingText(folder, 'title.txt', title, { maxBytes: 1000 });
+  if (Array.isArray(markers) && markers.length) {
+    const safeMarkers = markers.slice(0, 10000).map(m => String(m).slice(0, 100)).join('\n');
+    writeMeetingText(folder, 'markers.txt', safeMarkers, { maxBytes: 1024 * 1024 });
   }
   return { folder, bytes };
 });
@@ -1416,7 +1595,10 @@ ipcMain.handle('recording-finish', async (_e, title, markers) => {
 // the app is going away mid-recording: close the file properly, keep the audio
 app.on('before-quit', () => closeRecFile());
 
+const MAX_IMPORT_BYTES = 1024 * 1024 * 1024;
+
 ipcMain.handle('import-audio', async (_e, participants) => {
+  pendingImport = null;
   const res = await dialog.showOpenDialog(win, {
     title: 'Import voice note',
     properties: ['openFile'],
@@ -1426,28 +1608,39 @@ ipcMain.handle('import-audio', async (_e, participants) => {
     ]
   });
   if (res.canceled || res.filePaths.length === 0) return null;
-  const src = res.filePaths[0];
+  const src = resolveRegularFile(res.filePaths[0]);
+  const size = fs.statSync(src).size;
+  if (size > MAX_IMPORT_BYTES) throw new Error('That audio file is too large to import safely.');
   const folder = newMeetingFolder();
   // A phone voice note is called "recording" or "New Recording 4"; naming the
   // meeting after that tells you nothing, so those fall through to the same
   // auto-titling the recorder uses.
   const title = meaningfulName(path.basename(src, path.extname(src)));
-  if (title) fs.writeFileSync(path.join(folder, 'title.txt'), title, 'utf8');
+  if (title) writeMeetingText(folder, 'title.txt', title, { maxBytes: 1000 });
   writeParticipants(folder, participants);
+  pendingImport = { src, folder, open: false };
   // The renderer decodes it — Chromium already ships codecs for every format in
   // that filter list, so mp3/m4a/opus/flac all become the same 16 kHz mono WAV
   // the transcriber reads, and Yapper ships no media dependency of its own.
-  return { folder, title, src, bytes: fs.statSync(src).size };
+  return { folder, title, src, bytes: size };
 });
 
 // A meeting recorded before Yapper wrote WAV directly. The renderer can decode
 // it with the same codecs it uses for imports, so those recordings are not
 // stranded — they just get converted the first time they are transcribed.
 ipcMain.handle('legacy-audio', async (_e, folder) => {
-  if (fs.existsSync(path.join(folder, 'recording.wav'))) return null;
+  folder = requireMeetingFolder(folder);
+  pendingImport = null;
+  if (meetingFileExists(folder, 'recording.wav')) return null;
   const legacy = fs.readdirSync(folder)
     .find(f => /^recording\.(webm|m4a|mp3|ogg|opus|mp4|aac|flac)$/i.test(f));
-  return legacy ? path.join(folder, legacy) : null;
+  if (!legacy) return null;
+  const src = resolveDirectFile(folder, path.join(folder, legacy));
+  if (fs.statSync(src).size > MAX_IMPORT_BYTES) {
+    throw new Error('That legacy recording is too large to convert safely.');
+  }
+  pendingImport = { src, folder, open: false };
+  return src;
 });
 
 const GENERIC_NAMES = /^(new\s+)?(recording|record|audio|voice[\s_-]*(note|memo|recording)?|sound|grabaci[oó]n|nota[\s_-]*de[\s_-]*voz|untitled|new\s+file|whatsapp\s+(audio|ptt).*|audio[\s_-]*\d*|clip)[\s_-]*\d*$/i;
@@ -1461,23 +1654,37 @@ function meaningfulName(base) {
 }
 
 ipcMain.handle('import-read', async (_e, src) => {
-  const buf = fs.readFileSync(src);
+  const selected = resolveRegularFile(src);
+  if (!pendingImport || selected !== pendingImport.src) {
+    throw new Error('Choose the audio file again before importing it.');
+  }
+  const buf = fs.readFileSync(selected);
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
 });
 
 // The decoded samples come back through 'recording-chunk', the same path the
 // microphone uses, so there is only one piece of code that writes a WAV.
 ipcMain.handle('import-open', async (_e, folder) => {
+  folder = requireMeetingFolder(folder);
+  if (!pendingImport || folder !== pendingImport.folder) {
+    throw new Error('That meeting is not the active import.');
+  }
   closeRecFile();
   recFolder = folder;
   recBytes = 0;
-  recFd = engine.openWav(path.join(folder, 'recording.wav'));
+  recFd = engine.openWav(resolveDirectFileForWrite(folder, path.join(folder, 'recording.wav')));
+  pendingImport.open = true;
   return true;
 });
 
 ipcMain.handle('import-close', async () => {
-  closeRecFile();
-  return recBytes;
+  if (!pendingImport || !pendingImport.open) throw new Error('There is no active import.');
+  try {
+    closeRecFile();
+    return recBytes;
+  } finally {
+    pendingImport = null;
+  }
 });
 
 // Whisper initial_prompt biasing: nudges the model toward spelling these names/terms correctly
@@ -1510,15 +1717,17 @@ function humanTranscribeError(err) {
 }
 
 ipcMain.handle('transcribe', async (_e, folder) => {
-  const wav = path.join(folder, 'recording.wav');
-  if (!fs.existsSync(wav)) {
+  folder = requireMeetingFolder(folder);
+  const wav = resolveDirectFileForWrite(folder, path.join(folder, 'recording.wav'));
+  if (!meetingFileExists(folder, 'recording.wav')) {
     // Two transcriptions of the same meeting can be in flight at once — the
     // button double-clicked, or a retry racing the first attempt. The winner
     // writes the transcript and releases the audio, so the loser arrives to a
     // folder with no wav and used to fail loudly at something that had in fact
     // just succeeded. If the transcript is there, that is the answer.
-    const done = path.join(folder, 'transcript.txt');
-    if (fs.existsSync(done)) return fs.readFileSync(done, 'utf8');
+    if (meetingFileExists(folder, 'transcript.txt')) {
+      return readMeetingText(folder, 'transcript.txt', { required: true, maxBytes: 64 * 1024 * 1024 });
+    }
     // the renderer converts old recordings before calling this, so reaching
     // here means the conversion did not happen or the folder is genuinely empty
     throw new Error('No recording found in this meeting folder.');
@@ -1528,9 +1737,9 @@ ipcMain.handle('transcribe', async (_e, folder) => {
 
   // Both per-side tracks, or the mixed file alone — never a mixture of the
   // two, since a lone track can only be half a meeting.
-  const micWav = path.join(folder, MIC_TRACK);
-  const sysWav = path.join(folder, SYS_TRACK);
-  const twoTrack = fs.existsSync(micWav) && fs.existsSync(sysWav);
+  const micWav = resolveDirectFileForWrite(folder, path.join(folder, MIC_TRACK));
+  const sysWav = resolveDirectFileForWrite(folder, path.join(folder, SYS_TRACK));
+  const twoTrack = meetingFileExists(folder, MIC_TRACK) && meetingFileExists(folder, SYS_TRACK);
   if (twoTrack) {
     engine.repairWav(micWav);
     engine.repairWav(sysWav);
@@ -1571,13 +1780,30 @@ ipcMain.handle('transcribe', async (_e, folder) => {
   };
 
   let lines;
+  let diarization = null;
   try {
     if (twoTrack) {
+      // Core ML uses the Neural Engine while Whisper uses Metal/CPU, so doing
+      // both now hides most of diarization's cost behind transcription. The
+      // helper is optional and its failure never costs the transcript.
+      let waitingForSpeakers = false;
+      let diarizationDone = false;
+      const diarizationRun = speakerDiarizer.diarizeFile(helperPath('speaker-diarize'), sysWav, {
+        onProgress: (done, total) => {
+          if (waitingForSpeakers && total > 0) {
+            send(`\rIdentifying remote speakers locally… ${Math.round(done / total * 100)}%`);
+          }
+        }
+      }).then(result => { diarizationDone = true; return result; });
       const micLines = await engine.transcribeFile(micWav,
         { ...opts, from: head && head.mic, onProgress: progress(0, 50) });
       const sysLines = await engine.transcribeFile(sysWav,
         { ...opts, from: head && head.sys, onProgress: progress(50, 50) });
-      lines = engine.mergeSpeakerTracks(micLines, sysLines);
+      waitingForSpeakers = true;
+      if (!diarizationDone) send('\rIdentifying remote speakers locally…');
+      diarization = await diarizationRun;
+      const remote = speakerDiarizer.labelRemoteLines(sysLines, diarization.segments);
+      lines = engine.mergeSpeakerTracks(micLines, remote.lines);
     } else {
       lines = await engine.transcribeFile(wav,
         { ...opts, from: head && head.mixed, onProgress: progress(0, 100) });
@@ -1588,18 +1814,34 @@ ipcMain.handle('transcribe', async (_e, folder) => {
     // winner finished and released the audio, and this one was mid-read when
     // it vanished. The check at the top cannot catch that — by then the file
     // was still there. A finished transcript is the answer either way.
-    const done = path.join(folder, 'transcript.txt');
-    if (!fs.existsSync(wav) && fs.existsSync(done)) return fs.readFileSync(done, 'utf8');
+    if (!meetingFileExists(folder, 'recording.wav') && meetingFileExists(folder, 'transcript.txt')) {
+      return readMeetingText(folder, 'transcript.txt', { required: true, maxBytes: 64 * 1024 * 1024 });
+    }
     throw new Error(humanTranscribeError(err));
   }
   // Leave the server up while a recording is in progress: the live loop is using
   // it, and it takes its own model back on its next pass.
   if (!liveOn) await engine.stop();
 
-  const transcript = lines.join('\n').trim();
-  if (!transcript) throw new Error('The transcript came out empty. Was any audio recorded?');
+  const rawTranscript = lines.join('\n').trim();
+  if (!rawTranscript) throw new Error('The transcript came out empty. Was any audio recorded?');
+  const transcript = speakerDiarizer.applySpeakerMap(rawTranscript, readSpeakerMap(folder));
   try {
-    fs.writeFileSync(path.join(folder, 'transcript.txt'), transcript, 'utf8');
+    if (twoTrack) {
+      // Keep the machine-generated identities immutable. User-assigned names
+      // are always reapplied from this source, so changing Speaker 1 from one
+      // person to another cannot progressively corrupt the transcript.
+      writeMeetingText(folder, 'transcript.raw.txt', rawTranscript, { maxBytes: 64 * 1024 * 1024 });
+      if (diarization && diarization.segments.length) {
+        writeMeetingText(folder, 'speaker-segments.json', JSON.stringify({
+          version: 1,
+          segments: speakerDiarizer.displaySegments(diarization.segments)
+        }), { maxBytes: 16 * 1024 * 1024 });
+      } else if (diarization && diarization.reason) {
+        console.log('[speakers] using track-only labels:', String(diarization.reason).slice(0, 300));
+      }
+    }
+    writeMeetingText(folder, 'transcript.txt', transcript, { maxBytes: 64 * 1024 * 1024 });
     releaseAudio(folder);
   } catch (err) {
     // Transcribing succeeded and saving did not — the folder was deleted while
@@ -1629,9 +1871,10 @@ ipcMain.handle('transcribe', async (_e, folder) => {
 let keepThisOne = false;
 
 function releaseAudio(folder) {
-  const transcript = path.join(folder, 'transcript.txt');
   // never on a guess: only when the transcript is really there and has content
-  if (!fs.existsSync(transcript) || fs.statSync(transcript).size < 40) return;
+  if (!meetingFileExists(folder, 'transcript.txt')) return;
+  const transcript = resolveDirectFile(folder, path.join(folder, 'transcript.txt'));
+  if (fs.statSync(transcript).size < 40) return;
 
   if (keepThisOne) {
     keepThisOne = false;                     // that meeting, and only that one
@@ -1642,8 +1885,8 @@ function releaseAudio(folder) {
 
   for (const f of fs.readdirSync(folder)) {
     if (!/^recording\./i.test(f)) continue;
-    const p = path.join(folder, f);
     try {
+      const p = resolveDirectFile(folder, path.join(folder, f));
       const size = fs.statSync(p).size;
       fs.unlinkSync(p);
       console.log(`[audio] released ${f} (${(size / 1024 / 1024).toFixed(0)} MB) — the transcript is saved`);
@@ -1670,13 +1913,18 @@ function heldAudio() {
   let bytes = 0;
   for (const d of fs.readdirSync(MEETINGS_DIR, { withFileTypes: true })) {
     if (!d.isDirectory()) continue;
-    const folder = path.join(MEETINGS_DIR, d.name);
-    const transcript = path.join(folder, 'transcript.txt');
-    if (!fs.existsSync(transcript) || fs.statSync(transcript).size < 40) continue;
+    let folder;
+    try { folder = requireMeetingFolder(path.join(MEETINGS_DIR, d.name)); } catch { continue; }
+    if (!meetingFileExists(folder, 'transcript.txt')) continue;
+    const transcript = resolveDirectFile(folder, path.join(folder, 'transcript.txt'));
+    if (fs.statSync(transcript).size < 40) continue;
     for (const f of fs.readdirSync(folder)) {
       if (!/^recording\./i.test(f)) continue;
-      const p = path.join(folder, f);
-      try { bytes += fs.statSync(p).size; files.push(p); } catch { /* gone */ }
+      try {
+        const p = resolveDirectFile(folder, path.join(folder, f));
+        bytes += fs.statSync(p).size;
+        files.push(p);
+      } catch { /* gone or unsafe */ }
     }
   }
   return { bytes, files };
@@ -1830,7 +2078,18 @@ What was decided or agreed. If none, write "No decisions recorded."
 What happens after this session.`
 };
 
-function buildPrompt(options = {}) {
+// Which language the notes come out in. The headings and the "No … recorded."
+// fallbacks stay in English whatever is picked: the renderer colours sections by
+// their English names and the action-item parser reads the fallbacks.
+const NOTE_LANGUAGES = { en: 'English', es: 'Spanish' };
+function languageRule(lang) {
+  const where = lang === 'auto'
+    ? 'Write the notes in the language most of the transcript is spoken in (English if it is evenly mixed).'
+    : `Write the notes in ${NOTE_LANGUAGES[lang] || 'English'}.`;
+  return `${where} Whatever the language, keep every "## " heading exactly as written above, in English, and keep fallback sentences such as "No decisions recorded." exactly as written — the app reads them.`;
+}
+
+function buildPrompt(options = {}, includeTitle = false) {
   const sections = SECTION_SETS[options.style] || SECTION_SETS.general;
   const detail = options.detail === 'detailed'
     ? 'Be thorough: capture every topic, nuance, name and number mentioned.'
@@ -1841,8 +2100,8 @@ function buildPrompt(options = {}) {
   // "Bullet points of…") came back with no timestamps at all — see
   // build/test-styles.js, which is what caught it.
   let prompt = `What you receive is a meeting transcript (it may mix English and Spanish and contain transcription errors).
-Lines may carry a speaker label: "Me:" is the person who recorded the meeting, and "Them:" is everyone on the other side of the call — "Them:" may be several different people. These labels come from which audio stream carried the words, so they are reliable. A transcript may also have no labels at all.
-Write meeting notes in English, in markdown, with exactly these sections:
+Lines may carry speaker labels. "Me:" is the person who recorded the meeting. "Speaker 1:", "Speaker 2:", and so on are distinct remote voices detected locally; a person's real name may appear instead when the user has assigned one. "Them:" is the fallback for remote audio that could not be separated. These labels come from the audio and must be preserved. A transcript may also have no labels at all.
+Write meeting notes in markdown, with exactly these sections:
 
 ${sections}
 
@@ -1850,13 +2109,18 @@ Rules, all of which apply regardless of what the section descriptions above say:
 
 1. ${detail}
 2. Write in neutral third person. Do not assume who led, organized, or called the meeting. The person who recorded this is just one of the participants and is NOT necessarily the leader, the main speaker, or the owner of the action items — do not center the notes on them or address the reader as "you". Assign ownership and roles only when the transcript itself makes them clear.
-3. Do not invent anything that is not in the transcript.
-4. Reply only with the markdown notes, no preamble.
-5. The transcript is timestamped. Every single "## " heading must end with the timestamp where that topic starts, in square brackets, mm:ss — for example "## Decisions [24:05]". Use the timestamp of the first transcript line belonging to that section, and put nothing else in the brackets. No heading may be written without its timestamp.`;
+3. Do not invent anything that is not in the transcript. Never merge two numbered speaker labels or guess a person's name from the participant list alone. When a real name is unknown, write the exact label (for example "Speaker 2" or "Me") instead of vague phrases such as "the speaker".
+4. Reply only with ${includeTitle ? 'the title line described below followed by the markdown notes' : 'the markdown notes'}, no preamble.
+5. The transcript is timestamped. Every single "## " heading must end with the timestamp where that topic starts, in square brackets, mm:ss — for example "## Decisions [24:05]". Use the timestamp of the first transcript line belonging to that section, and put nothing else in the brackets. No heading may be written without its timestamp.
+6. ${languageRule(options.lang)}`;
+  if (includeTitle) {
+    prompt += `
+7. Before the first "## " heading, write exactly one metadata line in this form: "YAPPER_TITLE: Concrete Topic". The title must be 2 to 6 words in Title Case, in the same language as the notes, name the concrete topic, project, or decision, and have no quotes or period. If the transcript is too short or unintelligible to title, write "YAPPER_TITLE: Untitled Meeting". This replaces a separate title request, so do not omit the line.`;
+  }
   if (options.participants && options.participants.trim()) {
     const people = options.participants.trim().replace(/\n/g, ', ');
     prompt += `\n\nThe participants in this meeting are: ${people}.
-Attribute discussion points, decisions, and action items to specific people by name when the transcript makes it reasonably clear who said or owns what. When lines carry Me:/Them: labels, use them: work out from context which participant is "Me" (the recorder) and which names are behind "Them", and only then attribute by name. Without labels, infer from context alone. Either way, do not guess when it is ambiguous. Correct obvious mis-transcriptions of these names.`;
+Attribute discussion points, decisions, and action items to specific people by name only when the transcript itself identifies them or its speaker label is already that name. A participant list is context, not proof that a numbered speaker is a particular person. Do not guess when it is ambiguous. Correct obvious mis-transcriptions of names only when the intended person is clear.`;
   }
   if (options.markers && options.markers.length) {
     prompt += `\n\nDuring the meeting the note-taker flagged these moments as important: `
@@ -1870,27 +2134,93 @@ Attribute discussion points, decisions, and action items to specific people by n
 }
 
 /** Write text with whatever provider this machine is configured for. */
-function runModel(prompt, transcript, maxTokens) {
-  return llm.generate(llmConfig(), { system: prompt, input: transcript, maxTokens });
+function runModel(prompt, transcript, maxTokens, onDelta = null, signal = null) {
+  return llm.generate(llmConfig(), { system: prompt, input: transcript, maxTokens, onDelta, signal });
+}
+
+// Background writing is allowed only when this is zero. A weekly review is
+// useful later; the notes someone is waiting for are useful now.
+let foregroundNotes = 0;
+const noteJobs = new Map();       // canonical meeting folder -> AbortController
+
+/**
+ * Pull the optional title metadata out of a one-pass meeting draft. Models that
+ * miss the instruction still leave usable notes; naming is always best-effort.
+ */
+function splitMeetingDraft(raw, includeTitle) {
+  let summary = String(raw || '').trim();
+  let title = '';
+  if (includeTitle) {
+    const match = summary.match(/^YAPPER_TITLE:\s*([^\r\n]+)\r?\n+/i);
+    if (match) {
+      title = cleanTitle(match[1]);
+      summary = summary.slice(match[0].length).trim();
+    }
+  }
+  return { summary, title };
+}
+
+/** Generate and save the notes, optionally naming the meeting in the same call. */
+async function writeGeneratedMeeting(folder, options, includeTitle = false, onProgress = null) {
+  folder = requireMeetingFolder(folder);
+  if (noteJobs.has(folder)) throw new Error('Notes are already being generated for this meeting.');
+  const controller = new AbortController();
+  noteJobs.set(folder, controller);
+  foregroundNotes++;
+  const started = Date.now();
+  let firstTextMs = null;
+  try {
+    if (!meetingFileExists(folder, 'transcript.txt')) {
+      throw new Error('This meeting has no transcript to summarize.');
+    }
+    writeParticipants(folder, options && options.participants);
+    const transcript = readMeetingText(folder, 'transcript.txt', {
+      required: true, maxBytes: 64 * 1024 * 1024
+    });
+    const raw = await runModel(buildPrompt(options, includeTitle), transcript, undefined,
+      (_chunk, text) => {
+        if (firstTextMs === null && text) firstTextMs = Date.now() - started;
+        if (onProgress) onProgress({ folder, text, firstTextMs, elapsedMs: Date.now() - started });
+      }, controller.signal);
+    const result = splitMeetingDraft(raw, includeTitle);
+    if (!result.summary) throw new Error('The note provider returned no meeting notes.');
+    writeMeetingText(folder, 'notes.md', result.summary, { maxBytes: 5 * 1024 * 1024 });
+    if (result.title) writeMeetingText(folder, 'title.txt', result.title, { maxBytes: 1000 });
+    refreshLibrary();
+    return {
+      ...result,
+      metrics: { firstTextMs, notesMs: Date.now() - started }
+    };
+  } finally {
+    if (noteJobs.get(folder) === controller) noteJobs.delete(folder);
+    foregroundNotes--;
+  }
 }
 
 ipcMain.handle('summarize', async (_e, folder, transcript, options) => {
-  writeParticipants(folder, options && options.participants);
-  const out = await runModel(buildPrompt(options), transcript);
-  fs.writeFileSync(path.join(folder, 'notes.md'), out, 'utf8');
-  refreshLibrary();               // new notes can carry new action items
-  return out;
+  return (await writeGeneratedMeeting(folder, options)).summary;
 });
 
-ipcMain.handle('regenerate', async (_e, folder, options) => {
-  const transcriptPath = path.join(folder, 'transcript.txt');
-  if (!fs.existsSync(transcriptPath)) throw new Error('This meeting has no transcript to regenerate from.');
-  writeParticipants(folder, options && options.participants);
-  const transcript = fs.readFileSync(transcriptPath, 'utf8');
-  const out = await runModel(buildPrompt(options), transcript);
-  fs.writeFileSync(path.join(folder, 'notes.md'), out, 'utf8');
-  refreshLibrary();               // new notes can carry new action items
-  return out;
+// The normal stop/import path uses one provider request for both notes and the
+// automatic title. Starting a second model process after the notes were ready
+// was pure visible wait, especially through the Claude CLI.
+ipcMain.handle('generate-notes', async (_event, folder, options, includeTitle) =>
+  writeGeneratedMeeting(folder, options, !!includeTitle, payload => {
+    try { if (win && !win.isDestroyed()) win.webContents.send('notes-progress', payload); } catch { /* window closed */ }
+  }));
+
+ipcMain.handle('regenerate', async (_event, folder, options) => {
+  return (await writeGeneratedMeeting(folder, options, false, payload => {
+    try { if (win && !win.isDestroyed()) win.webContents.send('notes-progress', payload); } catch { /* window closed */ }
+  })).summary;
+});
+
+ipcMain.handle('cancel-notes', async (_event, folder) => {
+  folder = requireMeetingFolder(folder);
+  const controller = noteJobs.get(folder);
+  if (!controller) return false;
+  controller.abort();
+  return true;
 });
 
 function runOk(cmd, args) {
@@ -2083,22 +2413,11 @@ ipcMain.handle('engine-setup', async () => ensureEngine());
 // or right away if the user clicks the pill the renderer shows. A development
 // checkout updates with git and skips all of this.
 //
-// macOS is the exception: Squirrel.Mac refuses to apply an unsigned update, and
-// there is no signing certificate yet. So on mac the app only *notices* — it
-// reads latest.yml from the same feed, and the pill opens the download page
-// instead of promising a restart it cannot deliver.
-
 const RELEASES_LATEST = 'https://github.com/iamchuck504/yapper-releases/releases/latest';
 let updater = null;
-let macUpdateVersion = '';
 
 function setupAutoUpdate() {
   if (!app.isPackaged) return;
-  if (process.platform === 'darwin') {
-    checkMacUpdate();
-    setInterval(checkMacUpdate, 4 * 60 * 60 * 1000);
-    return;
-  }
   try {
     const { autoUpdater } = require('electron-updater');
     updater = autoUpdater;
@@ -2113,44 +2432,8 @@ function setupAutoUpdate() {
   }
 }
 
-async function checkMacUpdate() {
-  // latest-mac.yml first, and it matters which. electron-builder writes one
-  // manifest per platform: the Windows build produces latest.yml, the mac build
-  // latest-mac.yml. A release cut only on a Mac therefore leaves latest.yml at
-  // whatever version Windows last published, so reading only that one would
-  // announce nothing — or announce a version that has no dmg behind it.
-  for (const name of ['latest-mac.yml', 'latest.yml']) {
-    const tmp = path.join(app.getPath('temp'), `yapper-${name}-${process.pid}`);
-    try {
-      // A manifest is a few hundred bytes: nothing to resume, and a missing
-      // one is an answer rather than something to sit through retries for.
-      await provision.download(`${RELEASES_LATEST}/download/${name}`, tmp,
-        null, { retries: 0, resume: false });
-      const m = fs.readFileSync(tmp, 'utf8').match(/^version:\s*(\S+)/m);
-      try { fs.unlinkSync(tmp); } catch { /* temp */ }
-      if (!m) continue;
-      if (provision.newerVersion(m[1], app.getVersion())) {
-        macUpdateVersion = m[1];
-        broadcast('update-ready', { version: m[1], manual: true });
-      }
-      return;                     // the first manifest that parses is the answer
-    } catch (err) {
-      try { fs.unlinkSync(tmp); } catch { /* never existed */ }
-      console.log(`[update] ${name} unavailable:`, String(err.message).slice(0, 90));
-    }
-  }
-}
-
-// The command that updates a Mac in one step. Sending someone to the releases
-// page instead means the dmg, which means the Gatekeeper detour again — every
-// version, forever, for a build that is never going to be signed until there
-// is a certificate. This is the same installer they arrived through.
-const MAC_INSTALL_CMD =
-  `curl -fsSL ${RELEASES_LATEST}/download/install.sh | bash`;
-
 ipcMain.handle('update-restart', async () => {
   if (updater) { updater.quitAndInstall(); return 'installing'; }
-  if (macUpdateVersion) return { kind: 'command', command: MAC_INSTALL_CMD };
   return 'none';
 });
 
@@ -2161,7 +2444,10 @@ ipcMain.handle('open-releases-page', async () => {
 });
 
 ipcMain.handle('save-notes', async (_e, folder, md) => {
-  fs.writeFileSync(path.join(folder, 'notes.md'), md, 'utf8');
+  folder = requireMeetingFolder(folder);
+  md = String(md || '');
+  if (Buffer.byteLength(md, 'utf8') > 5 * 1024 * 1024) throw new Error('Those notes are too large to save.');
+  writeMeetingText(folder, 'notes.md', md, { maxBytes: 5 * 1024 * 1024 });
   refreshLibrary();               // edited notes can change the action items
   return true;
 });
@@ -2190,9 +2476,9 @@ function cleanTitle(raw) {
 }
 
 ipcMain.handle('generate-title', async (_e, folder) => {
-  const p = path.join(folder, 'transcript.txt');
-  if (!fs.existsSync(p)) return '';
-  const transcript = fs.readFileSync(p, 'utf8');
+  folder = requireMeetingFolder(folder);
+  if (!meetingFileExists(folder, 'transcript.txt')) return '';
+  const transcript = readMeetingText(folder, 'transcript.txt', { required: true, maxBytes: 64 * 1024 * 1024 });
   if (transcript.trim().length < 120) return '';        // too little was said
   // the opening minutes usually frame the meeting; keep the prompt cheap
   const excerpt = transcript.slice(0, 6000);
@@ -2202,18 +2488,24 @@ ipcMain.handle('generate-title', async (_e, folder) => {
   } catch {
     return '';                                          // titling is best-effort
   }
-  if (title) fs.writeFileSync(path.join(folder, 'title.txt'), title, 'utf8');
+  if (title) writeMeetingText(folder, 'title.txt', title, { maxBytes: 1000 });
   return title;
 });
 
 // ---------- exports ----------
 
 ipcMain.handle('save-text-file', async (_e, { defaultName, content, extension, description }) => {
+  const exportTypes = { md: 'Markdown', txt: 'Text' };
+  if (!exportTypes[extension]) throw new Error('That export format is not supported.');
+  content = String(content || '');
+  if (Buffer.byteLength(content, 'utf8') > 25 * 1024 * 1024) {
+    throw new Error('That export is too large to save safely.');
+  }
   const safe = String(defaultName || 'yapper-export').replace(/[\\/:*?"<>|]/g, '_');
   const res = await dialog.showSaveDialog(win, {
     title: 'Export',
     defaultPath: `${safe}.${extension}`,
-    filters: [{ name: description || extension.toUpperCase(), extensions: [extension] }]
+    filters: [{ name: exportTypes[extension], extensions: [extension] }]
   });
   if (res.canceled || !res.filePath) return null;
   fs.writeFileSync(res.filePath, content, 'utf8');
@@ -2224,17 +2516,21 @@ ipcMain.handle('list-meetings', async () => {
   if (!fs.existsSync(MEETINGS_DIR)) return [];
   return fs.readdirSync(MEETINGS_DIR, { withFileTypes: true })
     .filter(d => d.isDirectory())
-    .map(d => {
-      const folder = path.join(MEETINGS_DIR, d.name);
-      const titlePath = path.join(folder, 'title.txt');
-      return {
+    .flatMap(d => {
+      try {
+        const folder = requireMeetingFolder(path.join(MEETINGS_DIR, d.name));
+        return [{
         name: d.name,
-        title: fs.existsSync(titlePath) ? fs.readFileSync(titlePath, 'utf8').trim() : '',
+        title: readMeetingText(folder, 'title.txt', { maxBytes: 1000 }).trim(),
         folder,
-        hasSummary: fs.existsSync(path.join(folder, 'notes.md')),
-        hasTranscript: fs.existsSync(path.join(folder, 'transcript.txt')),
+        hasSummary: meetingFileExists(folder, 'notes.md'),
+        hasTranscript: meetingFileExists(folder, 'transcript.txt'),
         audioSec: Math.round(audioSeconds(folder))
-      };
+        }];
+      } catch (err) {
+        console.warn(`[security] skipped invalid meeting ${d.name}: ${err.message}`);
+        return [];
+      }
     })
     .sort((a, b) => b.name.localeCompare(a.name));
 });
@@ -2242,13 +2538,13 @@ ipcMain.handle('list-meetings', async () => {
 /** How much audio a meeting holds, so the UI can tell a false start apart. */
 function audioSeconds(folder) {
   try {
-    const wav = path.join(folder, 'recording.wav');
-    if (fs.existsSync(wav)) {
+    if (meetingFileExists(folder, 'recording.wav')) {
+      const wav = resolveDirectFile(folder, path.join(folder, 'recording.wav'));
       return Math.max(0, fs.statSync(wav).size - engine.WAV_HEADER) / engine.BYTES_PER_SEC;
     }
     // a legacy compressed recording: size is all we have, so only say "not empty"
     const legacy = fs.readdirSync(folder).find(f => /^recording\./i.test(f));
-    return legacy && fs.statSync(path.join(folder, legacy)).size > 4096 ? -1 : 0;
+    return legacy && fs.statSync(resolveDirectFile(folder, path.join(folder, legacy))).size > 4096 ? -1 : 0;
   } catch {
     return 0;
   }
@@ -2259,12 +2555,6 @@ function audioSeconds(folder) {
 // was no way to get rid of one. Deletion goes to the recycle bin rather than
 // straight out, because the one thing this app must never do is lose audio.
 
-function insideMeetings(folder) {
-  const root = path.resolve(MEETINGS_DIR) + path.sep;
-  const target = path.resolve(folder);
-  return target.startsWith(root) && target !== path.resolve(MEETINGS_DIR);
-}
-
 function describeMeeting(folder) {
   const secs = audioSeconds(folder);
   const bits = [];
@@ -2274,13 +2564,15 @@ function describeMeeting(folder) {
   } else if (secs < 0) {
     bits.push('a recording');
   }
-  if (fs.existsSync(path.join(folder, 'transcript.txt'))) bits.push('a transcript');
-  if (fs.existsSync(path.join(folder, 'notes.md'))) bits.push('notes');
+  if (meetingFileExists(folder, 'transcript.txt')) bits.push('a transcript');
+  if (meetingFileExists(folder, 'notes.md')) bits.push('notes');
   return bits;
 }
 
 ipcMain.handle('delete-meeting', async (_e, folder) => {
-  if (!folder || !insideMeetings(folder) || !fs.existsSync(folder)) {
+  try {
+    folder = requireMeetingFolder(folder);
+  } catch {
     return { deleted: false, reason: 'That meeting is no longer there.' };
   }
 
@@ -2316,20 +2608,60 @@ function listPhrase(items) {
 }
 
 ipcMain.handle('load-meeting', async (_e, folder) => {
-  const read = f => {
-    const p = path.join(folder, f);
-    return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
-  };
+  folder = requireMeetingFolder(folder);
+  const hasSpeakerSource = meetingFileExists(folder, 'transcript.raw.txt');
+  const rawTranscript = hasSpeakerSource
+    ? readMeetingText(folder, 'transcript.raw.txt', { maxBytes: 64 * 1024 * 1024 })
+    : '';
   return {
-    transcript: read('transcript.txt'),
-    summary: read('notes.md'),
-    title: read('title.txt').trim(),
-    participants: read('participants.txt').trim(),
-    hasRecording: fs.readdirSync(folder).some(f => f.startsWith('recording.'))
+    transcript: readMeetingText(folder, 'transcript.txt', { maxBytes: 64 * 1024 * 1024 }),
+    summary: readMeetingText(folder, 'notes.md', { maxBytes: 5 * 1024 * 1024 }),
+    title: readMeetingText(folder, 'title.txt', { maxBytes: 1000 }).trim(),
+    participants: readMeetingText(folder, 'participants.txt', { maxBytes: 10000 }).trim(),
+    // Older transcripts predate the immutable label source. Do not show a
+    // mapping panel that cannot safely be reapplied from those files.
+    speakers: hasSpeakerSource ? speakerDiarizer.speakerState(rawTranscript, readSpeakerMap(folder)) : [],
+    hasRecording: fs.readdirSync(folder).some(f => {
+      if (!f.startsWith('recording.')) return false;
+      try { resolveDirectFile(folder, path.join(folder, f)); return true; } catch { return false; }
+    })
   };
 });
 
-ipcMain.handle('open-folder', async (_e, folder) => shell.openPath(folder));
+// A title typed by hand after the fact. Same file the automatic title goes to,
+// so everything that reads titles — sidebar, search, digests — sees it at once.
+ipcMain.handle('rename-meeting', async (_e, folder, title) => {
+  folder = requireMeetingFolder(folder);
+  const clean = String(title || '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[\\/:*?"<>|]/g, '')     // keep it usable as a file name
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 120);
+  if (!clean) throw new Error('Type a title, or press Escape to keep the old one.');
+  writeMeetingText(folder, 'title.txt', clean, { maxBytes: 1000 });
+  refreshLibrary();
+  return clean;
+});
+
+ipcMain.handle('set-speaker-map', async (_e, folder, nextMap) => {
+  folder = requireMeetingFolder(folder);
+  if (!meetingFileExists(folder, 'transcript.raw.txt')) {
+    throw new Error('This meeting does not have separate speaker tracks.');
+  }
+  const rawTranscript = rawMeetingTranscript(folder);
+  const map = speakerDiarizer.normalizeSpeakerMap(nextMap);
+  const transcript = speakerDiarizer.applySpeakerMap(rawTranscript, map);
+  writeMeetingText(folder, 'speaker-map.json', JSON.stringify(map, null, 2), { maxBytes: 64 * 1024 });
+  writeMeetingText(folder, 'transcript.txt', transcript, { maxBytes: 64 * 1024 * 1024 });
+  refreshLibrary();
+  return { transcript, speakers: speakerDiarizer.speakerState(rawTranscript, map) };
+});
+
+ipcMain.handle('open-folder', async (_e, folder) => {
+  folder = requireMeetingFolder(folder);
+  return shell.openPath(folder);
+});
 
 // Only the sign-up pages the app itself offers: the renderer does not get to
 // name arbitrary URLs for the OS to open.
@@ -2378,34 +2710,84 @@ function remindersFile() {
   return path.join(app.getPath('userData'), 'reminders.json');
 }
 function readReminders() {
-  try { return JSON.parse(fs.readFileSync(remindersFile(), 'utf8')); } catch { return []; }
+  try {
+    const list = JSON.parse(fs.readFileSync(remindersFile(), 'utf8'));
+    return Array.isArray(list) ? list : [];
+  } catch { return []; }
 }
 function writeReminders(list) {
-  fs.writeFileSync(remindersFile(), JSON.stringify(list, null, 2), 'utf8');
+  atomicWriteFileSync(remindersFile(), JSON.stringify(list, null, 2));
+}
+
+// macOS exposes /var through /private/var. A validated meeting path is
+// canonical, while an index created from app.getPath() can retain the alias;
+// compare the real location so source links and repeated mentions survive.
+function meetingFolderKey(folder) {
+  try { return fs.realpathSync(folder); } catch { return path.resolve(String(folder || '')); }
 }
 
 ipcMain.handle('list-reminders', async () => readReminders());
 
 ipcMain.handle('add-reminder', async (_e, text, source) => {
-  const t = String(text || '').trim();
+  const t = String(text || '').trim().slice(0, 2000);
   if (!t) return null;
-  const list = readReminders();
   const now = Date.now();
-  const r = {
-    id: crypto.randomUUID(), text: t, done: false, source: source || '',
-    owner: '', due: '', priority: 'normal', folder: '', meeting: source || '',
-    sources: [], createdAt: now, updatedAt: now
+  const sourceInfo = source && typeof source === 'object' ? source : { title: source };
+  const origin = String(sourceInfo.title || '').trim().slice(0, 500);
+  let folder = '';
+  if (sourceInfo.folder) {
+    try { folder = requireMeetingFolder(sourceInfo.folder); } catch { folder = ''; }
+  }
+  const meeting = folder
+    ? meetings().find(m => meetingFolderKey(m.folder) === meetingFolderKey(folder))
+    : null;
+  const parsed = actions.parseActionItems(`## Action items\n- ${t}`, {
+    folder,
+    title: origin || (meeting && meeting.title) || '',
+    date: (meeting && meeting.date) || ''
+  })[0];
+  const candidate = parsed || {
+    text: t, owner: '', due: '', priority: 'normal', folder,
+    meeting: origin || (meeting && meeting.title) || '', meetingDate: (meeting && meeting.date) || ''
   };
-  list.unshift(r);
-  writeReminders(list);
-  return r;
+  const merged = actions.mergeActionItems(readReminders(), [candidate], now);
+  for (const item of merged.list) if (!item.id) item.id = crypto.randomUUID();
+
+  // A newly chosen item belongs at the top of the stack. Repeated clicks or a
+  // restatement in another selected meeting enrich the existing row instead.
+  if (merged.added) merged.list.unshift(merged.list.pop());
+  writeReminders(merged.list);
+  return merged.list.find(item => actions.isDuplicate(item, candidate)) || null;
 });
 
 ipcMain.handle('update-reminder', async (_e, id, fields) => {
   const list = readReminders();
   const r = list.find(x => x.id === id);
-  if (r) { Object.assign(r, fields); writeReminders(list); }
+  if (r && fields && typeof fields === 'object') {
+    if (typeof fields.done === 'boolean') r.done = fields.done;
+    if (typeof fields.text === 'string' && fields.text.trim()) r.text = fields.text.trim().slice(0, 2000);
+    r.updatedAt = Date.now();
+    writeReminders(list);
+  }
   return r || null;
+});
+
+// Several rows at once, one write. Only the done flag: bulk edits of text or
+// owner would be a way of corrupting a whole list with one click.
+ipcMain.handle('update-reminders', async (_e, ids, fields) => {
+  const wanted = new Set(Array.isArray(ids) ? ids.map(String) : []);
+  if (!wanted.size || !fields || typeof fields !== 'object' || typeof fields.done !== 'boolean') return 0;
+  const list = readReminders();
+  const now = Date.now();
+  let changed = 0;
+  for (const r of list) {
+    if (!wanted.has(r.id) || r.done === fields.done) continue;
+    r.done = fields.done;
+    r.updatedAt = now;
+    changed++;
+  }
+  if (changed) writeReminders(list);
+  return changed;
 });
 
 ipcMain.handle('delete-reminder', async (_e, id) => {
@@ -2414,10 +2796,10 @@ ipcMain.handle('delete-reminder', async (_e, id) => {
 });
 
 // ---------- the library: one index over every meeting ----------
-// The weekly summary, the daily digest, the action items and the search all ask
-// questions about every meeting at once. This keeps a derived index so they do
-// not each re-read twenty-eight folders, and folds the action items written in
-// the notes into the one list the user already has.
+// The weekly summary, the daily digest and search all ask questions about every
+// meeting at once. This keeps a derived index so they do not each re-read
+// twenty-eight folders. Action items remain facts in the index, but enter the
+// personal list only when the user chooses them inside a meeting.
 
 function libraryFile() {
   return path.join(app.getPath('userData'), 'index.json');
@@ -2426,8 +2808,7 @@ function libraryFile() {
 let libraryCache = null;
 
 /**
- * Bring the index up to date and pull in any action items from notes that have
- * changed. Returns the meetings, newest first.
+ * Bring the index up to date. Returns the meetings, newest first.
  */
 function refreshLibrary() {
   const { meetings, changed } = library.refresh({
@@ -2440,18 +2821,6 @@ function refreshLibrary() {
   // starts now rather than when the user next opens the week view.
   if (changed.length) queueWeeklyPrewarm();
 
-  // Only meetings whose files actually changed can have new tasks in them, so
-  // an unchanged library costs nothing.
-  const incoming = changed.flatMap(m => m.items);
-  if (incoming.length) {
-    const now = Date.now();
-    const { list, added, merged } = actions.mergeActionItems(readReminders(), incoming, now);
-    for (const item of list) if (!item.id) item.id = crypto.randomUUID();
-    if (added || merged) {
-      writeReminders(list);
-      console.log(`[library] action items: ${added} new, ${merged} folded into existing`);
-    }
-  }
   return meetings;
 }
 
@@ -2475,7 +2844,9 @@ function ensureSearchIndex() {
     return searchIndex;
   }
   searchIndex = search.buildIndex(list, m => {
-    try { return fs.readFileSync(path.join(m.folder, 'transcript.txt'), 'utf8'); } catch { return ''; }
+    try {
+      return readMeetingText(m.folder, 'transcript.txt', { maxBytes: 64 * 1024 * 1024 });
+    } catch { return ''; }
   });
   searchIndex.builtFrom = libraryCache;
   searchIndexFor = list.length;
@@ -2522,18 +2893,18 @@ ipcMain.handle('ask', async (_e, question) => {
 
 /** Everything the action items view needs, with its meeting resolved. */
 ipcMain.handle('list-actions', async () => {
-  const byFolder = new Map(meetings().map(m => [m.folder, m]));
+  const byFolder = new Map(meetings().map(m => [meetingFolderKey(m.folder), m]));
   return readReminders().map(r => {
-    const m = byFolder.get(r.folder);
+    const m = byFolder.get(meetingFolderKey(r.folder));
     return {
       ...r,
       meeting: r.meeting || (m ? (m.title || m.name) : ''),
       meetingDate: r.meetingDate || (m ? m.date : ''),
       // a task mentioned in several meetings shows all of them
-      mentions: (r.sources || []).filter(f => byFolder.has(f)).map(f => ({
+      mentions: (r.sources || []).filter(f => byFolder.has(meetingFolderKey(f))).map(f => ({
         folder: f,
-        title: byFolder.get(f).title || byFolder.get(f).name,
-        date: byFolder.get(f).date
+        title: byFolder.get(meetingFolderKey(f)).title || byFolder.get(meetingFolderKey(f)).name,
+        date: byFolder.get(meetingFolderKey(f)).date
       }))
     };
   });
@@ -2558,7 +2929,7 @@ function readDigest(name) {
 function writeDigest(name, data) {
   try {
     fs.mkdirSync(path.dirname(digestFile(name)), { recursive: true });
-    fs.writeFileSync(digestFile(name), JSON.stringify(data), 'utf8');
+    atomicWriteFileSync(digestFile(name), JSON.stringify(data));
   } catch (err) {
     console.log(`[digest] could not cache ${name}: ${err.message}`);
   }
@@ -2669,9 +3040,14 @@ ipcMain.handle('weekly-summary', async (_e, opts = {}) => {
  * Debounced, because one recording ends in several library refreshes in a row.
  */
 let weeklyPrewarmTimer = null;
+const WEEKLY_IDLE_MS = 30000;
 function queueWeeklyPrewarm() {
   clearTimeout(weeklyPrewarmTimer);
   weeklyPrewarmTimer = setTimeout(() => {
+    if (foregroundNotes || rendererRecording) {
+      queueWeeklyPrewarm();
+      return;
+    }
     try {
       const list = meetings();
       const week = library.weekOf(library.today());
@@ -2688,7 +3064,7 @@ function queueWeeklyPrewarm() {
     } catch (err) {
       console.log(`[digest] weekly pre-write skipped: ${err.message}`);
     }
-  }, 5000);
+  }, WEEKLY_IDLE_MS);
 }
 
 /**
@@ -2883,6 +3259,9 @@ ipcMain.on('autodetect-set', (_e, enabled) => {
 
 ipcMain.on('recording-state', (_e, recording) => {
   rendererRecording = !!recording;
+  // Do not let a scheduled weekly review start while a meeting is being
+  // recorded. The new meeting will queue a fresh review after its notes land.
+  if (rendererRecording && weeklyPrewarmTimer) clearTimeout(weeklyPrewarmTimer);
   // No more audio is coming, so there is nothing left to get ahead of. The
   // accumulated windows stay until `transcribe` collects them.
   if (!recording) stopHeadStart();
@@ -2966,6 +3345,11 @@ ipcMain.handle('live-start', async (_e, participants) => {
 ipcMain.handle('live-stop', async () => liveStopInternal());
 
 ipcMain.handle('export-pdf', async (_e, html, suggestedName) => {
+  html = String(html || '');
+  if (!html || Buffer.byteLength(html, 'utf8') > 10 * 1024 * 1024) {
+    throw new Error('Those notes are too large to export safely.');
+  }
+  suggestedName = String(suggestedName || 'meeting-notes').slice(0, 160);
   const res = await dialog.showSaveDialog(win, {
     title: 'Export notes to PDF',
     defaultPath: `${(suggestedName || 'meeting-notes').replace(/[\\/:*?"<>|]/g, '_')}.pdf`,
@@ -2977,12 +3361,26 @@ ipcMain.handle('export-pdf', async (_e, html, suggestedName) => {
   // and cannot fetch the bundled woff2). The file goes in temp — an installed
   // app cannot write inside itself — and a <base> points its relative URLs
   // back at renderer/, which Electron can serve even from inside the asar.
-  const tmpHtml = path.join(app.getPath('temp'), `yapper-pdf-${process.pid}.html`);
-  const baseTag = `<base href="${pathToFileURL(path.join(__dirname, 'renderer') + path.sep).href}">`;
+  const nonce = crypto.randomBytes(8).toString('hex');
+  const tmpHtml = path.join(app.getPath('temp'), `yapper-pdf-${process.pid}-${nonce}.html`);
+  const baseTag = `<base href="${appPageUrl('')}">`;
+  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline' ${APP_SCHEME}:; font-src ${APP_SCHEME}: data:; img-src ${APP_SCHEME}: data:">`;
+  const headTags = baseTag + csp;
   const doc = /<head[^>]*>/i.test(html)
-    ? html.replace(/<head[^>]*>/i, m => m + baseTag)
-    : baseTag + html;
-  const pdfWin = new BrowserWindow({ show: false, webPreferences: { offscreen: true } });
+    ? html.replace(/<head[^>]*>/i, m => m + headTags)
+    : headTags + html;
+  const pdfWin = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      offscreen: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      webSecurity: true,
+      javascript: false
+    }
+  });
+  lockWindowToPage(pdfWin, pathToFileURL(tmpHtml).href);
   try {
     fs.writeFileSync(tmpHtml, doc, 'utf8');
     await pdfWin.loadFile(tmpHtml);

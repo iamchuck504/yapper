@@ -40,10 +40,13 @@ const under = (parent, label) => {
   return p && p.submenu ? p.submenu.items.find(i => i.label === label) : null;
 };
 
+// main.js registers its app:// scheme as privileged at module level, which
+// Electron only allows before the app is ready — so it is loaded up front.
+require('../main.js');
+
 app.whenReady().then(async () => {
   const timer = watchdog(say, 200000);
   try {
-    require('../main.js');
     const win = await mainWindow();
     await pause(600);
 
@@ -68,6 +71,33 @@ app.whenReady().then(async () => {
 
     check('File offers the two actions that matter',
       !!under('File', 'New meeting') && !!under('File', 'Stop recording'));
+
+    // The rest of the keyboard: listed in the menu so it can be found, and
+    // routed through the page so it means the right thing for the view open.
+    check('File offers Export', !!under('File', 'Export…'));
+    check('Edit offers copy-as-markdown and rename',
+      !!under('Edit', 'Copy notes as Markdown') && !!under('Edit', 'Rename meeting'));
+    check('Go reaches the three views',
+      ['Today', 'Action items', 'Search'].every(l => !!under('Go', l)));
+    const accel = (m, l) => (under(m, l) || {}).accelerator || '';
+    check('with the accelerators the manual promises',
+      accel('Go', 'Search') === 'CmdOrCtrl+K' && accel('File', 'Export…') === 'CmdOrCtrl+E'
+      && accel('Edit', 'Copy notes as Markdown') === 'CmdOrCtrl+Shift+C'
+      && accel('Go', 'Today') === 'CmdOrCtrl+1' && accel('Go', 'Action items') === 'CmdOrCtrl+2',
+      ['Go/Search', 'File/Export…', 'Edit/Copy notes as Markdown'].map(p => accel(...p.split('/'))).join(', '));
+    const $go = js => win.webContents.executeJavaScript(js, true);
+    under('Go', 'Search').click();
+    await pause(400);
+    check('Go › Search opens the search view',
+      await $go("!document.getElementById('view-search').classList.contains('hidden')"));
+    under('Go', 'Action items').click();
+    await pause(400);
+    check('Go › Action items opens the list',
+      await $go("!document.getElementById('view-reminders').classList.contains('hidden')"));
+    under('Go', 'Today').click();
+    await pause(400);
+    check('Go › Today goes home',
+      await $go("!document.getElementById('view-home').classList.contains('hidden')"));
     check('at rest you can start, not stop',
       under('File', 'New meeting').enabled === true
       && under('File', 'Stop recording').enabled === false);

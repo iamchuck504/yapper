@@ -24,7 +24,12 @@ function chosenOptions() {
     const b = document.querySelector(`${sel} .seg-btn.active`);
     return b ? b.textContent.trim() : null;
   };
-  return [picked('#style-pills'), picked('#detail-seg')].filter(Boolean).join(' · ');
+  // The language is only worth a word in the summary when it is not the default.
+  // Read from the DOM, not `options`: this runs during module evaluation, before
+  // that object exists.
+  const langBtn = document.querySelector('#lang-seg .seg-btn.active');
+  const lang = langBtn && langBtn.dataset.lang !== 'en' ? langBtn.textContent.trim() : null;
+  return [picked('#style-pills'), picked('#detail-seg'), lang].filter(Boolean).join(' · ');
 }
 
 function paintOptsToggle() {
@@ -91,6 +96,7 @@ const resultTitle = $('result-title');
 const meetingList = $('meeting-list');
 const regenStyle = $('regen-style');
 const regenDetail = $('regen-detail');
+const regenLang = $('regen-lang');
 
 let recording = false;
 let audioCtx = null;
@@ -180,8 +186,15 @@ let currentNotesMd = '';
 let resultDateStr = '';
 let allMeetings = [];
 let searchQuery = '';
+let noteStreamFolder = '';
+let noteStreamStartedAt = 0;
+let noteStreamFirstTextMs = null;
+let noteStreamFrame = 0;
+let noteStreamPending = null;
+let noteStreamPreviousMd = '';
 
 const resultDate = $('result-date');
+const resultSpeed = $('result-speed');
 const searchInput = $('search');
 const btnSpeak = $('btn-speak');
 const voiceSelect = $('voice-select');
@@ -246,11 +259,17 @@ applyTheme();
 
 const participantsRec = $('participants-rec');
 const participantsMeet = $('participants-meet');
+const speakerMapEl = $('speaker-map');
+const speakerMapFields = $('speaker-map-fields');
+const speakerNameOptions = $('speaker-name-options');
+let currentSpeakers = [];
+let speakerSaveTimer = 0;
 
 const options = Object.assign(
-  { style: 'general', detail: 'concise', custom: '' },
+  { style: 'general', detail: 'concise', lang: 'en', custom: '' },
   JSON.parse(localStorage.getItem('yapper-options') || '{}')
 );
+if (!['en', 'es', 'auto'].includes(options.lang)) options.lang = 'en';
 // Who attended is a fact about one meeting, not a preference: carrying it over
 // would quietly put last week's names into today's notes. (Older versions did
 // persist it, so drop anything left behind.)
@@ -266,6 +285,70 @@ function recParticipants() {
   return participantsRec.value.trim();
 }
 
+function meetingParticipantNames() {
+  return [...new Set(participantsMeet.value.split(/[,;\n]/)
+    .map(name => name.trim()).filter(Boolean))].slice(0, 100);
+}
+
+function speakerLabelText(label) {
+  if (label === 'Me') return 'Recorder (Me)';
+  if (label === 'Them') return 'Remote side';
+  return label;
+}
+
+function paintSpeakerMap(speakers = currentSpeakers) {
+  currentSpeakers = Array.isArray(speakers) ? speakers : [];
+  speakerMapFields.replaceChildren();
+  speakerNameOptions.replaceChildren(...meetingParticipantNames().map(name => {
+    const option = document.createElement('option');
+    option.value = name;
+    return option;
+  }));
+  speakerMapEl.classList.toggle('hidden', !currentSpeakers.length);
+  for (const speaker of currentSpeakers) {
+    const row = document.createElement('div');
+    row.className = 'speaker-field';
+    const label = document.createElement('label');
+    label.textContent = speakerLabelText(speaker.label);
+    const input = document.createElement('input');
+    input.value = speaker.name || '';
+    input.placeholder = 'Choose or type a name';
+    input.setAttribute('list', 'speaker-name-options');
+    input.dataset.speaker = speaker.label;
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.addEventListener('input', scheduleSpeakerMapSave);
+    input.addEventListener('change', () => scheduleSpeakerMapSave(true));
+    row.append(label, input);
+    speakerMapFields.appendChild(row);
+  }
+}
+
+function scheduleSpeakerMapSave(now = false) {
+  clearTimeout(speakerSaveTimer);
+  const folder = currentFolder;
+  const save = async () => {
+    if (!folder || folder !== currentFolder) return;
+    const map = {};
+    speakerMapFields.querySelectorAll('input[data-speaker]').forEach(input => {
+      if (input.value.trim()) map[input.dataset.speaker] = input.value.trim();
+    });
+    try {
+      const result = await window.yapper.setSpeakerMap(folder, map);
+      if (folder !== currentFolder) return;
+      transcriptEl.textContent = result.transcript || '(no transcript)';
+      currentSpeakers = result.speakers || [];
+      setStatus(regenStatusEl, 'Speaker names saved. Regenerate the notes to update them.');
+      await refreshMeetingList();
+    } catch (err) {
+      if (folder === currentFolder) setStatus(regenStatusEl, `Could not save speaker names: ${err.message}`, true);
+    }
+  };
+  speakerSaveTimer = setTimeout(save, now ? 0 : 500);
+}
+
+participantsMeet.addEventListener('input', () => paintSpeakerMap());
+
 function syncOptionControls() {
   document.querySelectorAll('#style-pills .seg-btn').forEach(p =>
     p.classList.toggle('active', p.dataset.style === options.style));
@@ -273,9 +356,12 @@ function syncOptionControls() {
     b.classList.toggle('active', b.dataset.detail === options.detail));
   document.querySelectorAll('#noise-seg .seg-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.noise === noiseReduction));
+  document.querySelectorAll('#lang-seg .seg-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.lang === options.lang));
   customInput.value = options.custom || '';
   regenStyle.value = options.style;
   regenDetail.value = options.detail;
+  regenLang.value = options.lang;
   // The folded line summarises these. Without this it kept whatever was chosen
   // the last time the fold was opened or closed — a summary that says
   // "General · Concise" over a meeting set to Minutes is worse than none.
@@ -288,6 +374,8 @@ document.querySelectorAll('#detail-seg .seg-btn').forEach(b =>
   b.addEventListener('click', () => { options.detail = b.dataset.detail; saveOptions(); syncOptionControls(); }));
 document.querySelectorAll('#noise-seg .seg-btn').forEach(b =>
   b.addEventListener('click', () => { setNoiseReduction(b.dataset.noise); syncOptionControls(); }));
+document.querySelectorAll('#lang-seg .seg-btn').forEach(b =>
+  b.addEventListener('click', () => { options.lang = b.dataset.lang; saveOptions(); syncOptionControls(); }));
 customInput.addEventListener('change', saveOptions);
 
 
@@ -587,6 +675,7 @@ $('mp-dismiss').addEventListener('click', () => meetingPrompt.classList.add('hid
 window.yapper.onRemoteStop(() => stopAndProcess());
 regenStyle.addEventListener('change', () => { options.style = regenStyle.value; saveOptions(); syncOptionControls(); });
 regenDetail.addEventListener('change', () => { options.detail = regenDetail.value; saveOptions(); syncOptionControls(); });
+regenLang.addEventListener('change', () => { options.lang = regenLang.value; saveOptions(); syncOptionControls(); });
 
 // ---------- helpers ----------
 
@@ -702,7 +791,7 @@ function parseSections(md) {
   return sections;
 }
 
-function renderNotes(md) {
+function renderNotes(md, interactive = true) {
   currentNotesMd = md || '';
   notesEl.innerHTML = '';
   if (!md || !md.trim()) {
@@ -723,27 +812,219 @@ function renderNotes(md) {
       el.className = `note-sec ${meta.cls}`;
       el.innerHTML =
         `<div class="note-rule">${at ? `<span class="at">${escapeHtml(at)}</span>` : ''}</div>` +
-        `<div class="note-head">${escapeHtml(title)}</div>` +
+        `<div class="note-head"><span>${escapeHtml(title)}</span></div>` +
         bodyToHtml(sec.body);
-      if (meta.cls === 'sec-action' || meta.cls === 'sec-next') decorateAddButtons(el);
+      if (interactive) decorateCopyButton(el, sec);
+      if (interactive && (meta.cls === 'sec-action' || meta.cls === 'sec-next')) decorateAddButtons(el);
     }
     notesEl.appendChild(el);
   }
 }
 
-// add a "+ reminder" button to each list item in action-oriented sections
+const folderName = folder => String(folder || '').split(/[\\/]/).pop();
+
+/** One section as markdown, the shape that pastes cleanly into a chat or an email. */
+function sectionMarkdown(sec) {
+  return `## ${sec.title}\n\n${sec.body.join('\n').trim()}\n`;
+}
+
+// A small Copy on each card, shown on hover like the "+ my list" controls: the
+// whole note is rarely what gets pasted into Slack — the action items are.
+function decorateCopyButton(el, sec) {
+  const head = el.querySelector('.note-head');
+  if (!head) return;
+  const btn = document.createElement('button');
+  btn.className = 'sec-copy';
+  btn.type = 'button';
+  btn.textContent = 'Copy';
+  btn.title = 'Copy this section as markdown';
+  btn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(sectionMarkdown(sec));
+      btn.textContent = 'Copied';
+      btn.classList.add('copied');
+    } catch {
+      btn.textContent = 'Failed';
+    }
+    setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1400);
+  });
+  head.appendChild(btn);
+}
+
+function seconds(ms) {
+  return `${(Math.max(0, Number(ms) || 0) / 1000).toFixed(1)}s`;
+}
+
+/** Small, local timings make a slow provider distinguishable from Whisper. */
+function showGenerationTiming(timing) {
+  const parts = [];
+  if (timing && timing.transcribeMs != null) parts.push(`transcript ${seconds(timing.transcribeMs)}`);
+  if (timing && timing.firstTextMs != null) parts.push(`first notes ${seconds(timing.firstTextMs)}`);
+  if (timing && timing.notesMs != null) parts.push(`complete ${seconds(timing.notesMs)}`);
+  resultSpeed.textContent = parts.length ? `Measured here · ${parts.join(' · ')}` : '';
+  resultSpeed.classList.toggle('hidden', !parts.length);
+}
+
+function setNotesBusy(busy) {
+  notesEl.setAttribute('aria-busy', String(busy));
+  for (const id of ['btn-copy', 'btn-speak', 'btn-edit', 'btn-export']) {
+    const control = $(id);
+    if (control) control.disabled = busy;
+  }
+  notesEl.querySelectorAll('.li-add').forEach(control => { control.disabled = busy; });
+  regenStyle.disabled = busy;
+  regenDetail.disabled = busy;
+  const hasTranscript = transcriptEl.textContent && transcriptEl.textContent !== '(no transcript)';
+  btnRegen.disabled = !busy && !hasTranscript;
+  btnRegen.querySelector('.regen-label').textContent = busy ? 'Cancel' : 'Regenerate';
+  btnRegen.title = busy ? 'Cancel note generation; the transcript stays safe'
+    : 'Regenerate notes with the selected style';
+}
+
+/** Hide the metadata line until it is complete; everything after it is notes. */
+function splitStreamingDraft(raw) {
+  const text = String(raw || '').replace(/^\s+/, '');
+  const expected = 'YAPPER_TITLE:';
+  const upper = text.toUpperCase();
+  const newline = text.search(/\r?\n/);
+  if (newline < 0 && (expected.startsWith(upper) || upper.startsWith(expected))) {
+    return { title: '', summary: '' };
+  }
+  if (upper.startsWith(expected)) {
+    const lineEnd = newline < 0 ? text.length : newline;
+    return {
+      title: text.slice(expected.length, lineEnd).trim().slice(0, 120),
+      summary: newline < 0 ? '' : text.slice(lineEnd).replace(/^\r?\n+/, '')
+    };
+  }
+  return { title: '', summary: text };
+}
+
+function paintStreamingDraft() {
+  noteStreamFrame = 0;
+  const draft = noteStreamPending;
+  noteStreamPending = null;
+  if (!draft || !noteStreamFolder) return;
+  if (draft.title) resultTitle.textContent = draft.title;
+  if (draft.summary.trim()) renderNotes(draft.summary, false);
+}
+
+function beginNotesStream(folder, title, transcript, participants, keepNotes = false) {
+  const previous = keepNotes ? currentNotesMd : '';
+  openMeetingView(title || 'Writing notes…', previous, transcript,
+    true, participants);
+  noteStreamFolder = folderName(folder);
+  noteStreamStartedAt = performance.now();
+  noteStreamFirstTextMs = null;
+  noteStreamPending = null;
+  noteStreamPreviousMd = previous;
+  if (!keepNotes) {
+    currentNotesMd = '';
+    notesEl.innerHTML = '<div class="note-sec sec-neutral notes-writing"><p>Notes will appear here as they are written…</p></div>';
+  }
+  setNotesBusy(true);
+  setStatus(regenStatusEl, 'Writing notes…');
+  document.querySelector('#view-meeting details').open = false;
+}
+
+function finishNotesStream(timing = null) {
+  if (noteStreamFrame) cancelAnimationFrame(noteStreamFrame);
+  noteStreamFrame = 0;
+  noteStreamPending = null;
+  noteStreamFolder = '';
+  noteStreamPreviousMd = '';
+  setNotesBusy(false);
+  regenStatusEl.classList.add('hidden');
+  showGenerationTiming(timing);
+}
+
+function failNotesStream(message, retry = false) {
+  if (noteStreamFrame) cancelAnimationFrame(noteStreamFrame);
+  noteStreamFrame = 0;
+  noteStreamPending = null;
+  noteStreamFolder = '';
+  const previous = noteStreamPreviousMd;
+  noteStreamPreviousMd = '';
+  // A partial response is useful only while it is visibly in progress. Once
+  // the job fails or is canceled, return to the last complete saved state —
+  // or the honest empty state for a meeting that never had notes.
+  renderNotes(previous);
+  setNotesBusy(false);
+  // The placeholder title was waiting on the same response that failed.
+  if (resultTitle.textContent === 'Writing notes…') resultTitle.textContent = resultDateStr || 'Untitled meeting';
+  setStatus(regenStatusEl, message, true);
+  // The transcript is on disk, so the expensive half is done: offer the cheap
+  // half as one button instead of a sentence pointing at Regenerate.
+  if (retry && currentFolder) {
+    const btn = document.createElement('button');
+    btn.id = 'btn-retry-notes';
+    btn.className = 'inline-action';
+    btn.type = 'button';
+    btn.textContent = 'Retry notes';
+    btn.title = 'Write the notes again from the saved transcript — nothing is re-transcribed';
+    btn.addEventListener('click', retryNotes);
+    regenStatusEl.append(document.createElement('br'), btn);
+  }
+}
+
+/**
+ * The notes again, from the transcript already on disk. Unlike Regenerate this
+ * also asks for a title when the meeting never got one — the failed request was
+ * the one that would have named it.
+ */
+async function retryNotes() {
+  if (!currentFolder || noteStreamFolder) return;
+  const needsTitle = !resultTitle.textContent || resultTitle.textContent === resultDateStr
+    || resultTitle.textContent === 'Untitled meeting';
+  const participants = participantsMeet.value.trim();
+  const started = performance.now();
+  beginNotesStream(currentFolder, resultTitle.textContent, transcriptEl.textContent, participants, true);
+  setStatus(regenStatusEl, 'Writing the notes again from the saved transcript…');
+  try {
+    const draft = await window.yapper.generateNotes(currentFolder, { ...options, participants }, needsTitle);
+    if (draft.title) resultTitle.textContent = draft.title;
+    renderNotes(draft.summary);
+    finishNotesStream({ firstTextMs: noteStreamFirstTextMs, notesMs: performance.now() - started });
+    await refreshMeetingList();
+  } catch (err) {
+    failNotesStream(noteGenerationCanceled(err)
+      ? 'Note generation canceled. The transcript is safe.'
+      : `The notes failed again: ${err.message}`, !noteGenerationCanceled(err));
+  }
+}
+
+const noteGenerationCanceled = err => /generation canceled/i.test(String(err && err.message || err));
+
+window.yapper.onNotesProgress(progress => {
+  if (!noteStreamFolder || folderName(currentFolder) !== noteStreamFolder
+      || folderName(progress && progress.folder) !== noteStreamFolder) return;
+  if (noteStreamFirstTextMs == null) {
+    noteStreamFirstTextMs = progress.firstTextMs != null
+      ? progress.firstTextMs : performance.now() - noteStreamStartedAt;
+  }
+  noteStreamPending = splitStreamingDraft(progress.text);
+  if (!noteStreamFrame) noteStreamFrame = requestAnimationFrame(paintStreamingDraft);
+  setStatus(regenStatusEl, `Writing notes… first text in ${seconds(noteStreamFirstTextMs)}`);
+});
+
+// The notes may describe everybody's work. Nothing enters the personal list
+// until this button is chosen on that specific item.
 function decorateAddButtons(card) {
   for (const li of card.querySelectorAll('li')) {
     const text = li.textContent.trim();
     if (!text) continue;
     const btn = document.createElement('button');
     btn.className = 'li-add';
-    btn.textContent = '+ reminder';
-    btn.title = 'Add to action items';
+    btn.textContent = '+ my list';
+    btn.title = 'Add this item to my action list';
     btn.addEventListener('click', async () => {
-      if (await addReminderFromText(text, resultTitle.textContent)) {
+      if (await addReminderFromText(text, {
+        title: resultTitle.textContent,
+        folder: currentFolder
+      })) {
         btn.textContent = '✓ added';
         btn.classList.add('added');
+        btn.disabled = true;
       }
     });
     li.appendChild(btn);
@@ -1463,32 +1744,44 @@ async function stopAndProcess() {
 
     setStep('transcribe', 'active');
     setStatus(statusEl, 'Transcribing locally with Whisper…\n');
+    const transcribeStarted = performance.now();
     const transcript = await window.yapper.transcribe(folder);
+    const transcribeMs = performance.now() - transcribeStarted;
     setStep('transcribe', 'done');
 
     setStep('notes', 'active');
     setStatus(statusEl, 'Generating the notes…');
-    const summary = await window.yapper.summarize(folder, transcript,
-      { ...options, participants: recParticipants(), markers });
+    const typedTitle = titleInput.value.trim();
+    const participants = recParticipants();
+    beginNotesStream(folder, typedTitle, transcript, participants);
+    const draft = await window.yapper.generateNotes(folder,
+      { ...options, participants, markers }, !typedTitle);
+    const summary = draft.summary;
     setStep('notes', 'done');
 
-    // No title typed? Name the meeting after what was actually discussed.
-    let title = titleInput.value.trim();
-    if (!title) {
-      setStatus(statusEl, 'Naming the meeting…');
-      title = await window.yapper.generateTitle(folder);
-    }
+    // With no typed title the same model response carries both results. This
+    // removes an entire provider round trip from the visible stop path.
+    const title = typedTitle || draft.title;
 
     statusEl.classList.add('hidden');
     pipelineEl.classList.add('hidden');
+    const meetingData = await window.yapper.loadMeeting(folder);
     openMeetingView(title || formatMeetingDate(folder.split(/[\\/]/).pop()), summary, transcript,
-      true, recParticipants());
+      true, participants, { transcribeMs, ...draft.metrics }, meetingData.speakers);
+    finishNotesStream({ transcribeMs, ...draft.metrics });
     titleInput.value = '';
     participantsRec.value = '';     // these people were in that meeting, not the next one
     await refreshMeetingList();
   } catch (err) {
-    pipelineEl.querySelectorAll('.step.active').forEach(s => { s.classList.remove('active'); s.classList.add('error'); });
-    setStatus(statusEl, `Error: ${err.message}\nYour recording is safe — open the meeting in the sidebar and use "Transcribe now" to retry.`, true);
+    if (noteStreamFolder) {
+      failNotesStream(noteGenerationCanceled(err)
+        ? 'Note generation canceled. The transcript is safe — use Regenerate whenever you are ready.'
+        : `The transcript is safe, but the notes failed: ${err.message}`, !noteGenerationCanceled(err));
+      pipelineEl.classList.add('hidden');
+    } else {
+      pipelineEl.querySelectorAll('.step.active').forEach(s => { s.classList.remove('active'); s.classList.add('error'); });
+      setStatus(statusEl, `Error: ${err.message}\nYour recording is safe — open the meeting in the sidebar and use "Transcribe now" to retry.`, true);
+    }
     refreshMeetingList();
   } finally {
     btnRecord.disabled = false;
@@ -1497,7 +1790,8 @@ async function stopAndProcess() {
 
 // ---------- meeting view ----------
 
-function openMeetingView(title, summary, transcript, hasRecording = true, participants = null) {
+function openMeetingView(title, summary, transcript, hasRecording = true, participants = null, timing = null, speakers = null) {
+  if (noteStreamFolder && folderName(currentFolder) !== noteStreamFolder) finishNotesStream();
   stopSpeak();
   exitEditMode();
   showView('meeting');
@@ -1505,7 +1799,10 @@ function openMeetingView(title, summary, transcript, hasRecording = true, partic
   resultTitle.textContent = title;
   resultDateStr = currentFolder ? formatMeetingDate(currentFolder.split(/[\\/]/).pop()) : '';
   resultDate.textContent = resultDateStr;
+  showGenerationTiming(timing);
   participantsMeet.value = participants || '';
+  clearTimeout(speakerSaveTimer);
+  paintSpeakerMap(speakers || []);
   transcriptEl.textContent = transcript || '(no transcript)';
   btnRegen.disabled = !transcript;
   if (!transcript && hasRecording) {
@@ -1541,7 +1838,7 @@ async function retryTranscribe() {
     await window.yapper.transcribe(currentFolder);
     const data = await window.yapper.loadMeeting(currentFolder);
     regenStatusEl.classList.add('hidden');
-    openMeetingView(resultTitle.textContent, data.summary, data.transcript, data.hasRecording, data.participants);
+    openMeetingView(resultTitle.textContent, data.summary, data.transcript, data.hasRecording, data.participants, null, data.speakers);
     await refreshMeetingList();
   } catch (err) {
     setStatus(regenStatusEl, `Error: ${err.message}`, true);
@@ -1636,7 +1933,7 @@ function renderMeetingList() {
     li.addEventListener('click', async () => {
       currentFolder = m.folder;
       const data = await window.yapper.loadMeeting(m.folder);
-      openMeetingView(data.title || formatMeetingDate(m.name), data.summary, data.transcript, data.hasRecording, data.participants);
+      openMeetingView(data.title || formatMeetingDate(m.name), data.summary, data.transcript, data.hasRecording, data.participants, null, data.speakers);
       renderMeetingList();
     });
     meetingList.appendChild(li);
@@ -2314,40 +2611,59 @@ btnImport.addEventListener('click', async () => {
     setStep('save', 'done');
     setStep('transcribe', 'active');
     setStatus(statusEl, 'Transcribing the voice note…\n');
+    const transcribeStarted = performance.now();
     const transcript = await window.yapper.transcribe(picked.folder);
+    const transcribeMs = performance.now() - transcribeStarted;
     setStep('transcribe', 'done');
 
     // An imported voice note gets the same treatment as a recorded meeting.
     // It used to stop at the transcript, which left the whole point of the app
     // — the notes — undone for anything that did not come from the recorder.
     let summary = '';
+    let metrics = null;
+    const participants = recParticipants();
     setStep('notes', 'active');
+    beginNotesStream(picked.folder, picked.title, transcript, participants);
     try {
       setStatus(statusEl, 'Generating the notes…');
-      summary = await window.yapper.summarize(picked.folder, transcript,
-        { ...options, participants: recParticipants() });
+      const draft = await window.yapper.generateNotes(picked.folder,
+        { ...options, participants }, !picked.title);
+      summary = draft.summary;
+      metrics = draft.metrics;
+      if (!picked.title) picked.title = draft.title;
       setStep('notes', 'done');
     } catch (err) {
       // the transcript is already saved, so this is a partial success, not a loss
       setStep('notes', 'error');
-      setStatus(statusEl, `The transcript is saved, but the notes failed: ${err.message}`, true);
+      failNotesStream(noteGenerationCanceled(err)
+        ? 'Note generation canceled. The transcript is saved — use Regenerate whenever you are ready.'
+        : `The transcript is saved, but the notes failed: ${err.message}`, !noteGenerationCanceled(err));
     }
 
-    let title = picked.title;
-    if (!title) {
-      setStatus(statusEl, 'Naming it…');
-      title = await window.yapper.generateTitle(picked.folder);
-    }
+    const title = picked.title;
 
-    if (summary) statusEl.classList.add('hidden');
+    if (summary) {
+      statusEl.classList.add('hidden');
+      const meetingData = await window.yapper.loadMeeting(picked.folder);
+      openMeetingView(title || formatMeetingDate(picked.folder.split(/[\\/]/).pop()),
+        summary, transcript, true, participants, { transcribeMs, ...metrics }, meetingData.speakers);
+      finishNotesStream({ transcribeMs, ...metrics });
+    } else {
+      resultTitle.textContent = title || formatMeetingDate(picked.folder.split(/[\\/]/).pop());
+    }
     pipelineEl.classList.add('hidden');
-    openMeetingView(title || formatMeetingDate(picked.folder.split(/[\\/]/).pop()),
-      summary, transcript, true, recParticipants());
     participantsRec.value = '';
     await refreshMeetingList();
   } catch (err) {
-    pipelineEl.querySelectorAll('.step.active').forEach(s => { s.classList.remove('active'); s.classList.add('error'); });
-    setStatus(statusEl, `Error: ${err.message}`, true);
+    if (noteStreamFolder) {
+      failNotesStream(noteGenerationCanceled(err)
+        ? 'Note generation canceled. The transcript is safe — use Regenerate whenever you are ready.'
+        : `The transcript is safe, but the notes failed: ${err.message}`, !noteGenerationCanceled(err));
+      pipelineEl.classList.add('hidden');
+    } else {
+      pipelineEl.querySelectorAll('.step.active').forEach(s => { s.classList.remove('active'); s.classList.add('error'); });
+      setStatus(statusEl, `Error: ${err.message}`, true);
+    }
   } finally {
     btnImport.disabled = false;
     btnRecord.disabled = false;
@@ -2382,6 +2698,7 @@ initBubbleCorner();
 btnNew.addEventListener('click', () => {
   stopSpeak();
   currentFolder = null;
+  if (noteStreamFolder) finishNotesStream();
   showView('record');
   statusEl.classList.add('hidden');
   pipelineEl.classList.add('hidden');
@@ -2392,19 +2709,33 @@ btnNew.addEventListener('click', () => {
 
 btnRegen.addEventListener('click', async () => {
   if (!currentFolder) return;
-  btnRegen.disabled = true;
+  if (noteStreamFolder) {
+    btnRegen.disabled = true;
+    setStatus(regenStatusEl, 'Canceling note generation…');
+    try {
+      const canceled = await window.yapper.cancelNotes(currentFolder);
+      if (!canceled) setStatus(regenStatusEl, 'The notes were already finishing…');
+    } catch (err) {
+      btnRegen.disabled = false;
+      setStatus(regenStatusEl, `Could not cancel: ${err.message}`, true);
+    }
+    return;
+  }
+  const started = performance.now();
+  beginNotesStream(currentFolder, resultTitle.textContent, transcriptEl.textContent,
+    participantsMeet.value.trim(), true);
   // the attendees edited in this meeting's own bar, and only for this meeting
   setStatus(regenStatusEl, 'Regenerating the notes…');
   try {
     const summary = await window.yapper.regenerate(currentFolder,
       { ...options, participants: participantsMeet.value.trim() });
-    regenStatusEl.classList.add('hidden');
     renderNotes(summary);
+    finishNotesStream({ firstTextMs: noteStreamFirstTextMs, notesMs: performance.now() - started });
     await refreshMeetingList();
   } catch (err) {
-    setStatus(regenStatusEl, `Error: ${err.message}`, true);
-  } finally {
-    btnRegen.disabled = false;
+    failNotesStream(noteGenerationCanceled(err)
+      ? 'Note generation canceled. Your previous notes are unchanged.'
+      : `Could not regenerate the notes: ${err.message}`, !noteGenerationCanceled(err));
   }
 });
 
@@ -2706,16 +3037,47 @@ const ACTION_FILTERS = {
 };
 
 const EMPTY_FOR = {
-  open: 'Nothing pending. Action items appear here as your meetings produce them.',
+  open: 'Nothing pending. Add only the items you want from inside a meeting.',
   high: 'Nothing marked urgent.',
   mine: 'No action item has a named owner yet. Owners come from what was said in the meeting.',
   done: 'Nothing checked off yet.',
   all: 'No action items yet. Add one above, or use the + on an action item inside a meeting.'
 };
 
+// Selection mode: a checkbox per row, "Select all", and one action for the lot.
+// The selection only ever holds ids that are on screen — changing the filter
+// drops whatever is no longer shown, so "Mark as done" never touches a row you
+// cannot see.
+let selecting = false;
+const selectedIds = new Set();
+const bulkRow = $('bulk-row');
+const selectAllBox = $('select-all-actions');
+const bulkCountEl = $('bulk-count');
+const btnBulkDone = $('btn-bulk-done');
+const btnSelectActions = $('btn-select-actions');
+let shownIds = [];
+
+function renderBulkBar() {
+  bulkRow.classList.toggle('hidden', !selecting);
+  remindersList.classList.toggle('selecting', selecting);
+  btnSelectActions.classList.toggle('active', selecting);
+  if (!selecting) return;
+  const n = selectedIds.size;
+  const total = shownIds.length;
+  selectAllBox.checked = total > 0 && n === total;
+  selectAllBox.indeterminate = n > 0 && n < total;
+  selectAllBox.disabled = total === 0;
+  bulkCountEl.textContent = total ? `${n} of ${total} selected` : '';
+  // In "Done" the bulk action is the reverse one; anywhere else it completes.
+  btnBulkDone.textContent = actionFilter === 'done' ? 'Mark as not done' : 'Mark as done';
+  btnBulkDone.disabled = n === 0;
+}
+
 function renderReminders(list) {
   remindersList.innerHTML = '';
   const shown = list.filter(ACTION_FILTERS[actionFilter] || ACTION_FILTERS.all);
+  shownIds = shown.map(r => r.id);
+  for (const id of [...selectedIds]) if (!shownIds.includes(id)) selectedIds.delete(id);
 
   const open = list.filter(r => !r.done);
   const high = open.filter(r => r.priority === 'high');
@@ -2728,6 +3090,7 @@ function renderReminders(list) {
     li.className = 'reminders-empty';
     li.textContent = EMPTY_FOR[actionFilter] || EMPTY_FOR.all;
     remindersList.appendChild(li);
+    renderBulkBar();
     return;
   }
 
@@ -2738,7 +3101,19 @@ function renderReminders(list) {
 
   for (const r of sorted) {
     const li = document.createElement('li');
-    li.className = 'reminder' + (r.done ? ' done' : '') + (r.priority === 'high' ? ' urgent' : '');
+    li.className = 'reminder' + (r.done ? ' done' : '') + (r.priority === 'high' ? ' urgent' : '')
+      + (selectedIds.has(r.id) ? ' selected' : '');
+
+    const pick = document.createElement('input');
+    pick.type = 'checkbox';
+    pick.className = 'r-select';
+    pick.checked = selectedIds.has(r.id);
+    pick.title = 'Select';
+    pick.addEventListener('change', () => {
+      if (pick.checked) selectedIds.add(r.id); else selectedIds.delete(r.id);
+      li.classList.toggle('selected', pick.checked);
+      renderBulkBar();
+    });
 
     const check = document.createElement('button');
     check.className = 'r-check';
@@ -2799,10 +3174,49 @@ function renderReminders(list) {
       await refreshReminders();
     });
 
-    li.append(check, main, del);
+    li.append(pick, check, main, del);
     remindersList.appendChild(li);
   }
+  renderBulkBar();
 }
+
+function setSelecting(on) {
+  selecting = on;
+  if (!on) selectedIds.clear();
+  renderBulkBar();
+  if (on) remindersList.querySelectorAll('.r-select').forEach(b => { b.checked = false; });
+  remindersList.querySelectorAll('.reminder.selected').forEach(li => li.classList.remove('selected'));
+}
+
+btnSelectActions.addEventListener('click', () => setSelecting(!selecting));
+$('btn-bulk-cancel').addEventListener('click', () => setSelecting(false));
+
+selectAllBox.addEventListener('change', () => {
+  if (selectAllBox.checked) shownIds.forEach(id => selectedIds.add(id));
+  else selectedIds.clear();
+  remindersList.querySelectorAll('.reminder').forEach(li => {
+    const box = li.querySelector('.r-select');
+    if (!box) return;
+    box.checked = selectAllBox.checked;
+    li.classList.toggle('selected', selectAllBox.checked);
+  });
+  renderBulkBar();
+});
+
+btnBulkDone.addEventListener('click', async () => {
+  const ids = [...selectedIds];
+  if (!ids.length) return;
+  const done = actionFilter !== 'done';
+  btnBulkDone.disabled = true;
+  try {
+    const n = await window.yapper.updateReminders(ids, { done });
+    setStatus(statusEl, `${n} action item${n === 1 ? '' : 's'} marked as ${done ? 'done' : 'not done'}.`);
+  } catch (err) {
+    setStatus(statusEl, `Could not update the action items: ${err.message}`, true);
+  }
+  setSelecting(false);
+  await refreshReminders();
+});
 
 function chip(cls, value, label) {
   const el = document.createElement('span');
@@ -2819,7 +3233,7 @@ async function openMeetingByFolder(folder) {
     const data = await window.yapper.loadMeeting(folder);
     currentFolder = folder;
     openMeetingView(data.title || formatMeetingDate(folder.split(/[\\/]/).pop()),
-      data.summary, data.transcript, data.hasRecording, data.participants);
+      data.summary, data.transcript, data.hasRecording, data.participants, null, data.speakers);
     renderMeetingList();
   } catch (err) {
     setStatus(statusEl, `That meeting could not be opened: ${err.message}`, true);
@@ -2876,6 +3290,84 @@ function submitNewReminder() {
 }
 $('btn-add-reminder').addEventListener('click', submitNewReminder);
 newReminderInput.addEventListener('keydown', e => { if (e.key === 'Enter') submitNewReminder(); });
+
+// ---------- renaming a meeting ----------
+// The automatic title is a guess from the transcript, and a guess is sometimes
+// wrong. The heading itself is the field: double-click it (or the pencil, or
+// ⌘⇧R), type, Enter. Escape puts the old one back.
+
+const btnRename = $('btn-rename');
+let renameBefore = null;          // the title as it was when editing began; null when not editing
+
+function beginRename() {
+  if (!currentFolder || renameBefore !== null) return;
+  if (viewMeeting.classList.contains('hidden') || noteStreamFolder) return;
+  renameBefore = resultTitle.textContent;
+  resultTitle.contentEditable = 'plaintext-only';
+  resultTitle.classList.add('editing');
+  resultTitle.focus();
+  const range = document.createRange();
+  range.selectNodeContents(resultTitle);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+async function endRename(commit) {
+  if (renameBefore === null) return;
+  const before = renameBefore;
+  renameBefore = null;
+  resultTitle.contentEditable = 'false';
+  resultTitle.classList.remove('editing');
+  const typed = resultTitle.textContent.replace(/\s+/g, ' ').trim();
+  if (!commit || !typed || typed === before) { resultTitle.textContent = before; return; }
+  try {
+    const saved = await window.yapper.renameMeeting(currentFolder, typed);
+    resultTitle.textContent = saved;
+    await refreshMeetingList();      // the sidebar, search and digests all read title.txt
+  } catch (err) {
+    resultTitle.textContent = before;
+    setStatus(regenStatusEl, `Could not rename the meeting: ${err.message}`, true);
+  }
+}
+
+btnRename.addEventListener('click', beginRename);
+resultTitle.addEventListener('dblclick', beginRename);
+resultTitle.addEventListener('keydown', e => {
+  if (renameBefore === null) return;
+  if (e.key === 'Enter') { e.preventDefault(); endRename(true); }
+  else if (e.key === 'Escape') { e.preventDefault(); endRename(false); }
+});
+resultTitle.addEventListener('blur', () => endRename(true));
+
+// ---------- keyboard ----------
+// The accelerators live in the application menu (main.js), so they are listed
+// where people look for them and they work with the menu bar hidden on Windows.
+// The menu only names what it wants; what that means right now is decided here.
+
+window.yapper.onUiCommand(name => {
+  const inMeeting = !viewMeeting.classList.contains('hidden');
+  switch (name) {
+    case 'home': $('btn-home').click(); break;
+    case 'actions': btnReminders.click(); break;
+    case 'search': $('btn-search-view').click(); break;
+    case 'export': if (inMeeting && !btnExport.disabled) btnExport.click(); break;
+    case 'copy-notes': if (inMeeting && !btnCopy.disabled) btnCopy.click(); break;
+    case 'rename': if (inMeeting) beginRename(); break;
+    default: break;
+  }
+});
+
+// Escape closes whatever is open, nearest first. Handled here rather than in the
+// menu because what it dismisses is a fact about the page.
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (renameBefore !== null) return;                   // the title's own handler
+  if (!exportMenu.classList.contains('hidden')) { closeExportMenu(); return; }
+  if (!meetingPrompt.classList.contains('hidden')) { meetingPrompt.classList.add('hidden'); return; }
+  if (document.activeElement && document.activeElement !== document.body
+      && typeof document.activeElement.blur === 'function') document.activeElement.blur();
+});
 
 // ---------- init ----------
 
@@ -2964,32 +3456,15 @@ async function provisionEngine() {
 // Installed copies download updates in the background; this pill is the offer
 // to apply one now. Ignoring it is fine — it applies on next quit anyway.
 
-let updateIsManual = false;   // macOS: unsigned builds cannot self-apply, so
-                              // the pill opens the download page instead
-
 window.yapper.onUpdateReady(info => {
   const b = $('btn-update');
-  updateIsManual = !!(info && info.manual);
-  b.textContent = updateIsManual
-    ? `New version v${info.version} — download`
-    : `Update ${info && info.version ? 'v' + info.version : ''} ready — restart`.replace('  ', ' ');
+  b.textContent = `Update ${info && info.version ? 'v' + info.version : ''} ready — restart`.replace('  ', ' ');
   b.classList.remove('hidden');
 });
 $('btn-update').addEventListener('click', async () => {
-  if (recording && !updateIsManual) {
+  if (recording) {
     setStatus(statusEl, 'Recording — the update will install when Yapper closes.');
     return;
   }
-  const res = await window.yapper.updateRestart();
-
-  // macOS cannot apply an unsigned update to itself, so what comes back is the
-  // one command that does it. Putting it on the clipboard beats opening a page
-  // that ends in the dmg and the Gatekeeper detour all over again.
-  if (res && res.kind === 'command') {
-    let copied = false;
-    try { await navigator.clipboard.writeText(res.command); copied = true; } catch { /* below */ }
-    setStatus(statusEl, copied
-      ? `Update copied to your clipboard. Paste it in Terminal:\n\n${res.command}\n\nIt replaces Yapper and reopens it. Your meetings and the engine stay where they are.`
-      : `Run this in Terminal to update:\n\n${res.command}`);
-  }
+  await window.yapper.updateRestart();
 });

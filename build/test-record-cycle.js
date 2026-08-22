@@ -44,10 +44,30 @@ function speech() {
       return fs.readFileSync(p).subarray(engine.WAV_HEADER, engine.WAV_HEADER + engine.BYTES_PER_SEC * 60);
     }
   }
-  return null;
+  const made = require('./make-fixtures').build(60).dest;
+  return fs.readFileSync(made).subarray(engine.WAV_HEADER);
 }
 
 dialog.showMessageBox = async () => ({ response: 0 });
+const llm = require('../llm');
+let meetingDraftCalls = 0;
+llm.generate = async (_config, { system }) => {
+  if (system.includes('YAPPER_TITLE:')) meetingDraftCalls++;
+  if (system.includes('short title')) return 'Recording Cycle Test';
+  return `${system.includes('YAPPER_TITLE:') ? 'YAPPER_TITLE: Recording Cycle Test\n\n' : ''}# Summary
+- A deterministic full recording cycle completed successfully and produced local notes.
+
+# Key points
+- PCM reached the recording file in bounded chunks.
+- Pause, marker, transcription and note generation all completed.
+- The meeting can be reopened from the library after its audio is released.
+
+# Decisions
+- Keep this path as a release gate.
+
+# Action items
+- None recorded.`;
+};
 require('../main.js');
 
 app.whenReady().then(async () => {
@@ -135,13 +155,16 @@ app.whenReady().then(async () => {
   const result = await $(`(async () => {
     const saved = { folder: ${JSON.stringify(folder)}, bytes: ${sent} };
     const transcript = await window.yapper.transcribe(saved.folder);
-    const summary = await window.yapper.summarize(saved.folder, transcript,
-      { ...options, participants: 'Maya, Chuck', markers });
-    const title = await window.yapper.generateTitle(saved.folder);
+    const draft = await window.yapper.generateNotes(saved.folder,
+      { ...options, participants: 'Maya, Chuck', markers }, true);
+    const summary = draft.summary;
+    const title = draft.title;
     window.yapper.setRecordingState(false);
     return { saved, tLen: transcript.length, sLen: summary.length, title, markers };
   })()`);
   say(`\nthe full cycle took ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+  check('notes and automatic title use one model request', meetingDraftCalls === 1,
+    `${meetingDraftCalls} model requests`);
 
   check('a marker for the flagged moment was left',
     result.markers.length === 1 && fs.existsSync(path.join(folder, 'markers.txt')),

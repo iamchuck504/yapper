@@ -1,5 +1,5 @@
 #!/bin/bash
-# Install Yapper on an Apple Silicon Mac, without the Gatekeeper detour.
+# Install a signed and notarized Yapper release on an Apple Silicon Mac.
 #
 #   curl -fsSL https://github.com/iamchuck504/yapper-releases/releases/latest/download/install.sh | bash
 #
@@ -7,20 +7,10 @@
 # script and the build it installs are cut at the same moment and the feed
 # repo needs no source tree of its own.
 #
-# Why this exists, stated plainly: the app is not signed with an Apple
-# Developer certificate, so a dmg opened from the Finder is blocked and the
-# user has to go and click "Open Anyway" in System Settings. That block comes
-# from the `com.apple.quarantine` attribute the *browser* attaches to a
-# download — not from macOS inspecting the app. curl does not attach it, so a
-# copy installed this way opens normally.
-#
-# That means Apple is not vouching for these bytes. Nothing here pretends
-# otherwise. What replaces it is a checksum: the zip is verified against the
-# sha512 in the release manifest before anything is written to /Applications.
-# That catches a corrupted or tampered download; it does not protect against
-# the release feed itself being compromised, because both the manifest and the
-# zip come from it. Installing this way is trusting whoever publishes that
-# repo. Read the script before piping it to a shell — including this one.
+# The feed checksum catches corruption first. Before replacing an installed
+# copy, macOS then verifies the Developer ID signature, the expected Team ID,
+# Apple's stapled notarization ticket and Gatekeeper acceptance. The script
+# never clears quarantine to bypass a failed trust check.
 set -euo pipefail
 
 REPO="${YAPPER_REPO:-iamchuck504/yapper-releases}"
@@ -28,6 +18,7 @@ REPO="${YAPPER_REPO:-iamchuck504/yapper-releases}"
 # against a local server and a throwaway folder — see mac/e2e-install.sh.
 FEED="${YAPPER_FEED:-https://github.com/$REPO/releases/latest/download}"
 APP="${YAPPER_APP:-/Applications/Yapper.app}"
+EXPECTED_TEAM="54H77VDNJY"
 
 say()  { printf '\033[1m%s\033[0m\n' "$*"; }
 fail() { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
@@ -46,6 +37,16 @@ if [ "$OS_MAJOR" -lt 13 ]; then
 fi
 
 [ "$(id -u)" -ne 0 ] || fail "Do not run this with sudo. Yapper installs per-user and needs no admin rights."
+
+# The end-to-end installer test uses an unsigned local build in a throwaway
+# folder. Its bypass is accepted only for a loopback feed and a temporary
+# destination, so it cannot weaken an ordinary install by accident.
+TEST_MODE=0
+if [ -n "${YAPPER_TEST_ALLOW_UNTRUSTED:-}" ]; then
+  case "$FEED" in http://127.0.0.1:*|http://localhost:*) ;; *) fail "The test-only trust bypass requires a loopback feed." ;; esac
+  case "$APP" in /tmp/*|/private/tmp/*|/var/folders/*|/private/var/folders/*) ;; *) fail "The test-only trust bypass requires a temporary destination." ;; esac
+  TEST_MODE=1
+fi
 
 # ---------------------------------------------------------------- the manifest
 
@@ -111,28 +112,47 @@ say "Unpacking…"
 ditto -x -k "$WORK/$ZIP" "$WORK/out" || fail "Could not unpack the download."
 [ -d "$WORK/out/Yapper.app" ] || fail "The zip did not contain Yapper.app."
 
-# The new copy is written beside the old one first. Deleting and then copying
-# would mean a full-disk or permissions failure at exactly the wrong moment
-# leaves no Yapper at all — the window is narrowed to a rename, which either
-# happens or does not.
+CANDIDATE="$WORK/out/Yapper.app"
+if [ "$TEST_MODE" -eq 0 ]; then
+  say "Verifying Apple's signature and notarization…"
+  codesign --verify --deep --strict --verbose=2 "$CANDIDATE" \
+    || fail "The app's Developer ID signature is not valid. Nothing was installed."
+  TEAM="$(codesign -dv --verbose=4 "$CANDIDATE" 2>&1 | sed -n 's/^TeamIdentifier=//p' | head -1)"
+  [ "$TEAM" = "$EXPECTED_TEAM" ] \
+    || fail "The app is signed by unexpected team '$TEAM'. Nothing was installed."
+  xcrun stapler validate "$CANDIDATE" >/dev/null \
+    || fail "The app has no valid Apple notarization ticket. Nothing was installed."
+  spctl --assess --type execute --verbose=2 "$CANDIDATE" \
+    || fail "Gatekeeper does not accept this app. Nothing was installed."
+else
+  say "Test mode: trust checks are intentionally limited to the local fixture."
+fi
+
+# The new copy is written beside the old one first. The old bundle is then
+# renamed to a backup on the same filesystem and restored if activation fails.
 STAGE="$(dirname "$APP")/.Yapper.app.incoming"
+BACKUP="$(dirname "$APP")/.Yapper.app.previous.$$"
 rm -rf "$STAGE"
+rm -rf "$BACKUP"
 ditto "$WORK/out/Yapper.app" "$STAGE" || {
   rm -rf "$STAGE"
   fail "Could not write to $(dirname "$APP"). The copy you had is untouched."
 }
-rm -rf "$APP"
-mv "$STAGE" "$APP" || fail "Could not put Yapper in place."
+HAD_OLD=0
+if [ -e "$APP" ]; then
+  mv "$APP" "$BACKUP" || fail "Could not preserve the installed copy. Nothing was changed."
+  HAD_OLD=1
+fi
+if { [ "$TEST_MODE" -eq 1 ] && [ -n "${YAPPER_TEST_FAIL_ACTIVATE:-}" ]; } || ! mv "$STAGE" "$APP"; then
+  if [ "$HAD_OLD" -eq 1 ]; then
+    mv "$BACKUP" "$APP" 2>/dev/null \
+      || fail "Activation failed and the previous copy could not be restored from $BACKUP."
+  fi
+  fail "Could not put Yapper in place. The previous copy was restored."
+fi
+if [ "$HAD_OLD" -eq 1 ]; then rm -rf "$BACKUP"; fi
 
-# curl attaches no quarantine, but a previous install from a browser may have
-# left the attribute on the folder; clear it so this copy opens either way.
-xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
-
-# Replacing a bundle in place leaves LaunchServices holding the old record, and
-# an unsigned app changes identity with every build, so the mismatch is
-# guaranteed rather than unlucky. Seen after a few updates in a row: macOS
-# started treating Yapper as an accessory and stopped giving it a Dock icon.
-# Re-registering costs nothing and keeps the app what it says it is.
+# Re-register the replaced bundle so LaunchServices sees the current version.
 LSREG="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 [ -x "$LSREG" ] && "$LSREG" -f "$APP" 2>/dev/null || true
 

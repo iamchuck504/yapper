@@ -19,7 +19,7 @@ meeting.
 
 ## 1. Install
 
-There are two ways in, and they differ only in how much of §2 you have to read.
+There are two supported ways in.
 
 **The short way — one command, nothing to click**
 
@@ -28,8 +28,7 @@ curl -fsSL https://github.com/iamchuck504/yapper-releases/releases/latest/downlo
 ```
 
 It downloads the app, checks it against the checksum published with the
-release, puts it in `/Applications` and opens it. No Gatekeeper detour — see
-§2 for exactly why, because the reason matters.
+release, puts it in `/Applications` and opens it.
 
 Piping a script into a shell is a real thing to be careful about. The script
 is short and readable, so read it first if you like:
@@ -43,52 +42,22 @@ curl -fsSL https://github.com/iamchuck504/yapper-releases/releases/latest/downlo
 **[github.com/iamchuck504/yapper-releases/releases/latest](https://github.com/iamchuck504/yapper-releases/releases/latest)**
 
 Take `Yapper-<version>-arm64.dmg` (~95 MB), open it, drag Yapper to
-Applications. Then §2 applies.
+Applications, then open it normally.
 
-## 2. Gatekeeper, and why the two ways differ
+## 2. Gatekeeper verification
 
-This is the awkward part, and it is worth understanding rather than just
-working around.
+Release builds are signed with the Developer ID Application certificate for
+team `54H77VDNJY`, use hardened runtime and are submitted to Apple's notary
+service. Gatekeeper can therefore verify both the publisher and Apple's
+notarization ticket when the dmg is downloaded in a browser. Both the app
+inside the update zip and the final dmg receive their own stapled tickets.
 
-The app is **signed ad-hoc** — with its own identity, not with an Apple
-Developer certificate. Apple charges $99/year for one, and this build does not
-have it. It is not a judgement about the app; it is the absence of a paid
-signature.
-
-What actually triggers the block is narrower than it looks. macOS is not
-inspecting the app and objecting — it is reacting to `com.apple.quarantine`,
-an attribute your **browser** attaches to anything it downloads. `curl` does
-not attach it, which is the whole of the difference: the installer above lands
-an app with no quarantine flag, so nothing blocks it.
-
-**What that costs.** Apple is not vouching for those bytes either way — no
-certificate means no notarization, whichever route you take. What the
-installer puts in its place is a checksum: it verifies the download against
-the sha512 published in the release manifest and refuses to install on a
-mismatch. That catches a corrupted or tampered download. It does **not**
-protect you if the release feed itself is compromised, since the manifest and
-the app come from the same place. Installing this way means trusting whoever
-publishes that repo.
-
-**If you took the dmg instead**, macOS will block the first open. Since
-macOS 15 the old right-click → Open trick no longer works. Two ways through:
-
-**Option A — System Settings (no Terminal)**
-
-1. Double-click Yapper. macOS refuses and offers only *Done*.
-2. Open **System Settings → Privacy & Security**, scroll down. There is now a
-   line saying Yapper was blocked, with an **Open Anyway** button. It appears
-   for about an hour after the attempt.
-3. Click it, confirm, and Yapper opens. You only do this once.
-
-**Option B — Terminal (one command)**
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Yapper.app
-```
-
-This removes the quarantine flag macOS attaches to downloaded files. The app
-then opens normally, forever.
+The command-line installer remains useful for automation. It verifies sha512
+against `latest-mac.yml`, the Developer ID signature and expected team, the
+stapled notarization ticket, and Gatekeeper acceptance before replacing an
+installed copy. If activation fails it restores the previous app. If a freshly
+downloaded dmg is ever rejected, do not remove quarantine as a workaround:
+verify that the asset belongs to the current signed/notarized release.
 
 ## 3. First launch downloads the engine
 
@@ -189,27 +158,13 @@ on what you send, and the app says so when you pick one.
 
 ## Updating
 
-macOS copies **do not update themselves**. Squirrel.Mac refuses to apply an
-unsigned update, so the app does the honest thing instead of promising a restart
-it cannot deliver: it checks the same feed at launch and every four hours, and
-when there is something newer the sidebar shows
+Signed macOS copies check the release feed at launch and every four hours. The
+update downloads in the background; when it is ready the sidebar shows
 
-> **New version v0.1.1 — download**
+> **Update v0.1.1 ready — restart**
 
-which opens the releases page.
-
-**What updating actually involves:**
-
-Re-run the installer. It quits the running copy, replaces it and reopens it:
-
-```bash
-curl -fsSL https://github.com/iamchuck504/yapper-releases/releases/latest/download/install.sh | bash
-```
-
-Or, the dmg way: download the new one, drag Yapper into Applications, and **do
-the Gatekeeper step again** — the new download carries its own quarantine flag,
-so either *Open Anyway* in System Settings or
-`xattr -dr com.apple.quarantine /Applications/Yapper.app`.
+Click it to apply immediately, or close Yapper normally and it installs on
+quit. An active recording is never interrupted for an update.
 
 Either way:
 
@@ -217,11 +172,10 @@ Either way:
   `~/Library/Application Support/yapper`, outside the app — so an update is
   ~95 MB rather than another 650 MB.
 - **Your meetings are untouched.** They are in `~/Documents/Meetings` and have
-  nothing to do with the app bundle.
+  nothing to do with the app bundle. They are ordinary unencrypted files;
+  FileVault protects them while the Mac is locked. If iCloud Drive manages your
+  Documents folder, macOS may sync them even though Yapper never uploads audio.
 - Permissions stay granted, since the bundle id does not change.
-
-When the project has an Apple Developer certificate, none of this is needed and
-updates install themselves as they do on Windows.
 
 ## Uninstalling
 
@@ -237,8 +191,9 @@ That directory holds settings and the downloaded engine (~600 MB).
 
 ## If something goes wrong
 
-**"Yapper is damaged and can't be opened."** macOS says this for a quarantined
-app it cannot verify. Option B above (`xattr -dr`) clears it.
+**"Yapper is damaged and can't be opened."** Do not bypass this warning. Delete
+that copy, download the current dmg again, and confirm it came from the Yapper
+release page. A current notarized build should verify normally.
 
 **No sound from the other side of the call.** The system-audio permission is
 not granted, or — far more often — was granted without reopening the app.

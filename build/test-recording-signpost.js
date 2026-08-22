@@ -39,10 +39,13 @@ const sidebar = win => win.webContents.executeJavaScript(`(() => {
 const view = win => win.webContents.executeJavaScript(
   `document.getElementById('view-record').classList.contains('hidden') ? 'otra' : 'record'`);
 
+// main.js registers its app:// scheme as privileged at module level, which
+// Electron only allows before the app is ready — so it is loaded up front.
+require('../main.js');
+
 app.whenReady().then(async () => {
   const timer = watchdog(say);
   try {
-    require('../main.js');
     const win = await mainWindow();
     const $ = js => win.webContents.executeJavaScript(js, true);
 

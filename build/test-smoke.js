@@ -108,7 +108,9 @@ app.whenReady().then(async () => {
   check('colours the action items section',
     (await $("document.querySelectorAll('#notes .sec-action').length")) >= 1, 'none');
 
-  // ---- action items become reminders ----
+  // ---- action items enter the personal list only when chosen ----
+  check('opening or indexing notes adds no action item automatically',
+    (await $('window.yapper.listActions()')).length === 0, 'one appeared without a click');
   const addBtn = await $("document.querySelectorAll('#notes .li-add').length");
   check('action items offer to be added to reminders', addBtn >= 1, `${addBtn} botones`);
   if (addBtn >= 1) {
@@ -116,6 +118,8 @@ app.whenReady().then(async () => {
     check('the button confirms it was added',
       (await $("document.querySelector('#notes .li-add').textContent")).includes('added'),
       await $("document.querySelector('#notes .li-add').textContent"));
+    check('the chosen item cannot be stacked twice from the same button',
+      await $("document.querySelector('#notes .li-add').disabled"), 'button is still enabled');
     await click('#btn-reminders');
     const n = await $("document.querySelectorAll('#reminders-list .reminder').length");
     check('the reminder is saved', n >= 1, `${n} in the list`);

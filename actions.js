@@ -1,4 +1,4 @@
-// Action items, pulled out of the notes and kept in one place.
+// Action items, offered from the notes and kept only when the user selects one.
 //
 // The notes already have an "Action items" section, written from the transcript
 // by a prompt that forbids inventing anything. So these are read from there
@@ -39,7 +39,8 @@ function actionSection(md) {
   return '';
 }
 
-const NOTHING_TO_DO = /^(no (action items|commitments|decisions)|none|nothing)\b/i;
+// English and Spanish, now that the notes can come out in either.
+const NOTHING_TO_DO = /^(no (action items|commitments|decisions)|none|nothing|no hay|no se (registraron|registró|acordaron|acordó|tomaron|tomó)|ninguna|ningún|ninguno|sin (acciones|compromisos|decisiones|pendientes))\b/i;
 
 /**
  * The lines of a note section that are statements, with their bullet markers

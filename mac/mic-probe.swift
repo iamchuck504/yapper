@@ -24,16 +24,33 @@ func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddr
 
 let system = AudioObjectID(kAudioObjectSystemObject)
 var listAddr = address(kAudioHardwarePropertyProcessObjectList)
-var size: UInt32 = 0
 
-guard AudioObjectGetPropertyDataSize(system, &listAddr, 0, nil, &size) == noErr else {
-  FileHandle.standardError.write(Data("cannot size the audio process list\n".utf8))
-  exit(1)
+// The process list can change between asking for its size and reading it. A
+// call starting or ending in that gap makes CoreAudio reject the old buffer;
+// polling every five seconds made that harmless race look like a broken probe.
+// Re-read the size and retry, and treat a genuinely empty list as a valid
+// answer rather than an error.
+func audioProcessIDs() -> [AudioObjectID]? {
+  for _ in 0..<4 {
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(system, &listAddr, 0, nil, &size) == noErr else {
+      continue
+    }
+    if size == 0 { return [] }
+
+    var actualSize = size
+    var values = [AudioObjectID](
+      repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+    let status = AudioObjectGetPropertyData(system, &listAddr, 0, nil, &actualSize, &values)
+    if status == noErr {
+      let count = Int(actualSize) / MemoryLayout<AudioObjectID>.size
+      return Array(values.prefix(count))
+    }
+  }
+  return nil
 }
 
-var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
-guard !ids.isEmpty,
-      AudioObjectGetPropertyData(system, &listAddr, 0, nil, &size, &ids) == noErr else {
+guard let ids = audioProcessIDs() else {
   FileHandle.standardError.write(Data("cannot read the audio process list\n".utf8))
   exit(1)
 }

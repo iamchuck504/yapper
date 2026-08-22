@@ -39,18 +39,20 @@ const settings = () => {
   catch { return {}; }
 };
 
+// The app protocol must be registered before Electron becomes ready. Start the
+// helper watch first, then load the real main process at the same point a normal
+// launch does.
+let seen = false;
+const watching = setInterval(() => { if (running() >= 1) seen = true; }, 40);
+require('../main.js');
+
 app.whenReady().then(async () => {
   const timer = watchdog(say, 200000);
   try {
-    require('../main.js');
-
     // Sampled from before the window is ready. With the permission already
     // granted the probe ends as soon as the helper says "capturing" — hundreds
     // of milliseconds — and the harness takes longer than that to hand back the
     // window, so any later reading would always arrive too late.
-    let seen = false;
-    const watching = setInterval(() => { if (running() >= 1) seen = true; }, 40);
-
     const win = await mainWindow();
     await pause(3500);
     clearInterval(watching);
@@ -60,11 +62,9 @@ app.whenReady().then(async () => {
     // plays, with no window and no way to notice.
     check('and lets it go, leaving no tap open', running() === 0, `${running()} left`);
 
-    // No "already asked" flag: macOS drops these permissions when the app's
-    // code identity changes, which with an ad-hoc signature is every build. A
-    // per-version flag claimed it had already asked while the permission had
-    // been wiped six reinstalls ago, and the app went back to asking mid-meeting
-    // — exactly what this exists to prevent.
+    // No "already asked" flag: development builds and restored apps can still
+    // change code identity. A stale per-version flag could claim the prompt was
+    // already handled after macOS had discarded the permission.
     check('does not lean on a flag that code identity invalidates',
       settings().permissionsAskedBy === undefined,
       JSON.stringify(settings().permissionsAskedBy));

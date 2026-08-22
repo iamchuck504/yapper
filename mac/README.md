@@ -22,7 +22,7 @@ bash mac/build-app.sh      # every release: dmg + zip, uploaded to the
 all** — the engine on the feed is ours. `provision.js` downloads it on every
 Mac's first run, exactly like the Windows first run.
 
-## Installing without the Gatekeeper detour
+## Installing
 
 `mac/install.sh` rides along as a release asset and installs from the zip:
 
@@ -30,14 +30,18 @@ Mac's first run, exactly like the Windows first run.
 curl -fsSL https://github.com/iamchuck504/yapper-releases/releases/latest/download/install.sh | bash
 ```
 
-The point is narrow and worth stating exactly. Gatekeeper's block is triggered
-by `com.apple.quarantine`, which the *browser* attaches to a download — not by
-macOS inspecting the app. `curl` attaches none, so a copy installed this way
-opens with no detour. **This is not a substitute for signing.** Apple vouches
-for nothing either way; what the script substitutes is a sha512 check against
-`latest-mac.yml`, which catches a corrupt or tampered download but not a
-compromised feed. When the Developer ID certificate exists, this stops being
-the recommended path and notarization takes over.
+The ordinary route is the dmg. Release builds are signed with the Developer ID
+Application identity for team `54H77VDNJY`, use hardened runtime, and are sent
+to Apple's notary service by electron-builder. `mac/build-app.sh` verifies the
+identity and the `yapper-notary` keychain profile before it builds. The app is
+notarized before the update zip is created, and the finished dmg is submitted
+and stapled separately so both distribution formats carry offline-verifiable
+tickets.
+
+The script above remains an alternate route. It verifies the zip against the
+sha512 in `latest-mac.yml`, then requires the expected Developer ID Team ID,
+stapled notarization ticket and Gatekeeper acceptance before replacing the app.
+It does not clear quarantine as a workaround.
 
 Two things the release flow now depends on, both in `build-app.sh`: the **zip**
 goes up alongside the dmg (the installer has nothing to fetch otherwise), and
@@ -47,7 +51,7 @@ together.
 `bash mac/e2e-install.sh` drives the whole thing against a local feed and a
 throwaway folder — it checks the checksum is really enforced, that a tampered
 zip leaves the existing copy alone, that the framework symlinks survive
-unpacking, and that the installed copy carries no quarantine. It needs
+unpacking, and that an activation failure restores the installed copy. It needs
 `dist/` populated by `npx electron-builder --mac` first.
 
 ## Deployment targets are not optional
@@ -61,6 +65,7 @@ are pinned explicitly in `build-app.sh`:
 |---|---|---|
 | `system-audio` | `macos13.0` | the ScreenCaptureKit fallback; the process tap it prefers is gated to 14.4 at runtime |
 | `mic-probe` | `macos14.4` | the CoreAudio process list it reads |
+| `speaker-diarize` | `macos14.0` | FluidAudio's offline Core ML diarizer; the app falls back to track labels on macOS 13 |
 
 `minimumSystemVersion` in package.json says 13.0 to match. Check a build with
 `vtool -show-build build/system-audio` — it costs a second, and this is
@@ -136,24 +141,17 @@ and then dropped as not worth the dependency; see the history of
    the recording — found by the suite failing at 4 a.m. with the lid shut. A
    tap does not care, so the block is released as soon as the helper reports it
    took that door, and a laptop may dim through a meeting again.
-2. **Unsigned: Gatekeeper blocks the first open.** No Apple Developer account
-   ($99/year). The user right-clicks the app → Open → Open, once. Distribution
-   without that friction needs the account plus notarization.
-3. **Updates notify, they do not self-install.** Squirrel.Mac refuses unsigned
-   updates, so the app checks the same feed, and the sidebar pill becomes
-   "New version — download", opening the releases page. Auto-install arrives
-   with signing.
+2. **Every release must pass Apple notarization.** The certificate and
+   credentials are configured; `build-app.sh` refuses upload unless package
+   contents, fuses, signature, Team ID, stapling and Gatekeeper all validate.
+   Publishing remains explicit; local remediation builds are not uploaded.
+3. **Signed updates self-install.** The app checks the feed, downloads the
+   signed zip and offers a restart; ignoring the pill applies it on quit.
 
-   The check reads **`latest-mac.yml`**, falling back to `latest.yml`. That
-   distinction is not cosmetic: electron-builder writes one manifest per
-   platform, so a release cut here updates `latest-mac.yml` and leaves
-   `latest.yml` at whatever Windows last published. Reading only the latter —
-   which is what it did until this was noticed — means every installed Mac is
-   told there is nothing new. `build-app.sh` uploads the manifest with the dmg
-   for the same reason; it used to be left behind in `dist/`, so the feed had
-   never carried one.
+   electron-builder writes **`latest-mac.yml`** for this platform, and
+   `build-app.sh` uploads it with the signed zip and dmg.
 
-   Updating is manual but cheap: the engine and models live in
+   Updating is also cheap: the engine and models live in
    `~/Library/Application Support/yapper`, outside the bundle, so a new version
    is the ~95 MB dmg and not another 650 MB. Meetings and granted permissions
    survive, since neither belongs to the app bundle and the bundle id is stable.
@@ -167,13 +165,10 @@ answers the same question the Windows registry does, through
 huddle reports `com.tinyspeck.slackmacgap.helper` — so `meetings.js` matches
 the app the helper belongs to, not the id itself.
 
-Notifications were broken here too, and silently: electron-builder left the
-ad-hoc signature Electron ships with, so the bundle's id said
-`com.yapper.meetingnotes` while its signature said `Electron`. macOS keys
-notification authorisation on the signature, so the app was never registered
-and never asked. `identity: "-"` fixes it, and `hardenedRuntime` is off
-alongside it — it is only worth carrying for notarisation, and it would have
-demanded a microphone entitlement the defaults do not include.
+Notifications were broken here too, and silently: electron-builder once left
+the ad-hoc signature Electron ships with, so the bundle id and signature
+identity disagreed. Release builds now use the Developer ID identity plus
+hardened runtime and explicit inherited entitlements.
 
 ## What has actually run on a Mac
 
@@ -185,8 +180,9 @@ verified, in the order it was done:
   `engine-v1.9.1`, which until then did not exist — every Mac's first run was
   404ing.
 - **The app builds.** dmg and zip, arm64, via `electron-builder --mac`.
-- **Gatekeeper did not block it.** With the quarantine attribute cleared the
-  app opens directly; the right-click → Open dance was not needed.
+- **The original ad-hoc build opened only after a local quarantine workaround.**
+  That historical shakedown is not the current release policy: the signed path
+  now requires normal Gatekeeper acceptance and never clears quarantine.
 - **Transcription works, on the GPU.** `engine.js` against a real wav:
   `using MTL0 backend`, 21.7 s of audio in 0.5 s, timestamps and windowing as
   in production. Notes came back from `llm.js` through the Claude CLI.

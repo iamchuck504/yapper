@@ -11,6 +11,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const http = require('http');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const provision = require('../provision');
 
@@ -49,6 +50,13 @@ const macZip = makeZip('mac.zip', {
   'bin/whisper-server': 'fake mac server'
 });
 const model = name => Buffer.from(`fake ${name} model weights`);
+const sha256 = value => crypto.createHash('sha256').update(value).digest('hex');
+const fixtureHashes = {
+  cpuZip: sha256(cpuZip),
+  gpuZip: sha256(gpuZip),
+  macZip: sha256(macZip),
+  models: { base: sha256(model('base')), small: sha256(model('small')) }
+};
 
 // A file big enough to cut in half, served by a route that honours Range the
 // way GitHub and HuggingFace do — that is the behaviour resume depends on.
@@ -133,6 +141,7 @@ server.listen(0, '127.0.0.1', async () => {
     platform: 'win-x64',
     engineBase: `${base}/engine`,
     modelBase: `${base}/models`,
+    hashes: fixtureHashes,
     // the retry pauses are real seconds in production and pure waiting here
     retries: 1,
     backoff: [0],
@@ -255,6 +264,37 @@ server.listen(0, '127.0.0.1', async () => {
     check('and that meant downloading the whole thing', servedBytes, 200 + big.length);
     bigEtag = '"v1"';
 
+    // ---- downloaded bytes are not trusted until their digest matches ----
+    const verified = path.join(ROOT, 'verified.bin');
+    await provision.download(`${base}/ranged/big.bin`, verified, null,
+      { retries: 0, sha256: sha256(big), maxBytes: big.length });
+    check('a matching SHA-256 promotes the download', fs.readFileSync(verified).equals(big));
+
+    const tampered = path.join(ROOT, 'tampered.bin');
+    let integrityError = null;
+    try {
+      await provision.download(`${base}/ranged/big.bin`, tampered, null,
+        { retries: 0, sha256: '0'.repeat(64) });
+    } catch (err) { integrityError = err; }
+    check('a wrong SHA-256 is rejected', /integrity/i.test(integrityError && integrityError.message));
+    check('and is never left under the final name', fs.existsSync(tampered), false);
+
+    const oversized = path.join(ROOT, 'oversized.bin');
+    let sizeError = null;
+    try {
+      await provision.download(`${base}/ranged/big.bin`, oversized, null,
+        { retries: 0, maxBytes: 100 });
+    } catch (err) { sizeError = err; }
+    check('an oversized response is stopped', /allowed download size/i.test(sizeError && sizeError.message));
+    check('and leaves no installable file', fs.existsSync(oversized), false);
+
+    let insecureError = null;
+    try {
+      await provision.download('http://example.com/file.bin', path.join(ROOT, 'insecure.bin'), null,
+        { retries: 0 });
+    } catch (err) { insecureError = err; }
+    check('plain HTTP is refused away from localhost', /unencrypted/i.test(insecureError && insecureError.message));
+
     // ---- the retries belong to the download, not to the user ----
     servedBytes = 0;
     cutAfter = 120;
@@ -274,7 +314,10 @@ server.listen(0, '127.0.0.1', async () => {
     // cut and picked up in a second run, which is what happens when someone
     // closes Yapper with the bar halfway across.
     const Q = path.join(ROOT, 'homeQ');
-    const qOpts = { ...opts(Q), gpu: false, modelBase: `${base}/rmodels`, retries: 0 };
+    const qOpts = {
+      ...opts(Q), gpu: false, modelBase: `${base}/rmodels`, retries: 0,
+      hashes: { ...fixtureHashes, models: { base: sha256(big), small: sha256(big) } }
+    };
     servedBytes = 0;
     cutAfter = 120;                       // dies inside the first model
     let first = null;

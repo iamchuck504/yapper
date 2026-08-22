@@ -62,10 +62,7 @@ function growingCopy(dest, pcm, seconds) {
 }
 
 (async () => {
-  if (!fs.existsSync(SRC)) {
-    console.log('skip  the fixture is missing: node build/make-fixtures.js');
-    process.exit(0);
-  }
+  if (!fs.existsSync(SRC)) require('./make-fixtures').build(60);
   if (!engine.isInstalled() || !engine.hasModel('base')) {
     console.log('skip  the engine is not installed in this checkout');
     process.exit(0);

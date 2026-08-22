@@ -62,6 +62,10 @@ check('a line without a stamp keeps its label anyway',
   engine.mergeSpeakerTracks(['sin marca'], ['[00:00:02] x']),
   ['Me: sin marca', '[00:00:02] Them: x']);
 
+check('native remote speaker labels are not wrapped in Them',
+  engine.mergeSpeakerTracks(['[00:00:01] yo'], ['[00:00:02] Speaker 1: hello']),
+  ['[00:00:01] Me: yo', '[00:00:02] Speaker 1: hello']);
+
 // An hour in: the stamp parser has to read hours, or the merge sorts a late
 // meeting into its first minute.
 check('stamps past the hour sort where they belong',

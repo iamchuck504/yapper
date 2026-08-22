@@ -231,22 +231,41 @@ let reaped = false;       // orphan sweep: once per run, see start()
 let port = 0;
 let ready = null;
 let loadedModel = null;
+let forceCpu = false;       // Metal failed in this run; subsequent starts use -ng
 
 function freePort() {
   // whisper-server binds what we give it; pick something unlikely to collide
   return 8710 + Math.floor(process.pid % 200);
 }
 
-function waitForPort(p, timeoutMs = 90000) {
+function waitForPort(p, child, fatalError, timeoutMs = 90000) {
   const net = require('net');
   const started = Date.now();
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      child.removeListener('exit', onExit);
+      child.removeListener('error', onError);
+      fn(value);
+    };
+    const onExit = (code, signal) => finish(reject,
+      fatalError() || new Error(`whisper-server exited before starting (${signal || code})`));
+    const onError = err => finish(reject, err);
+    child.once('exit', onExit);
+    child.once('error', onError);
     const attempt = () => {
+      if (settled) return;
+      if (fatalError()) return finish(reject, fatalError());
       const sock = net.connect(p, '127.0.0.1');
-      sock.once('connect', () => { sock.destroy(); resolve(); });
+      sock.once('connect', () => { sock.destroy(); finish(resolve); });
       sock.once('error', () => {
         sock.destroy();
-        if (Date.now() - started > timeoutMs) return reject(new Error('whisper-server did not start'));
+        if (fatalError()) return finish(reject, fatalError());
+        if (Date.now() - started > timeoutMs) {
+          return finish(reject, new Error('whisper-server did not start'));
+        }
         setTimeout(attempt, 300);
       });
     };
@@ -322,23 +341,47 @@ async function start(model, { threads } = {}) {
   if (process.env.YAPPER_WHISPER_ARGS) {
     args.push(...process.env.YAPPER_WHISPER_ARGS.split(' ').filter(Boolean));
   }
-  proc = spawn(serverPath(), args, { cwd: binDir() });
+  if (forceCpu && !args.includes('-ng') && !args.includes('--no-gpu')) args.push('-ng');
+  const child = spawn(serverPath(), args, { cwd: binDir() });
+  proc = child;
+  let startupFatal = null;
+  let metalFailed = false;
   // whisper-server narrates its system info on every request; only surface the
   // lines that would actually help when something is wrong.
-  proc.stderr.on('data', d => {
+  child.stderr.on('data', d => {
     for (const line of d.toString().split('\n')) {
       const t = line.trim();
       if (!t) continue;
+      if (/ggml_metal_.*(?:error|failed)|metal.*(?:failed|cannot|unable|error)/i.test(t)) {
+        metalFailed = true;
+        startupFatal = new Error('Metal could not initialize');
+        try { child.kill(); } catch { /* it already exited */ }
+      }
       if (/error|failed|cannot|unable|no GPU found|using .*backend|device \d+:/i.test(t)) {
         console.log('[whisper]', t.slice(0, 200));
       }
     }
   });
-  proc.on('exit', () => { proc = null; loadedModel = null; });
+  child.on('exit', () => {
+    if (proc === child) {
+      proc = null;
+      loadedModel = null;
+    }
+  });
 
   loadedModel = model;
-  ready = waitForPort(port);
-  await ready;
+  ready = waitForPort(port, child, () => startupFatal);
+  try {
+    await ready;
+  } catch (err) {
+    if (isAppleSilicon() && !forceCpu && metalFailed) {
+      forceCpu = true;
+      console.log('[engine] Metal unavailable; retrying with the CPU backend');
+      await stop();
+      return start(model, { threads });
+    }
+    throw err;
+  }
   return ready;
 }
 
@@ -1039,6 +1082,11 @@ function mergeSpeakerTracks(micLines, sysLines) {
   if (!sysLines.length) return micLines;
   const tag = (lines, who) => lines.map(line => {
     const m = line.match(/^(\[[\d:]+\])\s*(.*)$/);
+    // The remote track may already have been split by the native diarizer.
+    // Preserve that stronger label instead of producing "Them: Speaker 1".
+    if (who === 'Them' && /^(?:Speaker [1-9]\d*|Them):\s/.test(m ? m[2] : line)) {
+      return { sec: stampSeconds(line) || 0, line };
+    }
     return {
       sec: stampSeconds(line) || 0,
       line: m ? `${m[1]} ${who}: ${m[2]}` : `${who}: ${line}`

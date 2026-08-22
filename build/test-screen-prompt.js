@@ -34,10 +34,13 @@ const state = win => win.webContents.executeJavaScript(`(() => {
 
 const pause = ms => new Promise(r => setTimeout(r, ms));
 
+// Load main before app readiness, as production does, so its privileged scheme
+// is registered at the only time Electron permits it.
+require('../main.js');
+
 app.whenReady().then(async () => {
   const timer = watchdog(say);
   try {
-    require('../main.js');
     const win = await within(mainWindow(), 'the main window');
 
     check('the prompt starts hidden', (await state(win)).hidden, await state(win));

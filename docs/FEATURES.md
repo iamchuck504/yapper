@@ -198,7 +198,11 @@ Seven, each with its own sections:
 | **Client call** | requirements, commitments, objections, follow-ups |
 | **Brainstorm** | ideas, themes, what to explore |
 
-Notes come out **in English**, as colour-coded cards: Summary (violet), Key
+Notes come out **in English by default** — **Language** under Meeting options
+(and the third dropdown beside Regenerate) switches them to Español or to
+whatever language the meeting was mostly spoken in; the section headings stay
+in English either way, because the cards, the search and the action-item list
+read them. They are shown as colour-coded cards: Summary (violet), Key
 points (cyan), Decisions (green), Action items (amber), Open questions (pink),
 Blockers/Risks (red), Next steps (teal).
 
@@ -208,16 +212,39 @@ be traced back to the moment in the meeting.
 ### Automatic titles
 
 Leave the title empty and the model names the meeting from what was discussed,
-in two to six words. If the recording is too thin for that, it falls back to the
-date.
+in two to six words. The title and notes come back in the same model response,
+so naming does not add a second wait. If the recording is too thin for that, it
+falls back to the date.
+
+The meeting view opens as soon as transcription finishes. Notes then appear a
+section at a time while the provider writes them; only the complete response is
+saved. A small timing line measured on the current computer shows transcription,
+time to first notes, and total note-writing time.
+
+On macOS 14 or newer, the final local pass also separates distinct voices on
+the remote/system track as **Speaker 1**, **Speaker 2**, and so on. The meeting
+shows a **Who is speaking?** panel: choose or type each person's name, then use
+**Regenerate** to update the notes with those names. Labels remain stable within
+that meeting; Yapper does not infer a person's identity from the attendee list.
+If the local Core ML detector is unavailable, the transcript still completes
+with the reliable `Me`/`Them` side-of-call labels.
 
 ### Editing, regenerating, reading aloud
 
 - **Edit** — the notes are yours; change them and save.
 - **↻ Regenerate** — rewrite any saved meeting's notes with a different style or
-  detail level. The transcript is kept, so this costs one model call and no
-  re-transcription.
-- **Copy** — the whole note to the clipboard.
+  detail level. While it is writing, this becomes **Cancel**. Cancellation stops
+  the provider job and restores the previous complete notes; the transcript is
+  kept throughout, so retrying needs no re-transcription.
+- **Copy** — the whole note to the clipboard. Each card also has its own
+  **Copy** on hover, for when only the action items are going into Slack.
+- **Rename** — double-click the title (or the pencil beside it, or ⌘⇧R), type,
+  Enter. Escape keeps the old one. The automatic title is a guess from the
+  transcript, and this is the correction.
+- **Retry notes** — when the provider fails after the transcript is saved, the
+  error carries a button that writes the notes again from that transcript.
+  Nothing is re-transcribed, and a meeting that never got a title asks for one
+  in the same request.
 - **Read aloud** — speaks the notes, using the system voice.
 - **Open folder** — the meeting on disk. Every meeting is a plain folder:
   `transcript.txt`, `notes.md`, `title.txt`. Nothing is locked in a database.
@@ -257,12 +284,21 @@ week has too little in it, the panel says so instead of inventing a summary.
 
 ### Action items
 
-Every task from every meeting, in one list, with the meeting it came from and
-its due date. Filterable, and completable from here.
+Only the tasks you choose, in one personal list, with the meeting they came
+from and their due dates. In a meeting, use **+ my list** beside an individual
+Action item or Next step. Opening, indexing, or regenerating notes never adds
+anything by itself. The list is filterable and completable from here.
 
-They are extracted from what the notes **actually say**: `URGENT:` is not an
-owner, an undated item never acquires a date, and restating the same task across
-meetings merges rather than duplicating.
+For a chosen item, owner, date, and priority are extracted from what the notes
+**actually say**: `URGENT:` is not an owner, an undated item never acquires a
+date, and choosing the same task from another meeting merges rather than
+duplicating.
+
+**Several at once.** **Select** turns on a checkbox per row, with **Select
+all** for the rows currently shown; **Mark as done** completes the lot in one
+go (inside the *Done* filter the same button reads *Mark as not done* and
+reverses it). The selection is only ever what the filter shows, so switching
+filters drops anything no longer on screen.
 
 ### Search, and asking questions
 
@@ -335,13 +371,17 @@ The rules around it:
 - **Start at login** — on by default, switchable.
 - **Updates** — checked at launch and every four hours. **Windows** downloads in
   the background and applies on quit, or immediately from the sidebar pill.
-  **macOS** shows *New version — download* and opens the releases page instead:
-  Squirrel.Mac refuses unsigned updates, so it says so rather than promising a
-  restart it cannot deliver. Updating there means dragging the new dmg over the
-  old app and clearing Gatekeeper once more — but not re-downloading the engine,
-  which lives outside the app, so it is ~95 MB rather than another 650 MB. Your
-  meetings and permissions are untouched either way.
+  Signed **macOS** releases use the same ready-to-restart flow. Updating does
+  not re-download the engine, which lives outside the app, so it is ~95 MB
+  rather than another 650 MB. Meetings and granted permissions are untouched.
 - **Reminders** — add your own, alongside the ones extracted from notes.
+- **Keyboard** — the shortcuts live in the menu bar, so they are listed where
+  people look for them (and they keep working on Windows, where the bar is
+  hidden): **⌘N** new meeting, **⌘.** stop, **⌘K** search, **⌘1** Today,
+  **⌘2** Action items, **⌘E** export, **⌘⇧C** copy the notes as Markdown,
+  **⌘⇧R** rename, **⌘⇧M** mark a moment while recording. **Escape** closes
+  the export menu, cancels a rename, or dismisses the detected-meeting prompt.
+  Ctrl instead of ⌘ on Windows.
 
 ---
 
@@ -349,14 +389,13 @@ The rules around it:
 
 Stated plainly, so it is planned around rather than discovered:
 
-- **No speaker labels.** The transcript does not say who said what. Typed
-  participants help spelling and attribution in the notes, but the app does not
-  know who is talking.
+- **Speaker detection is currently macOS-only.** macOS 14+ separates remote
+  voices locally; Windows still receives one mixed stream and has no reliable
+  speaker labels. Names are assigned by the user, not guessed.
 - **No calendar integration.** Detection knows a microphone is in use, not that
   "the 10:00 with Ana" is starting.
 - **No mobile, no sync, no sharing, no accounts.** Meetings live on the machine
   that recorded them.
 - **No playback** from the timestamps in the notes.
-- **Notes are written in English**, whatever the language spoken.
 - **macOS**: Apple Silicon only; auto-detection needs 14.4; updates only notify;
   the first open needs the Gatekeeper step.

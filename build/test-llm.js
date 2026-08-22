@@ -75,6 +75,75 @@ const ok = (req, res) => {
     srv.seen[0].url === '/v1/chat/completions', srv.seen[0].url);
   await srv.close();
 
+  // Streaming is the difference between a blank wait and notes appearing as
+  // they are written. Two SSE events may arrive in one TCP chunk, so this also
+  // proves the parser follows event boundaries rather than socket boundaries.
+  srv = await fakeServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.write('data: {"choices":[{"delta":{"content":"the "}}]}\n\n');
+    res.write('data: {"choices":[{"delta":{"content":"notes"}}]}\n\n');
+    res.end('data: [DONE]\n\n');
+  });
+  const partial = [];
+  const streamed = await llm.generate(
+    { provider: 'compatible', apiKey: 'k', baseUrl: srv.url, model: 'm' },
+    { system: 's', input: 'i', onDelta: (_chunk, text) => partial.push(text) });
+  check('asks compatible providers to stream when progress is wanted',
+    srv.seen[0].body.stream === true, JSON.stringify(srv.seen[0].body));
+  check('assembles a streamed answer exactly', streamed === 'the notes', streamed);
+  check('publishes progressive text before completion',
+    partial.length === 2 && partial[0] === 'the ' && partial[1] === 'the notes', JSON.stringify(partial));
+  await srv.close();
+
+  // Some custom gateways accept `stream: true` but still send normal JSON.
+  // That is slower to first text, but it must remain compatible.
+  srv = await fakeServer(ok);
+  const fallbackParts = [];
+  const fallback = await llm.generate(
+    { provider: 'compatible', apiKey: 'k', baseUrl: srv.url, model: 'm' },
+    { system: 's', input: 'i', onDelta: (_chunk, text) => fallbackParts.push(text) });
+  check('falls back when a gateway ignores streaming',
+    fallback === 'the notes' && fallbackParts.join('') === 'the notes', JSON.stringify(fallbackParts));
+  await srv.close();
+
+  // Cancel must close the request itself, not merely stop painting its output:
+  // otherwise a local model keeps the GPU busy and a hosted model may finish a
+  // request the user explicitly stopped.
+  srv = await fakeServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+    res.write('data: {"choices":[{"delta":{"content":"partial notes"}}]}\n\n');
+    const late = setTimeout(() => res.end('data: [DONE]\n\n'), 5000);
+    res.on('close', () => clearTimeout(late));
+  });
+  const controller = new AbortController();
+  const cancelStarted = Date.now();
+  let cancelMessage = '';
+  try {
+    await llm.generate(
+      { provider: 'compatible', apiKey: 'k', baseUrl: srv.url, model: 'm' },
+      { system: 's', input: 'i', signal: controller.signal,
+        onDelta: () => controller.abort() });
+  } catch (err) {
+    cancelMessage = err.message;
+  }
+  check('canceling stops a streamed provider request',
+    /generation canceled/i.test(cancelMessage), cancelMessage);
+  check('canceling returns immediately instead of waiting for the provider',
+    Date.now() - cancelStarted < 1000, `${Date.now() - cancelStarted} ms`);
+  await srv.close();
+
+  const alreadyCanceled = new AbortController();
+  alreadyCanceled.abort();
+  try {
+    await llm.generate(
+      { provider: 'compatible', apiKey: 'k', baseUrl: srv.url, model: 'm' },
+      { system: 's', input: 'i', signal: alreadyCanceled.signal });
+    check('an already canceled job never starts', false, 'did not throw');
+  } catch (err) {
+    check('an already canceled job never starts',
+      /generation canceled/i.test(err.message), err.message);
+  }
+
   // --- errors the user will actually hit ---
   const expectError = async (label, cfg, want) => {
     try {
@@ -152,6 +221,17 @@ const ok = (req, res) => {
 
   await expectError('an invalid URL is explained',
     { provider: 'compatible', apiKey: 'k', baseUrl: 'not a url', model: 'm' }, 'not a valid URL');
+  await expectError('a remote HTTP endpoint is refused before sending a key',
+    { provider: 'compatible', apiKey: 'secret', baseUrl: 'http://example.com/v1', model: 'm' },
+    'must use HTTPS');
+
+  srv = await fakeServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ choices: [{ message: { content: 'x'.repeat(2.1 * 1024 * 1024) } }] }));
+  });
+  await expectError('an unexpectedly large provider response is stopped',
+    { provider: 'compatible', apiKey: 'k', baseUrl: srv.url, model: 'm' }, 'large response');
+  await srv.close();
 
   console.log(fails ? `\n${fails} failures` : '\nPASS');
   process.exit(fails ? 1 : 0);

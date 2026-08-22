@@ -15,13 +15,16 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const http = require('http');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 
 const WHISPER_TAG = 'v1.9.1';
 
 const DEFAULTS = {
   engineBase: `https://github.com/ggml-org/whisper.cpp/releases/download/${WHISPER_TAG}`,
-  modelBase: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main',
+  // Pin the model repository too. `main` is mutable; hashes below are the
+  // second, independent check before any downloaded bytes become usable.
+  modelBase: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/5359861c739e955e79d9a303bcbc70fb988958b1',
   cpuZip: 'whisper-bin-x64.zip',
   gpuZip: 'whisper-cublas-12.4.0-bin-x64.zip',
   // ggml-org publishes no macOS binary at all, so the mac engine is our own:
@@ -30,7 +33,22 @@ const DEFAULTS = {
   macZip: `https://github.com/iamchuck504/yapper-releases/releases/download/engine-${WHISPER_TAG}/whisper-mac-arm64.zip`,
   // `medium` is deliberately absent: measured against `small` on real meeting
   // audio it loops (see ARCHITECTURE §8), so it would be 1.5 GB of worse output.
-  models: ['base', 'small']
+  models: ['base', 'small'],
+  hashes: {
+    cpuZip: '7d8be46ecd31828e1eb7a2ecdd0d6b314feafd82163038ab6092594b0a063539',
+    gpuZip: '106a2030eff8998e4ef320fe72e263a78449e9040386ee27c41ea80b001b601b',
+    macZip: '83506a4969de1a7d4b92e4338bb2535b89eeba138e1f42aea79fc990bb0cccbb',
+    models: {
+      base: '60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe',
+      small: '1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b'
+    }
+  },
+  maxBytes: {
+    cpuZip: 32 * 1024 * 1024,
+    gpuZip: 800 * 1024 * 1024,
+    macZip: 32 * 1024 * 1024,
+    models: { base: 200 * 1024 * 1024, small: 600 * 1024 * 1024 }
+  }
 };
 
 // ------------------------------------------------------------- downloading
@@ -61,6 +79,39 @@ function sizeOf(file) {
   try { return fs.statSync(file).size; } catch { return 0; }
 }
 
+function sha256File(file) {
+  const hash = crypto.createHash('sha256');
+  const fd = fs.openSync(file, 'r');
+  const buf = Buffer.allocUnsafe(1024 * 1024);
+  try {
+    let read;
+    while ((read = fs.readSync(fd, buf, 0, buf.length, null)) > 0) hash.update(buf.subarray(0, read));
+  } finally {
+    fs.closeSync(fd);
+  }
+  return hash.digest('hex');
+}
+
+function isLoopback(hostname) {
+  return hostname === 'localhost' || hostname === '127.0.0.1'
+    || hostname === '[::1]' || hostname === '::1';
+}
+
+function checkedRemote(url, { startedSecure = false, allowInsecure = false } = {}) {
+  let parsed;
+  try { parsed = new URL(url); } catch { throw fatal(`invalid download URL: ${url}`); }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw fatal(`unsupported download protocol: ${parsed.protocol}`);
+  }
+  if (startedSecure && parsed.protocol !== 'https:') {
+    throw fatal(`refusing to redirect a secure download to ${parsed.protocol}`);
+  }
+  if (parsed.protocol === 'http:' && !allowInsecure && !isLoopback(parsed.hostname)) {
+    throw fatal('unencrypted downloads are allowed only from this computer');
+  }
+  return parsed.href;
+}
+
 function dropPart(dest) {
   for (const f of [partOf(dest), tagOf(dest)]) {
     try { fs.unlinkSync(f); } catch { /* never existed */ }
@@ -76,7 +127,7 @@ function dropPart(dest) {
  * why every outcome after the first byte is delivered through the stream's
  * `close`, and nothing rejects out from under it.
  */
-function attempt(url, dest, onPct, resume, redirectsLeft = 5, headers = null) {
+function attempt(url, dest, onPct, resume, policy, redirectsLeft = 5, headers = null) {
   return new Promise((resolve, reject) => {
     const part = partOf(dest);
     if (!resume) dropPart(dest);
@@ -120,9 +171,15 @@ function attempt(url, dest, onPct, resume, redirectsLeft = 5, headers = null) {
       if (code >= 300 && code < 400 && res.headers.location) {
         res.resume();
         if (!redirectsLeft) return settle(fatal(`too many redirects for ${url}`));
+        let next;
+        try {
+          next = checkedRemote(new URL(res.headers.location, url).href, policy);
+        } catch (err) {
+          return settle(err);
+        }
         settled = true;       // the recursive attempt owns the outcome now
-        return attempt(new URL(res.headers.location, url).href, dest,
-          onPct, resume, redirectsLeft - 1, headers).then(resolve, reject);
+        return attempt(next, dest, onPct, resume, policy,
+          redirectsLeft - 1, headers).then(resolve, reject);
       }
 
       // 416: what we hold is already as long as the file. A truncated remote,
@@ -148,6 +205,10 @@ function attempt(url, dest, onPct, resume, redirectsLeft = 5, headers = null) {
 
       const len = Number(res.headers['content-length']) || 0;
       const total = code === 206 ? have + len : len;
+      if (policy.maxBytes && total > policy.maxBytes) {
+        res.resume();
+        return settle(fatal(`${path.basename(dest)} is larger than the allowed download size`, true));
+      }
       const tag = res.headers.etag || res.headers['last-modified'];
       if (tag) { try { fs.writeFileSync(tagOf(dest), tag, 'utf8'); } catch { /* best effort */ } }
 
@@ -172,6 +233,13 @@ function attempt(url, dest, onPct, resume, redirectsLeft = 5, headers = null) {
 
       res.on('data', chunk => {
         got += chunk.length;
+        if (policy.maxBytes && have + got > policy.maxBytes) {
+          const err = fatal(`${path.basename(dest)} exceeded the allowed download size`, true);
+          res.unpipe(out);
+          res.destroy();
+          abandon(err);
+          return;
+        }
         if (total && onPct) onPct(Math.min(100, ((have + got) / total) * 100));
       });
       res.on('aborted', () => abandon(new Error(`connection dropped fetching ${path.basename(dest)}`)));
@@ -183,9 +251,10 @@ function attempt(url, dest, onPct, resume, redirectsLeft = 5, headers = null) {
   });
 }
 
-function fatal(message) {
+function fatal(message, discard = false) {
   const err = new Error(message);
   err.fatal = true;
+  err.discard = discard;
   return err;
 }
 
@@ -198,6 +267,12 @@ async function download(url, dest, onPct, opts = {}) {
   const retries = opts.retries === undefined ? RETRIES : opts.retries;
   const backoff = opts.backoff || BACKOFF_MS;
   const resume = opts.resume !== false;
+  const initial = checkedRemote(url, { allowInsecure: opts.allowInsecure === true });
+  const policy = {
+    startedSecure: new URL(initial).protocol === 'https:',
+    allowInsecure: opts.allowInsecure === true,
+    maxBytes: opts.maxBytes || 0
+  };
   let last;
   for (let i = 0; i <= retries; i++) {
     if (i) {
@@ -206,14 +281,28 @@ async function download(url, dest, onPct, opts = {}) {
       await sleep(wait);
     }
     try {
-      await attempt(url, dest, onPct, resume);
+      await attempt(initial, dest, onPct, resume, policy);
+      if (opts.sha256) {
+        const got = sha256File(dest);
+        if (got !== String(opts.sha256).toLowerCase()) {
+          try { fs.unlinkSync(dest); } catch { /* never landed */ }
+          dropPart(dest);
+          const err = new Error(`integrity check failed for ${path.basename(dest)}`);
+          err.integrity = true;
+          throw err;
+        }
+      }
       return;
     } catch (err) {
       last = err;
+      if (err.discard || err.integrity) {
+        try { fs.unlinkSync(dest); } catch { /* not promoted */ }
+        dropPart(dest);
+      }
       if (err.fatal) break;
     }
   }
-  if (!resume) dropPart(dest);
+  if (!resume || (last && (last.discard || last.integrity))) dropPart(dest);
   throw last;
 }
 
@@ -245,6 +334,16 @@ function copyDir(from, to) {
   for (const f of fs.readdirSync(from)) {
     fs.copyFileSync(path.join(from, f), path.join(to, f));
   }
+}
+
+function expectedHash(value, label) {
+  const hash = String(value || '').toLowerCase();
+  if (!/^[a-f0-9]{64}$/.test(hash)) throw new Error(`missing SHA-256 for ${label}`);
+  return hash;
+}
+
+function verifiedFile(file, expected) {
+  return fs.existsSync(file) && sha256File(file) === expected;
 }
 
 function hasNvidia() {
@@ -305,14 +404,27 @@ async function run(opts) {
   const retryNote = label => ({ attempt, of, error }) =>
     tell(`${label} — connection lost, retrying (${attempt}/${of})`, null, { warning: error });
 
-  const engineZip = async (url, target, label) => {
+  const engineZip = async (url, target, label, wantedHash, maxBytes) => {
     step++;
-    if (fs.existsSync(path.join(target, exe))) { tell(`${label} — already here`, 100); return; }
+    const sourceHash = expectedHash(wantedHash, label);
+    const receipt = path.join(target, '.yapper-source.sha256');
+    let installedHash = '';
+    try { installedHash = fs.readFileSync(receipt, 'utf8').trim(); } catch { /* old install */ }
+    if (fs.existsSync(path.join(target, exe)) && installedHash === sourceHash) {
+      tell(`${label} — already here`, 100);
+      return;
+    }
     tell(label, 0);
     const zip = path.join(tmp, path.basename(new URL(url, 'http://x').pathname));
-    await download(url, zip, pct => tell(label, pct),
-      { onRetry: retryNote(label), retries: o.retries, backoff: o.backoff });
+    if (!verifiedFile(zip, sourceHash)) {
+      try { fs.unlinkSync(zip); } catch { /* not cached */ }
+      await download(url, zip, pct => tell(label, pct), {
+        onRetry: retryNote(label), retries: o.retries, backoff: o.backoff,
+        sha256: sourceHash, maxBytes
+      });
+    }
     const out = path.join(tmp, path.basename(zip, '.zip'));
+    try { fs.rmSync(out, { recursive: true, force: true }); } catch { /* first extraction */ }
     extractZip(zip, out);
     const src = findServerDir(out, exe);
     if (!src) throw new Error(`${path.basename(zip)} did not contain ${exe}`);
@@ -323,23 +435,34 @@ async function run(opts) {
         try { fs.chmodSync(path.join(target, f), 0o755); } catch { /* best effort */ }
       }
     }
+    fs.writeFileSync(receipt, sourceHash, 'utf8');
     tell(`${label} — done`, 100);
   };
 
   if (mac) {
-    await engineZip(o.macZip, binMain, 'Transcription engine (Metal)');
+    await engineZip(o.macZip, binMain, 'Transcription engine (Metal)',
+      o.hashes && o.hashes.macZip, o.maxBytes && o.maxBytes.macZip);
   } else {
-    await engineZip(`${o.engineBase}/${o.cpuZip}`, binMain, 'Transcription engine (8 MB)');
+    await engineZip(`${o.engineBase}/${o.cpuZip}`, binMain, 'Transcription engine (8 MB)',
+      o.hashes && o.hashes.cpuZip, o.maxBytes && o.maxBytes.cpuZip);
   }
 
   for (const name of o.models) {
     step++;
     const dest = path.join(models, `ggml-${name}.bin`);
     const label = `"${name}" model`;
-    if (fs.existsSync(dest)) { tell(`${label} — already here`, 100); announceUsable(); continue; }
+    const modelHash = expectedHash(o.hashes && o.hashes.models && o.hashes.models[name], label);
+    if (verifiedFile(dest, modelHash)) {
+      tell(`${label} — already here`, 100); announceUsable(); continue;
+    }
+    try { fs.unlinkSync(dest); } catch { /* first install */ }
     tell(label, 0);
     await download(`${o.modelBase}/ggml-${name}.bin`, dest,
-      pct => tell(label, pct), { onRetry: retryNote(label), retries: o.retries, backoff: o.backoff });
+      pct => tell(label, pct), {
+        onRetry: retryNote(label), retries: o.retries, backoff: o.backoff,
+        sha256: modelHash,
+        maxBytes: o.maxBytes && o.maxBytes.models && o.maxBytes.models[name]
+      });
     tell(`${label} — done`, 100);
     announceUsable();
   }
@@ -349,7 +472,8 @@ async function run(opts) {
   // bar for the better part of an hour before it could record anything.
   if (!mac && o.gpu) {
     try {
-      await engineZip(`${o.engineBase}/${o.gpuZip}`, binGpu, 'GPU acceleration (646 MB)');
+      await engineZip(`${o.engineBase}/${o.gpuZip}`, binGpu, 'GPU acceleration (646 MB)',
+        o.hashes && o.hashes.gpuZip, o.maxBytes && o.maxBytes.gpuZip);
     } catch (err) {
       // CPU still transcribes; a failed GPU download must not block install
       tell(`GPU build skipped: ${err.message}`, 100);

@@ -7,19 +7,42 @@
 # Needs: Node 20+, and the gh CLI signed in as iamchuck504. The engine must
 # already be on the feed (mac/build-engine.sh, once per engine version).
 #
-# The build is NOT signed or notarized (no Apple Developer account), so
-# Gatekeeper will block the first open: right-click the app -> Open -> Open.
-# That is stated in the docs; signing is the known gap.
+# Requires a Developer ID Application identity in the macOS keychain and a
+# validated notarytool profile. Credentials stay in the keychain; this script
+# never reads or prints them.
 set -euo pipefail
 
 VERSION="$(node -p "require('./package.json').version")"
 REPO="iamchuck504/yapper-releases"
+APPLE_KEYCHAIN_PROFILE="${APPLE_KEYCHAIN_PROFILE:-yapper-notary}"
+CSC_NAME="${CSC_NAME:-6DA3D507B0277225D26570969C3E05D454228496}"
+CSC_KEYCHAIN="${CSC_KEYCHAIN:-${HOME}/Library/Application Support/Yapper Signing/yapper-signing.keychain-db}"
+export APPLE_KEYCHAIN_PROFILE
+export CSC_NAME
+export CSC_KEYCHAIN
+
+if [ ! -f "$CSC_KEYCHAIN" ]; then
+  echo "missing signing keychain: $CSC_KEYCHAIN" >&2
+  exit 1
+fi
+
+if ! security find-identity -v -p codesigning "$CSC_KEYCHAIN" \
+     | grep -q "$CSC_NAME.*Developer ID Application: Carlos Lopez (54H77VDNJY)"; then
+  echo "missing expected Developer ID Application identity $CSC_NAME in $CSC_KEYCHAIN" >&2
+  exit 1
+fi
+
+if ! xcrun notarytool history --keychain-profile "$APPLE_KEYCHAIN_PROFILE" \
+     --output-format json >/dev/null; then
+  echo "notarytool profile '$APPLE_KEYCHAIN_PROFILE' is missing or invalid" >&2
+  exit 1
+fi
 
 echo "== dependencies"
-npm install
+npm_config_cache="${TMPDIR:-/tmp}/yapper-npm-cache" npm ci
 
-echo "== native helpers (meeting detection and system audio)"
-# Both are required before packaging: electron-builder copies them into the app,
+echo "== native helpers (meeting detection, system audio and speaker detection)"
+# All are required before packaging: electron-builder copies them into the app,
 # and main.js degrades quietly if either is missing — auto-detection stays off,
 # and recording falls back to the microphone alone. swiftc ships with the
 # Command Line Tools, so neither needs Xcode.
@@ -30,10 +53,22 @@ echo "== native helpers (meeting detection and system audio)"
 # the mic probe reads in 14.4.
 swiftc -O -target arm64-apple-macos14.4 mac/mic-probe.swift -o build/mic-probe
 swiftc -O -target arm64-apple-macos13.0 mac/system-audio.swift -o build/system-audio
+swift build -c release --package-path mac/speaker-diarize --product speaker-diarize
+DIARIZER_BIN="$(swift build -c release --package-path mac/speaker-diarize --show-bin-path)/speaker-diarize"
+test -x "$DIARIZER_BIN" || { echo "missing speaker diarizer: $DIARIZER_BIN" >&2; exit 1; }
+cp "$DIARIZER_BIN" build/speaker-diarize
 ./build/mic-probe >/dev/null || true   # exits 0 with no output when nobody is capturing
+./build/speaker-diarize --self-test >/dev/null
 
 echo "== pure test suite"
 npm test
+
+echo "== real renderer smoke test"
+npx electron build/test-smoke.js
+npx electron build/test-record-cycle.js
+npx electron build/test-two-track-app.js
+npx electron build/test-speakers-ui.js
+npx electron build/test-import.js
 
 echo "== building Yapper $VERSION (dmg + zip, arm64)"
 npx electron-builder --mac
@@ -43,17 +78,31 @@ ls -lh dist/*.dmg dist/*-mac.zip 2>/dev/null || ls -lh dist/
 
 DMG="dist/Yapper-$VERSION-arm64.dmg"
 test -f "$DMG" || DMG="$(ls dist/*.dmg | head -1)"
+APP="dist/mac-arm64/Yapper.app"
+test -d "$APP" || { echo "missing unpacked app: $APP" >&2; exit 1; }
+
+# electron-builder notarizes and staples the .app before creating the zip and
+# dmg. The zip therefore carries the ticket used by automatic updates. Submit
+# the finished dmg too, so a browser-downloaded disk image has its own stapled
+# ticket and can be assessed offline before it is mounted.
+echo "== notarizing final dmg"
+xcrun notarytool submit "$DMG" --keychain-profile "$APPLE_KEYCHAIN_PROFILE" --wait
+xcrun stapler staple "$DMG"
+
+echo "== release gates"
+node build/verify-package.js "$APP"
+codesign --verify --deep --strict --verbose=2 "$APP"
+TEAM="$(codesign -dv --verbose=4 "$APP" 2>&1 | sed -n 's/^TeamIdentifier=//p' | head -1)"
+test "$TEAM" = "54H77VDNJY" || { echo "unexpected signing Team ID: $TEAM" >&2; exit 1; }
+xcrun stapler validate "$APP"
+xcrun stapler validate "$DMG"
+spctl --assess --type execute --verbose=2 "$APP"
+spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
 
 echo "== uploading to release v$VERSION"
-# latest-mac.yml goes up with the dmg, not as an afterthought: it is what an
-# installed Mac reads to notice a new version. Without it the app falls back to
-# latest.yml, which the Windows build owns — so a release cut only here would be
-# invisible to every Mac already installed.
+# latest-mac.yml and the signed zip are what electron-updater uses to apply a
+# Mac update; the dmg is the ordinary first install.
 FEED="dist/latest-mac.yml"
-# The zip goes up beside the dmg because it is what mac/install.sh installs:
-# curl attaches no quarantine to what it downloads, so that route skips the
-# Gatekeeper block the dmg does trigger. With no zip on the feed, the one-line
-# installer has nothing to fetch.
 ZIP="dist/Yapper-$VERSION-arm64-mac.zip"
 
 # This script used to require that Windows had published the release first,
@@ -67,12 +116,11 @@ if ! gh release view "v$VERSION" --repo "$REPO" >/dev/null 2>&1; then
     --title "Yapper $VERSION" \
     --notes "Yapper $VERSION.
 
-macOS (Apple Silicon), without the Gatekeeper detour:
+macOS (Apple Silicon): download the signed and notarized dmg, or install with:
 
     curl -fsSL https://github.com/$REPO/releases/latest/download/install.sh | bash
 
-Or download the dmg and follow docs/INSTALL-MACOS.md. Installed copies read this
-same feed to tell you about new versions."
+Installed copies use this same feed for signed automatic updates."
   NEW_RELEASE=1
 fi
 

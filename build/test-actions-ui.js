@@ -1,6 +1,6 @@
-﻿// The action items view, driven for real: the notes of several meetings produce
-// the list, duplicates fold into one row, the facts shown come only from what
-// the notes said, and every control works.
+﻿// The action items view, driven for real: meeting notes offer tasks, but only
+// the ones the user chooses enter the personal list. Chosen duplicates fold
+// into one row, their facts come only from the notes, and every control works.
 const path = require('path');
 const fs = require('fs');
 const { app, dialog } = require('electron');
@@ -69,19 +69,44 @@ app.whenReady().then(async () => {
     await new Promise(r => setTimeout(r, 300));
   };
 
+  const chooseItems = async (folder, needles) => {
+    await $(`openMeetingByFolder(${JSON.stringify(folder)})`);
+    await new Promise(r => setTimeout(r, 300));
+    for (const needle of needles) {
+      const clicked = await $(`(() => {
+        const li = [...document.querySelectorAll('#notes li')]
+          .find(x => x.textContent.toLowerCase().includes(${JSON.stringify(needle.toLowerCase())}));
+        const btn = li && li.querySelector('.li-add');
+        if (!btn) return false;
+        btn.click();
+        return true;
+      })()`);
+      check(`can choose "${needle}"`, clicked, 'button was not found');
+      await new Promise(r => setTimeout(r, 300));
+    }
+  };
+
   await $('window.yapper.refreshLibrary()');
-  const list = await $('window.yapper.listActions()');
+  let list = await $('window.yapper.listActions()');
+  check('refreshing notes adds nothing on its own', list.length === 0,
+    `${list.length} items appeared without a click`);
+
+  // Choose three tasks from planning, deliberately leave the contract out,
+  // then choose the repeated rollout and one new item from the stand-up.
+  await chooseItems(planning, ['rollout plan', 'pricing deck', 'login bug']);
+  await chooseItems(standup, ['rollout plan', 'launch venue']);
+  list = await $('window.yapper.listActions()');
   say(`  items: ${list.map(r => `${r.owner || '—'}/${r.text}`).join(' | ')}\n`);
 
-  // ---- extraction ----
-  check('pulls the action items out of the notes', list.length === 5, `${list.length}: ver arriba`);
-  check('ignora "No action items recorded."',
-    !list.some(r => /no action items/i.test(r.text)), 'inserted the marker');
+  // ---- selection and extraction ----
+  check('only the chosen action items enter the list', list.length === 4, `${list.length}: see above`);
+  check('the item deliberately left unselected stays out',
+    !list.some(r => /contract/i.test(r.text)), 'the contract was added');
   check('reads the owners that were actually named',
     list.filter(r => r.owner).map(r => r.owner).sort().join(',') === 'Chuck,Maya',
     list.map(r => r.owner).join(','));
   check('leaves the owner empty when nobody was named',
-    list.some(r => /contract/i.test(r.text) && !r.owner), 'made one up');
+    list.some(r => /venue/i.test(r.text) && !r.owner), 'made one up');
   check('reads the dates as written', list.some(r => r.due === 'Friday'), 'found none');
   check('flags what is urgent', list.some(r => r.priority === 'high' && /login/i.test(r.text)),
     'did not flag the bug');
@@ -103,7 +128,7 @@ app.whenReady().then(async () => {
   say(`  resumen: "${summary.text}"`);
   check('the home screen summarises the action items', !summary.hidden, 'is hidden');
   check('with the count and the urgent ones',
-    /5 action items pending/.test(summary.text) && /1 high priority/.test(summary.text),
+    /4 action items pending/.test(summary.text) && /1 high priority/.test(summary.text),
     summary.text);
 
   // The theme button is fixed to the window and floats over whatever is under
@@ -137,7 +162,7 @@ app.whenReady().then(async () => {
   }))`);
 
   let shown = await rows();
-  check('the view lists the action items', shown.length === 5, `${shown.length} filas`);
+  check('the view lists the chosen action items', shown.length === 4, `${shown.length} filas`);
   check('urgent items come first', shown[0].urgent, JSON.stringify(shown[0]));
   check('shows the owner', shown.some(r => r.owner === 'Maya'), JSON.stringify(shown));
   check('shows the date', shown.some(r => r.due === 'Friday'), JSON.stringify(shown));
@@ -164,7 +189,7 @@ app.whenReady().then(async () => {
   let after = await $('window.yapper.listActions()');
   check('marking as done is saved', after.filter(r => r.done).length === 1,
     `${after.filter(r => r.done).length} hechos`);
-  check('and it disappears from "Open"', (await rows()).length === 4, `${(await rows()).length}`);
+  check('and it disappears from "Open"', (await rows()).length === 3, `${(await rows()).length}`);
 
   await $(`(() => { const i = document.querySelector('#reminders-list .reminder .r-text');
     i.value = 'edited by hand'; i.dispatchEvent(new Event('change')); })()`);
@@ -172,6 +197,49 @@ app.whenReady().then(async () => {
   after = await $('window.yapper.listActions()');
   check('editing by hand is saved', after.some(r => r.text === 'edited by hand'),
     'was not saved');
+
+  // ---- several at once ----
+  // Select mode is off by default, so the checkboxes cost nothing until asked for.
+  const boxVisible = () => $(`(() => { const b = document.querySelector('#reminders-list .r-select');
+    return !!b && getComputedStyle(b).display !== 'none'; })()`);
+  check('row checkboxes are hidden until Select is pressed', !(await boxVisible()), 'visible already');
+  await click('#btn-select-actions');
+  check('Select shows a checkbox per row', await boxVisible(), 'still hidden');
+  check('Mark as done is disabled with nothing selected',
+    await $("document.getElementById('btn-bulk-done').disabled"), 'enabled');
+  await click('#select-all-actions');
+  const picked = await $("document.querySelectorAll('#reminders-list .r-select:checked').length");
+  const openRows = (await rows()).length;
+  check('Select all ticks every row shown', picked === openRows, `${picked} of ${openRows}`);
+  check('and the count says so',
+    new RegExp(`${openRows} of ${openRows} selected`).test(await $("document.getElementById('bulk-count').textContent")),
+    await $("document.getElementById('bulk-count').textContent"));
+  await click('#btn-bulk-done');
+  await new Promise(r => setTimeout(r, 400));
+  after = await $('window.yapper.listActions()');
+  check('Mark as done completes every selected item in one go',
+    after.every(r => r.done), `${after.filter(r => !r.done).length} still open`);
+  check('"Open" is empty afterwards',
+    (await $("!!document.querySelector('#reminders-list .reminders-empty')")), 'rows remain');
+  check('and select mode switches itself off',
+    await $("document.getElementById('bulk-row').classList.contains('hidden')"), 'bar still shown');
+
+  // From "Done" the same button reverses it, so a slip is one click away from undone.
+  await click('#action-filter .seg-btn[data-filter="done"]');
+  await click('#btn-select-actions');
+  check('inside Done the button reads Mark as not done',
+    (await $("document.getElementById('btn-bulk-done').textContent")) === 'Mark as not done',
+    await $("document.getElementById('btn-bulk-done').textContent"));
+  await click('#select-all-actions');
+  await click('#btn-bulk-done');
+  await new Promise(r => setTimeout(r, 400));
+  after = await $('window.yapper.listActions()');
+  check('Mark as not done reopens the lot', after.every(r => !r.done),
+    `${after.filter(r => r.done).length} still done`);
+  await click('#action-filter .seg-btn[data-filter="open"]');
+  await click('#reminders-list .reminder .r-check');
+  await new Promise(r => setTimeout(r, 300));
+  after = await $('window.yapper.listActions()');
 
   const before = (await rows()).length;
   await click('#reminders-list .reminder .r-del');

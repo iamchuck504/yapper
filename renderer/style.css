@@ -521,6 +521,36 @@ body.light #btn-theme .icon-moon { display: block; }
 }
 #participants-meet::placeholder { color: var(--text-3); }
 
+.speaker-map {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin: -4px 0 16px;
+  padding: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-1);
+}
+.speaker-map-copy { min-width: 170px; display: flex; flex-direction: column; gap: 3px; }
+.speaker-map-copy strong { font-size: 12.5px; color: var(--text); }
+.speaker-map-copy span { max-width: 260px; font-size: 11.5px; line-height: 1.4; color: var(--text-3); }
+.speaker-map-fields { flex: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.speaker-field { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.speaker-field label { flex: 0 0 auto; font-size: 11.5px; color: var(--text-2); }
+.speaker-field input {
+  min-width: 0;
+  width: 100%;
+  padding: 6px 8px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  outline: none;
+  font-size: 12px;
+}
+.speaker-field input:focus { border-color: var(--accent); }
+
 /* ---- Toggle switches ---- */
 .switch {
   display: inline-flex;
@@ -942,7 +972,40 @@ body.light #status.error, body.light #regen-status.error { color: var(--rec); }
   margin-bottom: 18px;
 }
 .meeting-head { min-width: 0; }
+/* the title is the rename field: a pencil on hover, a ring while editing */
+.title-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.rename-btn {
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+.title-row:hover .rename-btn, .rename-btn:focus-visible { opacity: 1; }
+.rename-btn:hover { background: var(--surface-4); color: var(--text); }
+#result-title.editing {
+  outline: 2px solid var(--accent);
+  border-radius: 6px;
+  padding: 0 6px;
+  margin: 0 -6px;
+  background: var(--surface-3);
+  cursor: text;
+}
+#result-title.editing ~ .rename-btn { opacity: 0; }
 .meeting-date { font-size: 12.5px; color: var(--text-3); margin-top: 3px; }
+.meeting-speed {
+  font-size: 11.5px;
+  color: var(--text-3);
+  margin-top: 5px;
+  font-family: var(--font-mono);
+}
 
 .toolbar-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .regen-group {
@@ -1097,12 +1160,35 @@ body.light #status.error, body.light #regen-status.error { color: var(--rec); }
 .note-sec.sec-risk .note-rule .at { color: var(--accent); }
 
 .note-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 14px;
   font-weight: 650;
   letter-spacing: -0.01em;
   color: var(--sec, var(--text));
   margin-bottom: 6px;
 }
+/* one card to the clipboard; shown on hover like the "+ my list" controls */
+.sec-copy {
+  border: 1px solid var(--border-2);
+  background: transparent;
+  color: var(--text-3);
+  border-radius: 4px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 16px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+.note-sec:hover .sec-copy, .sec-copy:focus-visible { opacity: 1; }
+.sec-copy:hover, .sec-copy.copied { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+#regen-status .inline-action { margin-top: 8px; }
+/* with a button inside it, the box needs air before the first card */
+#regen-status:not(.hidden) { margin-bottom: 14px; }
 
 .note-sec p { margin: 4px 0; font-size: 14.5px; line-height: 1.62; color: var(--text-2); max-width: 74ch; }
 .note-sec ul { list-style: none; padding: 0; margin: 4px 0; max-width: 74ch; }
@@ -1514,6 +1600,28 @@ body.light #status.error, body.light #regen-status.error { color: var(--rec); }
 }
 .r-del:hover { background: var(--surface-4); color: var(--rec); }
 .reminders-empty { color: var(--text-3); font-style: italic; text-align: center; padding: 40px 12px; }
+
+/* selection mode: the checkbox column only exists while it is on */
+.filter-row { flex-wrap: wrap; }
+#btn-select-actions { margin-left: auto; }
+#btn-select-actions.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.bulk-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  margin-bottom: 10px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  animation: fadeUp 0.18s ease both;
+}
+.bulk-all { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; }
+.bulk-spacer { flex: 1; }
+.r-select, #select-all-actions { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+.r-select { display: none; flex-shrink: 0; }
+#reminders-list.selecting .r-select { display: inline-block; }
+.reminder.selected { border-color: var(--accent); }
 
 /* ---- Notes editor ---- */
 #notes-textarea {

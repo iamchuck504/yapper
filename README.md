@@ -1,6 +1,6 @@
 # Yapper
 
-A desktop app for meetings: it records the call, transcribes it **on your own machine** with Whisper, and turns the transcript into a structured markdown write-up — summary, key points, decisions, action items. The audio never leaves the device. Only text is sent for the notes, and only to the provider you pick, which can be a model running locally if you want nothing to leave at all.
+A desktop app for meetings: it records the call, transcribes it **on your own machine** with Whisper, and turns the transcript into a structured markdown write-up — summary, key points, decisions, action items. Yapper never uploads the audio. Only text is sent for the notes, and only to the provider you pick; Ollama keeps that processing local too. Meeting files live in `Documents/Meetings`, so the operating system may still sync them when iCloud Drive, OneDrive or another backup service manages that folder.
 
 Runs on **Windows** and **macOS (Apple Silicon)**. Both record both sides of a call, transcribe on the machine, and detect meetings automatically — see [Platforms](#platforms) for the two places they still differ.
 
@@ -12,7 +12,7 @@ Runs on **Windows** and **macOS (Apple Silicon)**. Both record both sides of a c
 >
 > **Manual with screenshots + honest assessment** (what it does well, what is missing, and the comparison against another meeting-notes app in both directions): **[docs/MANUAL.md](docs/MANUAL.md)**.
 >
-> **macOS build runbook:** **[mac/README.md](mac/README.md)** — how the engine and the two native helpers are compiled, and which permissions the app needs.
+> **macOS build runbook:** **[mac/README.md](mac/README.md)** — how the engine and native helpers are compiled, and which permissions the app needs.
 >
 > **To install without cloning anything:** the installers live in
 > [yapper-releases](https://github.com/iamchuck504/yapper-releases/releases/latest)
@@ -29,6 +29,7 @@ Runs on **Windows** and **macOS (Apple Silicon)**. Both record both sides of a c
 - **Floating bubble.** At rest it is a **capsule** the size of its own clock: real audio level (the bars follow the captured signal, it is not an animation) plus a timer. Hovering opens it into the live transcript with controls; leaving turns it back into a capsule, with a pin to keep it open. Draggable, follows the light/dark theme. "Floating bubble" toggle, and **Bubble starts** picks which of the four corners it appears in — it does not remember being dragged, so that corner is where it lives for the meeting. Bottom left by default: the bottom right is the strip a video call fills with its own controls, and on a MacBook with a notch the top corners stay clear of it.
 - **Knowing it is recording, and getting back.** The sidebar's *New meeting* button becomes *Recording — 12:34* with a pip while one is running, and it is also the route back to the stop control from Action items or Search. Nothing else on screen used to say a recording was in progress.
 - **Meeting auto-detection.** Detects which app is holding the microphone (Zoom, Teams, Slack, Discord, Webex, and browser calls: Meet/Hangouts) and **sends a system notification**: one click starts recording, with no window to go hunting for. When Yapper is already in front of you, the prompt appears inside the app instead. "Auto-detect meetings" toggle. Works on both platforms — Windows reads the registry's consent store, macOS asks CoreAudio.
+- **Local speaker detection on macOS 14+.** The microphone remains `Me`; remote voices become stable `Speaker 1`, `Speaker 2`, etc. through an on-device Core ML pass. A meeting panel lets you match those labels to participant names, and never guesses a name when it is ambiguous. Failure falls back to the reliable `Me`/`Them` track labels without blocking the transcript.
 
 The live preview is *only a preview*: on stop, the final transcript is redone with a full higher-quality pass, and the notes come from that.
 
@@ -105,6 +106,9 @@ Measured end to end with a 2 h meeting on the `fast` tier (`build/test-two-hours
    - `recording.wav` — the audio
    - `transcript.txt` — the transcript with timestamps
    - `notes.md` — the generated minutes
+   These are ordinary unencrypted files. Protect the account with FileVault or
+   BitLocker, and check whether the operating system synchronizes `Documents`
+   before recording sensitive material.
 5. The sidebar lists past meetings; click to read the minutes again.
 
 ## Platforms
@@ -113,23 +117,34 @@ Everything above works on both. These are the differences that remain:
 
 | | Windows | macOS |
 |---|---|---|
-| System audio | Electron loopback | ScreenCaptureKit helper — **needs Screen Recording permission** |
+| System audio | Electron loopback | Core Audio process tap; ScreenCaptureKit fallback on macOS 13 |
 | Meeting detection | registry consent store | CoreAudio process list |
-| Updates | downloads and installs itself | notifies, opens the download page |
-| Install | signed-by-nobody NSIS installer | unsigned `.dmg`, Gatekeeper asks the first time |
+| Speaker labels | none (mixed capture) | `Me` + locally separated remote voices on macOS 14+; `Me`/`Them` fallback |
+| Updates | downloads and installs itself | downloads and installs itself |
+| Install | signed-by-nobody NSIS installer | Developer ID signed + Apple-notarized `.dmg` |
 | Hardware | x64 | Apple Silicon only |
 
 **macOS permissions.** The first recording asks for the microphone, and for **System Audio Recording Only** — the permission that lets Yapper hear the other side of the call, granted in System Settings › Privacy & Security, after which the app must be reopened. It does exactly what its name says: system audio through a Core Audio process tap, no screen and no other app's data. On macOS 13, where that permission does not exist, Yapper falls back to ScreenCaptureKit and has to ask for **Screen Recording** instead; no screen content is ever read there either, the video side being reduced to 2×2 pixels once a second and thrown away. Without either, Yapper records the microphone alone and says so on screen.
 
-**The screen stays awake while recording on macOS.** Not a preference — a requirement: ScreenCaptureKit offers no displays while the screen is asleep, and with no display there is no capture, so a meeting you mostly listen to would quietly lose the other side halfway through. The block is released as soon as the recording stops.
+**On macOS 13, the screen stays awake while recording.** That fallback uses
+ScreenCaptureKit, which offers no capture source while the screen sleeps. On
+14.4+ the Core Audio process tap needs no display and the Mac may dim normally.
 
-The updater and the installer both depend on an Apple Developer certificate the project does not have. Until then, macOS updates are a notice rather than an install: the sidebar shows *New version — download*, and installing or updating is one command:
+macOS release builds require the Developer ID identity and a validated
+`notarytool` profile; `mac/build-app.sh` refuses to continue without both. The
+resulting dmg is signed, hardened and notarized, and updates install through
+`electron-updater`. The command-line installer remains available as an
+alternative:
 
 ```bash
 curl -fsSL https://github.com/iamchuck504/yapper-releases/releases/latest/download/install.sh | bash
 ```
 
-That route exists because the Gatekeeper block comes from the `com.apple.quarantine` attribute a *browser* attaches to a download, not from macOS inspecting the app — `curl` attaches none, so the copy it installs opens normally. Apple still vouches for nothing; `mac/install.sh` verifies the download against the sha512 in the release manifest instead, which catches a corrupted or tampered file but not a compromised feed. The dmg still works and still needs the *Open Anyway* detour; both are in `docs/INSTALL-MACOS.md`. The engine is not re-downloaded — it lives in `~/Library/Application Support/yapper`, outside the bundle — so an update is ~95 MB, not another 650 MB, and meetings and granted permissions survive it.
+`mac/install.sh` verifies the zip against the sha512 in the release manifest,
+then checks the Developer ID Team ID, notarization ticket and Gatekeeper before
+installing. It never clears quarantine. The engine is not re-downloaded — it lives in
+`~/Library/Application Support/yapper`, outside the bundle — so an update is
+~95 MB, not another 650 MB, and meetings and granted permissions survive it.
 
 Note for whoever cuts a release: electron-builder writes one manifest per platform, `latest.yml` from the Windows build and `latest-mac.yml` from the mac one. Both belong on the release, and `mac/build-app.sh` uploads the mac one with the dmg — a release published from only one platform would otherwise tell the other's users that nothing is new.
 
@@ -157,10 +172,13 @@ or the **Yapper** shortcut on the desktop (Windows) / in Applications (macOS).
 - **Participants**: the names are passed to Whisper as an initial prompt, so it stops writing "Maya" as "Nympho". It belongs to **that meeting**, not to your preferences: the field starts empty every time, so last week's names cannot leak into today's minutes.
 - **Deleting meetings**: every sidebar row has a bin that appears on hover. Failed recordings (no audio) are dimmed and labelled *Empty recording*. It always asks first, listing what the folder holds, and it goes to the system trash — it never deletes audio irreversibly.
 - **↻ Regenerate**: redoes the notes of any saved meeting with a different style/detail.
-- **Automatic title**: if you do not type a title, Claude names the meeting from what was discussed (2-6 words); if the recording is too thin for that, it falls back to the date.
+- **Automatic title**: if you do not type a title, the same model response that writes the notes also names the meeting from what was discussed (2-6 words); if the recording is too thin for that, it falls back to the date. This avoids waiting for a second model request.
+- **Progressive notes**: after transcription, the meeting opens immediately and the cards fill in as the provider writes them. A small local timing line separates transcription, first note, and completion time.
+- **Cancelable generation**: while notes are being written, Regenerate becomes **Cancel**. It stops the model request itself; the transcript remains safe and a canceled rewrite restores the previous complete notes.
+- **Personal action list**: action items remain visible in every meeting, but none are copied into your list automatically. Use **+ my list** on only the items that belong to you; repeated selections of the same task fold into one row.
 - **Export** (menu): notes as PDF, notes as Markdown, **the full transcript as Markdown** (bold timestamps, new paragraph after a minute of silence), transcript as .txt, or notes + transcript in a single .md.
 - **Start with Windows** / **Start at login**: launches Yapper when you sign in (on by default, switched off from the toggle).
-- The notes come out **in English** and are shown as colour-coded cards: Summary (violet), Key points (cyan), Decisions (green), Action items (amber), Open questions (pink), Blockers/Risks (red), Next steps (teal).
+- **Language**: English by default; Español or *As spoken* switch the body of the notes (the section headings stay in English, the app reads them). The notes are shown as colour-coded cards: Summary (violet), Key points (cyan), Decisions (green), Action items (amber), Open questions (pink), Blockers/Risks (red), Next steps (teal).
 
 ## Sharing with colleagues
 
@@ -170,17 +188,11 @@ or the **Yapper** shortcut on the desktop (Windows) / in Applications (macOS).
 2. On the new PC: install Node (`winget install OpenJS.NodeJS.LTS`) if it is not there.
 3. Run `powershell -ExecutionPolicy Bypass -File setup.ps1` — downloads the whisper.cpp engine (and the CUDA build if there is an NVIDIA GPU), the models, installs Electron and creates the shortcut.
 
-**macOS** — the build is not notarised, so this is the honest walkthrough:
+**macOS** — for a signed/notarized release:
 
 1. Hand over the `.dmg` from [yapper-releases](https://github.com/iamchuck504/yapper-releases/releases/latest), or build one with `bash mac/build-app.sh`.
-2. Drag Yapper to Applications. **The first open will be blocked** — the app is
-   signed ad-hoc, so Gatekeeper rejects it (`spctl` says `rejected`, by design).
-   Since macOS 15 the old right-click → Open shortcut no longer works for
-   unsigned apps. Two ways through:
-   - **Settings**: try to open it, then go to System Settings › Privacy &
-     Security, where an *"Open Anyway"* button appears for about an hour.
-   - **Terminal**, if you would rather not explain the above:
-     `xattr -dr com.apple.quarantine /Applications/Yapper.app`
+2. Drag Yapper to Applications and open it normally. Gatekeeper can verify the
+   Developer ID signature and Apple's notarization ticket.
 3. First launch downloads the engine and models (~600 MB) with progress on
    screen. Nothing else to install.
 4. The first recording asks for the **microphone** and for **Screen Recording**.
@@ -202,7 +214,7 @@ The app warns on launch if a requirement is missing. If a transcription fails or
 - Node + Electron (in `node_modules`)
 - whisper.cpp in `bin/` and models in `models/` (downloaded by `setup.ps1`, by `mac/build-app.sh`, or by the app itself on first run)
 - For the notes: Claude Code signed in, **or** an API key in settings
-- macOS only: Xcode Command Line Tools, for the `swiftc` that builds the two native helpers. Full Xcode is not needed.
+- macOS only: Xcode Command Line Tools, for `swiftc`/SwiftPM to build the native helpers. Full Xcode is not needed.
 
 ## Optional configuration (environment variables)
 
@@ -263,7 +275,7 @@ node_modules/electron/dist/electron.exe build/test-smoke.js                     
 node_modules/electron/dist/Electron.app/Contents/MacOS/Electron build/test-smoke.js   # macOS
 ```
 
-Worth running: `test-bubble-corner.js`, `test-recording-signpost.js`, `test-sys-meter.js`, `test-tray.js`, `test-screen-prompt.js`, `test-record-cycle.js`, `test-record-recovery.js`, `test-smoke.js`, `icon-verify.js`, `test-splash-mark.js`, `test-bubble-fit.js`, `test-keystore.js`, `test-llm-ui.js`, `test-delete-ui.js`, `test-options-ui.js`, `test-import.js`, `test-memo.js`, `test-styles.js`, `test-stamps.js`, and on macOS `probe-system-audio.js`.
+Worth running: `test-bubble-corner.js`, `test-recording-signpost.js`, `test-sys-meter.js`, `test-tray.js`, `test-screen-prompt.js`, `test-record-cycle.js`, `test-record-recovery.js`, `test-notes-cancel.js`, `test-smoke.js`, `icon-verify.js`, `test-splash-mark.js`, `test-bubble-fit.js`, `test-keystore.js`, `test-llm-ui.js`, `test-delete-ui.js`, `test-options-ui.js`, `test-import.js`, `test-memo.js`, `test-styles.js`, `test-stamps.js`, and on macOS `probe-system-audio.js`.
 
 The heavier ones want an audio fixture. `node build/make-fixtures.js` builds it from the calibration sample that ships with the repo, so they no longer depend on clips cut from someone's real meetings — point `WAV=` at real audio when the words themselves matter.
 

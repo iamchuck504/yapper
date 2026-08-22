@@ -42,6 +42,22 @@ report('invoke -> ipcMain.handle', invoked, handled);
 report('send -> ipcMain.on', sent, received);
 report('on <- webContents.send', listened, emitted);
 
+// All registrations must go through the validating facade. One raw listener
+// of each kind is the facade itself; any more is a channel bypassing it.
+for (const [kind, count] of [
+  ['handle', (main.match(/electronIpcMain\.handle\(/g) || []).length],
+  ['on', (main.match(/electronIpcMain\.on\(/g) || []).length]
+]) {
+  if (count === 1) console.log(`ok    trusted IPC wrapper owns raw ${kind}`);
+  else { fails++; console.log(`FAIL  raw ipcMain.${kind} registrations: ${count}`); }
+}
+if (/assertTrustedRenderer\(event, channel\)/.test(main)) {
+  console.log('ok    every wrapped channel validates its sender');
+} else {
+  fails++;
+  console.log('FAIL  IPC wrapper does not validate its sender');
+}
+
 // the other direction: something registered and then never reachable is dead
 // weight, and usually means a rename was left half done
 for (const ch of [...handled, ...received]) {

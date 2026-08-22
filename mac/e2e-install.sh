@@ -4,10 +4,10 @@
 #
 #   bash mac/e2e-install.sh
 #
-# What it proves: the manifest is parsed, the checksum is actually checked
-# (a tampered zip must be refused), the bundle survives unpacking with its
-# symlinks and executable bits, and the installed copy carries no quarantine —
-# which is the entire reason the script exists.
+# What it proves: the manifest is parsed, the checksum is actually checked,
+# the bundle survives unpacking, and a failed activation restores the previous
+# installation. Production signature/notarization checks are release gates in
+# mac/build-app.sh; this local fixture is intentionally unsigned.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -42,6 +42,7 @@ FEED="http://127.0.0.1:$PORT"
 export YAPPER_FEED="$FEED"
 export YAPPER_APP="$WORK/Applications/Yapper.app"
 export YAPPER_NO_OPEN=1
+export YAPPER_TEST_ALLOW_UNTRUSTED=1
 mkdir -p "$WORK/Applications"
 
 # ---- 1. clean install ----
@@ -58,9 +59,7 @@ check "the framework symlinks survived" $?
 PLIST_VER="$(defaults read "$YAPPER_APP/Contents/Info.plist" CFBundleShortVersionString 2>/dev/null)"
 [ "$PLIST_VER" = "$VERSION" ]; check "the installed version is $VERSION" $?
 
-# What justifies the whole script: no quarantine, no Gatekeeper detour.
-! xattr -p com.apple.quarantine "$YAPPER_APP" >/dev/null 2>&1
-check "the installed copy carries no quarantine" $?
+grep -q "Test mode" "$WORK/install.log"; check "the local fixture uses the constrained test mode" $?
 
 # ---- 2. a tampered zip has to be rejected ----
 echo "== zip alterado"
@@ -78,6 +77,17 @@ cp "$ROOT/dist/$ZIP" "$WORK/feed/$ZIP"
 bash "$ROOT/mac/install.sh" >"$WORK/reinstall.log" 2>&1; rc=$?
 check "reinstalling over an existing copy works" "$rc"
 grep -qi "replacing it" "$WORK/reinstall.log"; check "and says it is replacing it" $?
+
+# ---- 4. activation failure restores the installed copy ----
+echo "== rollback"
+BEFORE_INODE="$(stat -f %i "$YAPPER_APP")"
+export YAPPER_TEST_FAIL_ACTIVATE=1
+bash "$ROOT/mac/install.sh" >"$WORK/rollback.log" 2>&1; rc=$?
+unset YAPPER_TEST_FAIL_ACTIVATE
+[ "$rc" -ne 0 ]; check "a forced activation failure is reported" $?
+[ -d "$YAPPER_APP" ]; check "the previous app is restored" $?
+AFTER_INODE="$(stat -f %i "$YAPPER_APP")"
+[ "$BEFORE_INODE" = "$AFTER_INODE" ]; check "the restored app is the original bundle" $?
 
 echo ""
 [ "$fails" -eq 0 ] && echo "PASS" || echo "$fails fallos"

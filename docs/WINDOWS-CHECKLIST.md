@@ -319,11 +319,9 @@ actually run is worth more than another cross-build from the Mac.
 
 ## 6. Known, not scheduled
 
-- **Permissions do not survive an update on macOS.** An ad-hoc signature
-  changes identity with every build, so macOS treats each update as a new app.
-  A stable self-signed certificate would fix it; a Developer ID certificate
-  would fix Gatekeeper too. Windows has the equivalent problem as SmartScreen
-  warnings, which signing also fixes.
+- **Windows remains unsigned.** SmartScreen warnings remain until the Windows
+  installer gets a trusted signing identity. macOS release builds now use a
+  stable Developer ID identity, so permissions survive signed updates.
 - **`llm.js` was never in git until today.** It was not ignored — it had simply
   never been added, so any clone was missing the note providers and would fail
   at require time. Worth a glance at whether anything else escaped the same

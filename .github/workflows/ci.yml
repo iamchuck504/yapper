@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm audit --audit-level=high
+      - name: Compile macOS native helpers
+        if: runner.os == 'macOS'
+        run: |
+          swiftc -O -target arm64-apple-macos14.4 mac/mic-probe.swift -o build/mic-probe
+          swiftc -O -target arm64-apple-macos13.0 mac/system-audio.swift -o build/system-audio
+      - name: Exercise the real renderer
+        if: runner.os == 'macOS'
+        run: npx electron build/test-smoke.js
+      - name: Package macOS app without release credentials
+        if: runner.os == 'macOS'
+        run: npx electron-builder --mac --dir --publish never -c.mac.identity=null -c.mac.notarize=false
+      - name: Inspect macOS package and Electron fuses
+        if: runner.os == 'macOS'
+        run: node build/verify-package.js dist/mac-arm64/Yapper.app
+      - name: Package Windows app
+        if: runner.os == 'Windows'
+        run: npx electron-builder --win --dir --publish never
+      - name: Inspect Windows package and Electron fuses
+        if: runner.os == 'Windows'
+        run: node build/verify-package.js dist/win-unpacked
