@@ -85,6 +85,14 @@ test -d "$APP" || { echo "missing unpacked app: $APP" >&2; exit 1; }
 # dmg. The zip therefore carries the ticket used by automatic updates. Submit
 # the finished dmg too, so a browser-downloaded disk image has its own stapled
 # ticket and can be assessed offline before it is mounted.
+# electron-builder signs the app but not the disk image, and the gate below
+# assesses the dmg by its primary signature — an unsigned one is "rejected:
+# no usable signature" even with a stapled ticket. Sign first, then notarize,
+# then staple: that order is what makes the ticket cover the signed image.
+echo "== signing final dmg"
+codesign --sign "$CSC_NAME" --keychain "$CSC_KEYCHAIN" --timestamp --force "$DMG"
+codesign --verify --verbose=2 "$DMG"
+
 echo "== notarizing final dmg"
 xcrun notarytool submit "$DMG" --keychain-profile "$APPLE_KEYCHAIN_PROFILE" --wait
 xcrun stapler staple "$DMG"
