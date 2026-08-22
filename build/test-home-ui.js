@@ -92,6 +92,28 @@ app.whenReady().then(async () => {
   const $ = js => win.webContents.executeJavaScript(js, true);
 
   await $('window.yapper.refreshLibrary()');
+
+  // Nothing enters the personal list on its own — indexing the notes adds
+  // nothing, by design (see test-actions-ui.js). So the day is read the way a
+  // person would reach it: open the meeting, press "+ my list" on the task.
+  const choose = async (name, needle) => {
+    const folder = path.join(ROOT, 'Meetings', name);
+    await $(`openMeetingByFolder(${JSON.stringify(folder)})`);
+    await new Promise(r => setTimeout(r, 300));
+    const clicked = await $(`(() => {
+      const li = [...document.querySelectorAll('#notes li')]
+        .find(x => x.textContent.toLowerCase().includes(${JSON.stringify(needle.toLowerCase())}));
+      const btn = li && li.querySelector('.li-add');
+      if (!btn) return false;
+      btn.click();
+      return true;
+    })()`);
+    check(`chose "${needle}" from ${name}`, clicked, 'no + my list button on that line');
+    await new Promise(r => setTimeout(r, 300));
+  };
+  await choose(`${TODAY}_0900`, 'changelog');
+  await choose(`${monday}_1000`, 'vendor contract');
+
   await $(`document.getElementById('btn-home').click()`);
   await new Promise(r => setTimeout(r, 900));
 

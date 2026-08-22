@@ -20,6 +20,8 @@
 // Both are derived. Nothing here is a source of truth; a cached digest is
 // thrown away as soon as any meeting it was built from changes.
 
+const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
 const actions = require('./actions');
 const { sectionKind } = require('./search');
@@ -104,6 +106,10 @@ function dueOn(text, todayStr) {
   return '';
 }
 
+function folderKey(folder) {
+  try { return fs.realpathSync(folder); } catch { return path.resolve(String(folder || '')); }
+}
+
 // ---------------------------------------------------------------- daily
 //
 // Every field below is a copy of something in a file, with its source attached.
@@ -111,7 +117,7 @@ function dueOn(text, todayStr) {
 function dailyDigest({ meetings = [], items = [], day }) {
   const todays = meetings.filter(m => m.date === day)
     .sort((a, b) => timeOf(a.name).localeCompare(timeOf(b.name)));
-  const folders = new Set(todays.map(m => m.folder));
+  const folders = new Set(todays.map(m => folderKey(m.folder)));
 
   const decisions = [];
   for (const m of todays) {
@@ -121,7 +127,11 @@ function dailyDigest({ meetings = [], items = [], day }) {
   }
 
   const open = items.filter(i => !i.done);
-  const from = i => [i.folder, ...(i.sources || [])].some(f => folders.has(f));
+  // A chosen item stores the canonical folder (main.js validates paths through
+  // realpath); the library index keeps whatever app.getPath() said, which on
+  // macOS can be the /var alias of /private/var, or a symlinked Documents.
+  // Same meeting, two spellings — compare real locations, not strings.
+  const from = i => [i.folder, ...(i.sources || [])].some(f => folders.has(folderKey(f)));
 
   // "New today" is decided by which meeting the task came from, not by when the
   // row was written — a library refresh can extract an old meeting's tasks today.
