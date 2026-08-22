@@ -60,7 +60,10 @@ const wantedFuses = {
   enableNodeCliInspectArguments: false,
   enableEmbeddedAsarIntegrityValidation: true,
   onlyLoadAppFromAsar: true,
-  loadBrowserProcessSpecificV8Snapshot: true,
+  // Off: this fuse makes the browser process load a browser_v8_context_snapshot
+  // nobody generates, and 0.1.9 died at launch on every Mac with "Error loading
+  // V8 startup snapshot file". build/packaged-launch-check.sh is what catches it.
+  loadBrowserProcessSpecificV8Snapshot: false,
   grantFileProtocolExtraPrivileges: false
 };
 for (const [name, wanted] of Object.entries(wantedFuses)) {
@@ -111,7 +114,7 @@ async function inspectApp(appPath) {
     [FuseV1Options.EnableNodeCliInspectArguments, false],
     [FuseV1Options.EnableEmbeddedAsarIntegrityValidation, true],
     [FuseV1Options.OnlyLoadAppFromAsar, true],
-    [FuseV1Options.LoadBrowserProcessSpecificV8Snapshot, true],
+    [FuseV1Options.LoadBrowserProcessSpecificV8Snapshot, false],
     [FuseV1Options.GrantFileProtocolExtraPrivileges, false]
   ];
   for (const [index, wanted] of fuseChecks) {

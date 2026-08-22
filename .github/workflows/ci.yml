@@ -45,6 +45,9 @@ jobs:
       - name: Inspect macOS package and Electron fuses
         if: runner.os == 'macOS'
         run: node build/verify-package.js dist/mac-arm64/Yapper.app
+      - name: Launch the packaged macOS app
+        if: runner.os == 'macOS'
+        run: bash build/packaged-launch-check.sh dist/mac-arm64/Yapper.app
       - name: Package Windows app
         if: runner.os == 'Windows'
         run: npx electron-builder --win --dir --publish never

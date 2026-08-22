@@ -219,6 +219,7 @@ The app warns on launch if a requirement is missing. If a transcription fails or
 ## Optional configuration (environment variables)
 
 - `YAPPER_LANG` — forces the transcription language (`es`, `en`); autodetected by default.
+- `YAPPER_HOME` — puts everything the app writes (settings, meetings, the engine) under one directory, so a second copy can run without touching the real one. `build/packaged-launch-check.sh` uses it to start the packaged app against scratch storage.
 - `YAPPER_LIVE_DEBUG=1` — prints one line per live pass (cost, buffer size, how many words agreed and how many were confirmed).
 - `WAV` — points the heavier tests at a specific audio file instead of the generated fixture.
 

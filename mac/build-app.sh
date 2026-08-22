@@ -73,6 +73,12 @@ npx electron build/test-import.js
 echo "== building Yapper $VERSION (dmg + zip, arm64)"
 npx electron-builder --mac
 
+echo "== the packaged app actually starts"
+# Every test above runs the source through the electron binary. The packaged
+# app — fuses flipped, asar sealed, hardened runtime, our entitlements — had
+# never been launched by anything before 0.1.9 shipped and died on open.
+bash build/packaged-launch-check.sh "dist/mac-arm64/Yapper.app"
+
 echo "== artefacts"
 ls -lh dist/*.dmg dist/*-mac.zip 2>/dev/null || ls -lh dist/
 

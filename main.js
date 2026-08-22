@@ -5,6 +5,18 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
+
+// YAPPER_HOME: everything the app writes — settings, index, reminders, meetings
+// and the engine — under one directory of your choosing. It exists so the
+// packaged app can be launched against scratch storage (build/packaged-launch-
+// check.sh) and so a second copy can run without touching the real one; the
+// single-instance lock lives in userData, so it moves with it.
+if (process.env.YAPPER_HOME) {
+  const home = path.resolve(process.env.YAPPER_HOME);
+  app.setPath('userData', path.join(home, 'user'));
+  app.setPath('documents', home);
+}
+
 const { clampToArea } = require('./bounds');
 const engine = require('./engine');
 const live = require('./live');
