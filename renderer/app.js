@@ -1816,7 +1816,12 @@ async function startRecording() {
     pipelineEl.classList.add('hidden');
     statusEl.classList.add('hidden');
     const sysAudio = !!(sys && sys.getAudioTracks().length);
-    if (micNodes.size === 0 && !sysAudio) {
+    // applyMicSelection already knows the difference between permission denied,
+    // a busy device and ordinary silence. Preserve that actionable explanation:
+    // the generic no-source fallback used to overwrite it immediately on macOS.
+    if (micError) {
+      setStatus(statusEl, micSilenceMessage(!!analysers.sys), true);
+    } else if (micNodes.size === 0 && !sysAudio) {
       setStatus(statusEl, 'Warning: no audio source could be captured.');
     } else if (!sysAudio) {
       // On macOS system audio does not come through the renderer at all: the

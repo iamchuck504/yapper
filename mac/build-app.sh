@@ -66,6 +66,7 @@ npm test
 echo "== real renderer smoke test"
 npx electron build/test-smoke.js
 npx electron build/test-record-cycle.js
+npx electron build/test-mic-permission-ui.js
 npx electron build/test-two-track-app.js
 npx electron build/test-speakers-ui.js
 npx electron build/test-import.js
