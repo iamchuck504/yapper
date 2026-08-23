@@ -21,15 +21,30 @@ test -x "$BIN" || { echo "no executable at $BIN" >&2; exit 1; }
 # 0.1.10 shipped exactly that way and nothing noticed, because a launch check
 # cannot hear. Every bundle that touches audio has to carry it: the app and
 # the helpers Chromium runs its audio service in.
-for BUNDLE in "$APP" "$APP"/Contents/Frameworks/*Helper*.app; do
-  if ! codesign -d --entitlements :- "$BUNDLE" 2>/dev/null \
-      | grep -q "com.apple.security.device.audio-input"; then
-    echo "FAIL  $(basename "$BUNDLE") is signed without the microphone entitlement" >&2
-    echo "      (com.apple.security.device.audio-input — see build/entitlements.mac*.plist)" >&2
-    exit 1
-  fi
-done
-echo "ok    the app and its helpers carry the microphone entitlement"
+#
+# Only under hardened runtime, which is where the entitlement is enforced. CI
+# packages the app unsigned (identity=null) to check that it launches, and an
+# unsigned or ad-hoc build records the microphone without any entitlement —
+# 0.1.8 shipped that way and worked. Demanding it there failed every CI run.
+# (Captured first: under pipefail, `grep -q` closing the pipe early would turn
+# codesign's SIGPIPE into a false "not hardened".)
+SIGNING="$(codesign -d --verbose=2 "$APP" 2>&1 || true)"
+if grep -q "flags=.*(runtime)" <<<"$SIGNING"; then
+  for BUNDLE in "$APP" "$APP"/Contents/Frameworks/*Helper*.app; do
+    # Capture this one too: with pipefail, grep -q may close the pipe as soon
+    # as it finds the entitlement and turn codesign's SIGPIPE into a false
+    # failure of the entire pipeline.
+    ENTITLEMENTS="$(codesign -d --entitlements :- "$BUNDLE" 2>/dev/null || true)"
+    if ! grep -q "com.apple.security.device.audio-input" <<<"$ENTITLEMENTS"; then
+      echo "FAIL  $(basename "$BUNDLE") is signed without the microphone entitlement" >&2
+      echo "      (com.apple.security.device.audio-input — see build/entitlements.mac*.plist)" >&2
+      exit 1
+    fi
+  done
+  echo "ok    the app and its helpers carry the microphone entitlement"
+else
+  echo "ok    not a hardened-runtime build; the microphone entitlement is not required here"
+fi
 
 SCRATCH="$(mktemp -d)"
 LOG="$SCRATCH/launch.log"

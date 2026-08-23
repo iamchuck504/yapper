@@ -69,4 +69,20 @@ function matchMeetingApp(ids, platform = process.platform) {
   return null;
 }
 
-module.exports = { MEETING_APPS_WIN, MEETING_APPS_MAC, appOf, matchMeetingApp };
+/**
+ * One poll while a recording is running. `current` is the meeting app this
+ * recording is attached to (null when none has been seen), `streak` how many
+ * polls in a row it has been absent, `hit` what this poll found. Returns the
+ * next state and whether this is the poll that says "the meeting ended":
+ * exactly the second clear poll after an app was seen, so a blip does not end
+ * a meeting and a recording that never had a meeting app in it — a note, a
+ * video playing — is never told one ended.
+ */
+function whileRecording({ current = null, streak = 0 } = {}, hit) {
+  if (hit) return { current: hit, streak: 0, ended: false };
+  if (!current) return { current: null, streak: 0, ended: false };
+  const next = streak + 1;
+  return { current, streak: next, ended: next === 2 };
+}
+
+module.exports = { MEETING_APPS_WIN, MEETING_APPS_MAC, appOf, matchMeetingApp, whileRecording };

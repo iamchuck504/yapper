@@ -1300,15 +1300,34 @@ function writeTracks(mic, sys) {
 // captures system audio and its samples are added to the microphone's here.
 // On Windows the renderer has already done this in its audio graph, so this
 // stays dormant and the chunks arrive mixed.
+// The helper's mute watch has to tell Yapper's own audio output from anyone
+// else's (see othersPlaying in mac/system-audio.swift). Packaged, that is the
+// bundle id family; unpackaged it is Electron's own.
+if (process.platform === 'darwin') {
+  process.env.YAPPER_OWN_BUNDLE_PREFIX = app.isPackaged ? 'com.yapper.' : 'com.github.Electron';
+}
+
 const sysAudio = sysaudio.create({
   probePath: helperPath('system-audio'),
   onStatus: info => {
+    // The display block is taken when the recording starts, before the route
+    // is known, because guessing wrong the other way costs the far side of
+    // the meeting. From here on it is derived, not toggled: held only while a
+    // recording is open and the far side comes through ScreenCaptureKit,
+    // which cannot capture without a lit display. A tap does not need it, a
+    // helper that died does not need it, and a status that arrives after the
+    // file was closed (the helper drains before it exits) must not re-take it.
+    // A doubt is not a stop: capture continues, so the route in force — and
+    // with it the display hold — is left exactly as it was.
+    if (info.reason !== 'suspect') {
+      holdDisplayAwake(!!info.ok && info.via !== 'tap' && recFd !== null);
+    }
     if (info.ok) {
       console.log(`[audio] capturing system audio via ${info.via || 'screen'}`);
-      // The display block is taken when the recording starts, before the route
-      // is known, because guessing wrong the other way costs the far side of
-      // the meeting. A tap does not need it, so it is let go here.
-      if (info.via === 'tap') holdDisplayAwake(false);
+      // Sent as well as the failures: a helper that failed and then came back
+      // — its own retry, or the screen door opening after the tap gave up —
+      // has to be able to take its own warning off the screen.
+      broadcast('system-audio-status', info);
       return;
     }
     console.log(`[audio] system audio unavailable (${info.reason})`,
@@ -3167,7 +3186,7 @@ function previousWeekWith(list, from) {
 // every meeting: Zoom/Teams/Slack huddles natively, and Meet/Hangouts via the
 // browser. On Windows it lives in the CapabilityAccessManager consent store.
 
-const { matchMeetingApp } = require('./meetings');
+const { matchMeetingApp, whileRecording } = require('./meetings');
 
 const MIC_CONSENT_KEY =
   'HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\CapabilityAccessManager\\ConsentStore\\microphone';
@@ -3176,14 +3195,29 @@ function micUsersWindows() {
   return new Promise(resolve => {
     let out = '';
     let p;
+    let settled = false;
+    let timer = null;
+    const finish = value => {
+      if (settled) return false;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(value);
+      return true;
+    };
     try {
       p = spawn('reg', ['query', MIC_CONSENT_KEY, '/s']);
     } catch {
-      return resolve([]);
+      return finish(null);
     }
+    timer = setTimeout(() => {
+      if (!finish(null)) return;
+      try { p.kill(); } catch { /* already gone */ }
+    }, 4000);
+    timer.unref();
     p.stdout.on('data', d => { out += d.toString('utf8'); });
-    p.on('error', () => resolve([]));
-    p.on('close', () => {
+    p.on('error', () => finish(null));
+    p.on('close', code => {
+      if (code !== 0) return finish(null);
       const users = [];
       let key = '';
       let start = null;
@@ -3204,7 +3238,7 @@ function micUsersWindows() {
         else if (m[2] !== '0x0') start = null;   // stopped -> not in use
       }
       flush();
-      resolve([...new Set(users)]);
+      finish([...new Set(users)]);
     });
   });
 }
@@ -3233,7 +3267,7 @@ function startMicWatch() {
   } catch {
     return;
   }
-  const w = { proc: p, users: null, buf: '' };
+  const w = { proc: p, users: null, buf: '', updatedAt: 0 };
   micWatch = w;
   p.stdout.on('data', d => {
     w.buf += d.toString('utf8');
@@ -3243,6 +3277,7 @@ function startMicWatch() {
       w.buf = w.buf.slice(nl + 1);
       w.users = line === '?' ? null
         : [...new Set(line.split('\t').map(s => s.trim()).filter(Boolean))];
+      w.updatedAt = Date.now();
     }
   });
   const gone = () => { if (micWatch === w) micWatch = null; };
@@ -3264,22 +3299,45 @@ function stopMicWatch() {
  * meeting having ended.
  */
 function micUsersMac() {
-  if (micWatch && micWatch.users) return Promise.resolve(micWatch.users.slice());
+  if (micWatch && micWatch.users && Date.now() - micWatch.updatedAt < 45000) {
+    return Promise.resolve(micWatch.users.slice());
+  }
+  // The resident process can stay alive while its CoreAudio listener is no
+  // longer delivering. Restart a stale watcher, but use a bounded one-shot for
+  // this poll so stale state can never end or prolong a meeting.
+  if (micWatch && Date.now() - micWatch.updatedAt >= 45000) {
+    stopMicWatch();
+    startMicWatch();
+  }
   return new Promise(resolve => {
     const probe = probePath();
     if (!fs.existsSync(probe)) return resolve(null);
     let out = '';
     let p;
+    let settled = false;
+    let timer = null;
+    const finish = value => {
+      if (settled) return false;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(value);
+      return true;
+    };
     try {
       p = spawn(probe, []);
     } catch {
-      return resolve(null);
+      return finish(null);
     }
+    timer = setTimeout(() => {
+      if (!finish(null)) return;
+      try { p.kill(); } catch { /* already gone */ }
+    }, 4000);
+    timer.unref();
     p.stdout.on('data', d => { out += d.toString('utf8'); });
-    p.on('error', () => resolve(null));
+    p.on('error', () => finish(null));
     p.on('close', code => {
-      if (code !== 0) return resolve(null);
-      resolve([...new Set(out.split('\n').map(l => l.trim()).filter(Boolean))]);
+      if (code !== 0) return finish(null);
+      finish([...new Set(out.split('\n').map(l => l.trim()).filter(Boolean))]);
     });
   });
 }
@@ -3292,16 +3350,32 @@ let autoDetectOn = false;
 let rendererRecording = false;
 
 let meetingGoneStreak = 0;
-// Whether a meeting app has held the microphone at any point during the
-// current recording. "The meeting app let go" only means something if there
-// was one: without this, a memo recorded with no call running — a test with a
-// YouTube video playing, say — got "Stopping on its own in 60 s" after ten
-// seconds and was cut off at 73 s, twice in one evening.
-let meetingSeenWhileRecording = false;
+let meetingEndedPending = false;
+// Bumped on every start and stop. A poll takes a moment to answer — a spawned
+// probe on macOS, a registry query on Windows — and one that started before
+// the recording did would otherwise land inside it and attach the meeting it
+// saw beforehand, which is the whole thing this is trying not to do.
+let meetingEra = 0;
+
+let pollInFlight = false;
 
 async function pollMeetings() {
   if (process.platform !== 'win32' && process.platform !== 'darwin') return;
-  const users = await micUsers();
+  // One at a time. A probe can take longer than the five seconds between
+  // ticks — a registry query on a busy Windows box — and two answers landing
+  // out of order would advance or reset the streak with a stale observation.
+  if (pollInFlight) return;
+  pollInFlight = true;
+  const era = meetingEra;
+  let users;
+  try {
+    users = await micUsers();
+  } catch {
+    users = null;
+  } finally {
+    pollInFlight = false;
+  }
+  if (era !== meetingEra) return;        // a recording started or ended meanwhile
   if (users === null) return;            // could not ask; say nothing
   // The label, not the process: a call can move between helper processes
   // without ever stopping, and that must not read as a second meeting.
@@ -3309,19 +3383,26 @@ async function pollMeetings() {
 
   // While recording, watch for the opposite signal: the meeting app letting go
   // of the microphone. Two clear polls (~10 s) avoids reacting to a blip.
+  // "The meeting app let go" only means something if one was ever on the
+  // microphone during this recording: a note, or a video playing with no
+  // call running, used to be told the meeting ended after ten seconds and
+  // stopped on its own at 73. meetingCurrent is that memory; the step itself
+  // lives in meetings.js where it can be tested as a sequence.
   if (rendererRecording) {
-    if (hit) {
-      meetingSeenWhileRecording = true;
-      meetingGoneStreak = 0;
-    } else if (meetingSeenWhileRecording) {
-      meetingGoneStreak += 1;
-      if (meetingGoneStreak === 2 && win && !win.isDestroyed()) {
-        win.webContents.send('meeting-ended');
-      }
+    const step = whileRecording({ current: meetingCurrent, streak: meetingGoneStreak }, hit);
+    meetingCurrent = step.current;
+    meetingGoneStreak = step.streak;
+    if (step.ended && win && !win.isDestroyed()) {
+      meetingEndedPending = true;
+      win.webContents.send('meeting-ended', true);
+    } else if (hit && meetingEndedPending) {
+      // The app took the microphone again during the grace minute. Withdraw
+      // the pending auto-stop instead of ending a meeting that has resumed.
+      meetingEndedPending = false;
+      if (win && !win.isDestroyed()) win.webContents.send('meeting-ended', false);
     }
     return;
   }
-  meetingGoneStreak = 0;
 
   if (!hit) { meetingCurrent = null; return; }
   if (meetingCurrent === hit) return;
@@ -3380,7 +3461,10 @@ function startMeetingWatch() {
     console.log('[meetings] no mic probe built; auto-detection stays off');
     return;
   }
-  meetingCurrent = null;
+  // Not while recording: the meeting this recording is attached to is what
+  // decides whether it may be auto-ended, and toggling auto-detection off and
+  // on mid-meeting must not make the app forget the call it is in.
+  if (!rendererRecording) meetingCurrent = null;
   startMicWatch();
   meetingTimer = setInterval(pollMeetings, 5000);
 }
@@ -3388,7 +3472,14 @@ function startMeetingWatch() {
 function stopMeetingWatch() {
   if (meetingTimer) clearInterval(meetingTimer);
   meetingTimer = null;
-  meetingCurrent = null;
+  // Detection is off from this moment: a poll already in flight must not come
+  // back and end a meeting, and the streak it was counting starts over if
+  // detection is switched on again.
+  meetingEra++;
+  meetingGoneStreak = 0;
+  if (meetingEndedPending && win && !win.isDestroyed()) win.webContents.send('meeting-ended', false);
+  meetingEndedPending = false;
+  if (!rendererRecording) meetingCurrent = null;
   stopMicWatch();
 }
 
@@ -3428,11 +3519,16 @@ ipcMain.on('recording-state', (_e, recording) => {
   refreshTray();               // the menu bar says start or stop, never both
   refreshAppMenu();            // and so does File
   meetingGoneStreak = 0;
-  // A recording started from the detection prompt already knows its meeting
-  // app; one started by hand learns of it from the next poll, if there is one.
-  meetingSeenWhileRecording = rendererRecording && !!meetingCurrent;
-  // once a recording ends, allow the same app to trigger a fresh prompt later
-  if (!rendererRecording) meetingCurrent = null;
+  meetingEra++;               // polls already in flight belong to what came before
+  if (meetingEndedPending && win && !win.isDestroyed()) win.webContents.send('meeting-ended', false);
+  meetingEndedPending = false;
+  // Either way, the meeting memory starts over. A recording is attached to a
+  // meeting app only by a poll that sees the app on the microphone *while it
+  // records*: one seen before — a call that ended a moment ago, a prompt that
+  // was ignored — must not follow a memo in and stop it. A recording started
+  // from the prompt re-attaches at its first poll, a few seconds in. And once
+  // a recording ends, the same app may trigger a fresh prompt later.
+  meetingCurrent = null;
 });
 
 // ---------- flag a moment without leaving the meeting ----------

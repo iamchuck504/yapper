@@ -16,6 +16,47 @@ function check(name, ok, detail) {
   if (ok) console.log(`ok    ${name}`);
   else { fails++; console.log(`FAIL  ${name}\n      ${detail || ''}`); }
 }
+
+// The Swift helper is not importable into this Node test, but these are
+// structural runtime invariants worth pinning: a trial may not substitute a
+// second app, and the macOS 13 fallback may not silently omit its mute watch.
+const swift = fs.readFileSync(path.join(__dirname, '..', 'mac', 'system-audio.swift'), 'utf8');
+checkSwiftInvariant('a trial checks the exact process that provoked the doubt',
+  /canTrial\(pid: other\.pid\)/.test(swift)
+    && /capturer\.trialPID = other\.pid/.test(swift)
+    && /stillPlaying\(other\)/.test(swift)
+    && !/trialTarget\(among:/.test(swift));
+checkSwiftInvariant('no seam turns a global stream into a pretend scoped trial',
+  !/YAPPER_SCK_TRIAL_ANY/.test(swift));
+checkSwiftInvariant('macOS before 14.2 still watches a screen-only capture',
+  /else \{ watchScreenOnlyLegacy\(capturer\) \}/.test(swift));
+checkSwiftInvariant('the SCK watch consumes recent signal and remains reusable',
+  /func consumeRecentSignal\(\) -> Bool/.test(swift)
+    && /said = false\s+note\("note: the system audio track came alive after all"\)/.test(swift)
+    && !/consumeRecentSignal\(\)[\s\S]{0,180}watch\.cancel\(\)/.test(swift));
+checkSwiftInvariant('an accepted trial gets the same permanent SCK watch',
+  /if live \{[\s\S]{0,260}watchScreenOnly\(capturer\)[\s\S]{0,80}return/.test(swift));
+checkSwiftInvariant('the tap-to-screen hand-off prevents display sleep',
+  /beginActivity\([\s\S]{0,120}idleDisplaySleepDisabled/.test(swift)
+    && /defer \{ ProcessInfo\.processInfo\.endActivity\(transitionActivity\) \}/.test(swift));
+checkSwiftInvariant('the process tap is watched for later degradation, not trusted for life',
+  /func consumeRecentSignal\(\) -> Bool/.test(swift)
+    && /if t\.consumeRecentSignal\(\)/.test(swift)
+    && !/if t\.heard \{ watch\.cancel\(\)/.test(swift));
+checkSwiftInvariant('the tap remains the recorder throughout a provisional SCK trial',
+  /if trialPID == nil \{ note\("capturing: screen"\) \}/.test(swift)
+    && /if outputLock\.withLock\(\{ \$0 \}\) \{ sink\.write\(pcm\) \}/.test(swift)
+    && /if general \{[\s\S]{0,320}t\.stop\(\)[\s\S]{0,120}capturer\.enableOutput\(\)[\s\S]{0,120}note\("capturing: screen"\)/.test(swift));
+checkSwiftInvariant('cancelled mute-watch timers release their source and capture',
+  /final class MainQueueTimer/.test(swift)
+    && /source\.setEventHandler\(handler: \{\}\)[\s\S]{0,100}source\.cancel\(\)[\s\S]{0,100}self\.source = nil/.test(swift));
+checkSwiftInvariant('a tap that recovers after suspicion is watched again',
+  /note\("capturing: tap"\)[\s\S]{0,180}armMuteWatch\(t, attemptsLeft: 3\)/.test(swift));
+
+function checkSwiftInvariant(name, ok) {
+  if (ok) console.log(`ok    ${name}`);
+  else { fails++; console.log(`FAIL  ${name}`); }
+}
 const pcm = (...samples) => {
   const b = Buffer.alloc(samples.length * 2);
   samples.forEach((s, i) => b.writeInt16LE(s, i * 2));
@@ -48,13 +89,89 @@ check('does not touch the buffer it is handed', (() => {
 check('a shorter tail does not break the mix',
   String(samplesOf(mixPcm(pcm(10, 20, 30), pcm(5)))) === String([15, 20, 30]));
 
+// ---- the stderr protocol, with a stub helper ----
+// The helper's only channel to the app is its stderr, and every line it can
+// write means something different: an advisory to log, a doubt to warn about
+// while capture continues, a refusal that names a Settings pane, a failure in
+// its own words. Read wrongly, the app tells the user to grant a permission
+// they already have, or says nothing while a meeting records one-sided.
+function stderrProtocol() {
+  const os = require('os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yapper-sysaudio-'));
+  const stub = path.join(dir, 'stub-helper.sh');
+  fs.writeFileSync(stub, `#!/bin/sh
+echo "note: waiting for a display" >&2
+printf 'capturing: tap\n' >&2
+echo "suspect: audio" >&2
+echo "note: the system audio track has been silent" >&2
+sleep 1
+printf 'capturing: tap\n' >&2
+sleep 1
+echo "suspect: screen" >&2
+sleep 1
+printf 'capturing: screen\n' >&2
+sleep 2
+echo "suspect: screen" >&2
+sleep 1
+printf 'capturing: screen\n' >&2
+sleep 30
+`, { mode: 0o755 });
+  const seen = [];
+  const it = create({ probePath: stub, onStatus: info => seen.push(info) });
+  // start() resolves the moment "capturing:" is read; the lines after it
+  // arrive in their own chunks, so give the pipe a beat before judging.
+  return it.start().then(ok => new Promise(r => setTimeout(() => r(ok), 300))).then(ok => {
+    check('the stub helper is read as capturing', ok === true && it.state === 'capturing', it.state);
+    const live = seen.find(i => i.ok);
+    check('and the route it named is passed on', live && live.via === 'tap', JSON.stringify(seen));
+    check('an advisory note raises no status at all',
+      !seen.some(i => i.reason === 'helper'), JSON.stringify(seen));
+    const doubt = seen.find(i => i.reason === 'suspect');
+    check('a doubt is reported, and says which permission it doubts',
+      doubt && doubt.which === 'audio' && doubt.ok === false, JSON.stringify(seen));
+    check('and the explanation after it is not a second status',
+      seen.filter(i => i.reason === 'suspect').length === 1, JSON.stringify(seen));
+    return new Promise(r => setTimeout(r, 1400)).then(() => {
+      // The doubt can be withdrawn: the helper says it is capturing again,
+      // and that has to reach the app as an ok, or the warning stays up over
+      // a recording that is fine.
+      check('a doubt can be withdrawn by capturing again',
+        seen.some(i => i.ok === true && i.via === 'tap'), JSON.stringify(seen));
+      return new Promise(r => setTimeout(r, 2600)).then(() => {
+        // The screen door can be the one in doubt — the only door, on a Mac
+        // with no process tap — and it is named separately so the app can say
+        // something true about it rather than pointing at the wrong pane.
+        const doubts = seen.filter(i => i.reason === 'suspect');
+        check('the door in doubt is named, whichever it is',
+          doubts.length === 2 && doubts[0].which === 'audio' && doubts[1].which === 'screen',
+          JSON.stringify(doubts));
+        check('and capturing again withdraws that one too',
+          seen[seen.length - 1].ok === true && seen[seen.length - 1].via === 'screen',
+          JSON.stringify(seen.slice(-3)));
+        return new Promise(r => setTimeout(r, 2600)).then(() => {
+          // The health watch is permanent: another silent spell can warn and
+          // recover again without restarting the helper.
+          const later = seen.filter(i => i.reason === 'suspect' && i.which === 'screen');
+          check('the screen doubt can recur after it was withdrawn',
+            later.length === 2, JSON.stringify(seen));
+          check('and the later doubt can be withdrawn again',
+            seen[seen.length - 1].ok === true && seen[seen.length - 1].via === 'screen',
+            JSON.stringify(seen.slice(-3)));
+          it.stop();
+          fs.rmSync(dir, { recursive: true, force: true });
+        });
+      });
+    });
+  });
+}
+
 // ---- taking, with no helper running ----
 const idle = create({ probePath: path.join(__dirname, 'no-such-helper') });
 check('with no helper there is no capture state', idle.state === 'off');
 check('y take() devuelve null, no silencio', idle.take(64) === null,
   'it would write zeros over the microphone');
 
-idle.start().then(started => {
+stderrProtocol().then(() => idle.start()).then(started => {
   check('starting with no helper resolves false rather than throwing', started === false);
   check('and it is marked unavailable', idle.state === 'unavailable', idle.state);
 

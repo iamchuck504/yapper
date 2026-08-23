@@ -73,11 +73,60 @@ const poll = main.slice(main.indexOf('async function pollMeetings'),
   main.indexOf('function notifyMeeting'));
 check('a failed probe is not mistaken for silence', /users === null/.test(poll),
   'null would be treated as an empty list and cut the recording');
+{
+  const from = main.indexOf('function micUsersWindows()');
+  const windowsProbe = main.slice(from, main.indexOf('// macOS answers', from));
+  check('a failed Windows registry query is unknown, not an empty room',
+    /catch \{\s*return finish\(null\)/.test(windowsProbe)
+      && /p\.on\('error', \(\) => finish\(null\)\)/.test(windowsProbe)
+      && /code !== 0\) return finish\(null\)/.test(windowsProbe),
+    'a registry failure could still advance the meeting-gone streak');
+  check('meeting probes have a deadline instead of wedging every future poll',
+    (main.match(/setTimeout\(\(\) => \{\s*if \(!finish\(null\)\) return;/g) || []).length >= 2,
+    'a hung child could leave pollInFlight true forever');
+}
 check('the match comes from the module, not a loose map',
   /matchMeetingApp\(users\)/.test(poll), 'main.js went back to doing it on its own');
-check('a recording with no meeting app in it is never told the meeting ended',
-  /meetingSeenWhileRecording/.test(poll) && /else if \(meetingSeenWhileRecording\)/.test(poll),
-  'a memo with no call running would be stopped on its own after 70 s');
+check('the end-of-meeting decision is the tested step in meetings.js',
+  /whileRecording\(\{ current: meetingCurrent, streak: meetingGoneStreak \}, hit\)/.test(poll),
+  'main.js went back to deciding it inline');
+check('a meeting that resumes withdraws a pending automatic stop',
+  /hit && meetingEndedPending/.test(poll)
+    && /send\('meeting-ended', false\)/.test(poll),
+  'the renderer countdown would keep running after the meeting returned');
+// The step itself, as the sequences a recording actually sees. `ended` must be
+// true on exactly one poll, and never for a recording no meeting app was in.
+{
+  const { whileRecording } = require('../meetings');
+  const run = (hits, state = {}) => hits.map(h => { state = whileRecording(state, h); return state.ended; });
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  check('a note with no meeting app is never told the meeting ended',
+    run([null, null, null, null, null]).every(e => !e), 'ended fired');
+  check('a meeting that ends is announced on the second clear poll, once',
+    eq(run(['Zoom', 'Zoom', null, null, null, null]), [false, false, false, true, false, false]),
+    JSON.stringify(run(['Zoom', 'Zoom', null, null, null, null])));
+  check('a blip does not end the meeting',
+    run(['Zoom', null, 'Zoom', null, 'Zoom']).every(e => !e), 'ended fired on a blip');
+  check('a call that starts after the recording did is watched from then on',
+    eq(run([null, null, 'Teams', null, null]), [false, false, false, false, true]),
+    JSON.stringify(run([null, null, 'Teams', null, null])));
+  check('after an in-recording hit, two clear polls end it',
+    eq(run(['Zoom', null, null]), [false, false, true]), JSON.stringify(run(['Zoom', null, null])));
+}
+// And the memory is wiped when a recording starts or stops, so an app seen
+// before the recording — a call that ended a moment ago — cannot follow a
+// memo in and end it. A regex over the handler, since it cannot run here.
+{
+  const from = main.indexOf("ipcMain.on('recording-state'");
+  const handler = main.slice(from, main.indexOf('});', from));
+  check('recording-state clears the meeting memory unconditionally',
+    /^\s*meetingCurrent = null;/m.test(handler) && !/if \(!rendererRecording\) meetingCurrent/.test(handler),
+    'a meeting seen before the recording would be inherited by it');
+  check('and retires the polls that were already in flight',
+    /meetingEra\+\+/.test(handler) && /const era = meetingEra;/.test(poll)
+    && /if \(era !== meetingEra\) return;/.test(poll),
+    'a probe that started before the recording could still attach its meeting to it');
+}
 
 // ---- the probe itself, where there is one ----
 const probe = path.join(__dirname, 'mic-probe');

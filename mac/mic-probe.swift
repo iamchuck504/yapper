@@ -90,9 +90,9 @@ if CommandLine.arguments.contains("--watch") {
   var watched = Set<AudioObjectID>()
   var listener: AudioObjectPropertyListenerBlock = { _, _ in }
 
-  func emit() {
+  func emit(force: Bool = false) {
     let line = capturingBundleIDs().map { $0.joined(separator: "\t") } ?? "?"
-    if line == last { return }
+    if !force && line == last { return }
     last = line
     print(line)
     fflush(stdout)
@@ -127,7 +127,9 @@ if CommandLine.arguments.contains("--watch") {
   // being installed. Thirty seconds is far from the five the app polled at.
   let resync = DispatchSource.makeTimerSource(queue: queue)
   resync.schedule(deadline: .now() + 30, repeating: 30)
-  resync.setEventHandler { watchProcesses(); emit() }
+  // Also a heartbeat: the parent can distinguish a healthy unchanged watcher
+  // from one that is alive but stopped receiving CoreAudio notifications.
+  resync.setEventHandler { watchProcesses(); emit(force: true) }
   resync.resume()
 
   queue.async { watchProcesses(); emit() }

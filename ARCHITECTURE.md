@@ -106,18 +106,18 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 3402 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
-| `engine.js` | 1113 | whisper.cpp lifecycle, the tier table, calibration, Metal-to-CPU fallback, WAV read/write, full-file transcription |
+| `main.js` | 3620 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `engine.js` | 1149 | whisper.cpp lifecycle, the tier table, calibration, Metal-to-CPU fallback, WAV read/write, full-file transcription |
 | `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
 | `llm.js` | 552 | Note providers (§6), including streamed and cancelable responses, behind one `generate()` call |
-| `live.js` | 310 | Live transcription: rolling window, LocalAgreement-2 confirmation |
+| `live.js` | 316 | Live transcription: rolling window, LocalAgreement-2 confirmation |
 | `actions.js` | 253 | Parsing user-selected action items from notes, and folding duplicates together |
 | `provision.js` | 505 | First-run engine download for installed copies (Windows and macOS): pinned, SHA-256 verified, size-bounded, resumable and retried |
 | `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
-| `sysaudio.js` | 234 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
-| `speaker-diarizer.js` | 223 | Optional macOS Core ML diarization, timestamp alignment, stable labels and per-meeting name maps |
-| `meetings.js` | 72 | Which running app counts as a meeting, in both platforms' vocabularies |
+| `sysaudio.js` | 302 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
+| `speaker-diarizer.js` | 242 | Optional macOS Core ML diarization, timestamp alignment, stable labels and per-meeting name maps |
+| `meetings.js` | 89 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
 | `security.js` | 99 | Canonical meeting and import paths; blocks traversal and folder/file symlink escapes |
@@ -133,7 +133,7 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 3472 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
+| `renderer/app.js` | 3701 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
 | `renderer/style.css` | 1782 | Everything visual, light and dark |
 | `renderer/index.html` | 554 | Main window markup |
 | `renderer/bubble.html` | 198 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
@@ -153,8 +153,8 @@ unpacked from the asar — nothing can be executed from inside one.
 
 | Helper | Lines | Answers |
 |---|---:|---|
-| `mac/system-audio.swift` | 339 | What the machine is playing, as 16 kHz mono PCM on stdout (a Core Audio process tap, falling back to ScreenCaptureKit) |
-| `mac/mic-probe.swift` | 58 | Which processes hold the microphone right now, as bundle ids (CoreAudio); with `--watch` it stays resident and prints a line per change instead of being spawned every five seconds |
+| `mac/system-audio.swift` | 958 | What the machine is playing, as 16 kHz mono PCM on stdout (a Core Audio process tap, falling back to ScreenCaptureKit) |
+| `mac/mic-probe.swift` | 144 | Which processes hold the microphone right now, as bundle ids (CoreAudio); with `--watch` it stays resident and prints changes plus a health heartbeat instead of being spawned every five seconds |
 | `mac/speaker-diarize/` | SwiftPM executable | Distinct remote voices and their time ranges, using FluidAudio's offline Core ML pipeline on macOS 14+ |
 
 The capture helpers are deliberately dumb: they answer one question on stdout and exit codes

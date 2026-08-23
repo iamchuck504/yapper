@@ -190,10 +190,81 @@ code requirement that no longer matched, so tccd neither matched it nor asked
 again. A tap in that state does not fail — it delivers exact zeros for as long
 as it runs. 0.1.11 recorded a YouTube video through the microphone (it heard
 the speakers) with a system track of silence. The helper now watches its own
-tap: three seconds of zeros while the default output device is running means
-the tap is muted, and it switches to ScreenCaptureKit, which asks for its own
-permission and names it. `YAPPER_TAP_SIMULATE_MUTE=1` exercises that path on a
-machine where the tap is permitted; `YAPPER_TAP_DEBUG=1` prints the watch.
+tap. The signal is not "the output device is running" — during a recording it
+always is: the app's own audio graph keeps the default output open, and Zoom
+or Teams hold it for the whole call. It is "a process other than Yapper has
+its output running" (`kAudioProcessPropertyIsRunningOutput` over CoreAudio's
+process list, excluding the helper's parent and Yapper's bundle-id family).
+Even that is a hint — a call where everyone is muted looks the same — so the
+bar is high and being wrong is kept cheap: sixty consecutive seconds of it
+without one non-zero sample from the tap, and only if Screen Recording is
+already granted (`CGPreflightScreenCaptureAccess`), because trading a tap that
+may be fine for a permission prompt mid-meeting is the worse mistake. Then the
+helper tries ScreenCaptureKit; the app logs it (`[audio] helper: tap
+silent for 60 s while … played`) and holds the display awake, since that door
+needs a lit display. Without Screen Recording it stays on the tap and reports
+the doubt immediately because there is no second door with which to check it.
+
+The switch is not committed until the new door proves itself, because
+`startCapture()` returning proves nothing: **ScreenCaptureKit receives
+Safari's protected playback as a steady stream of digital silence** — buffers
+on time, every sample zero — where the tap hears it perfectly (measured on
+macOS 27). So the helper waits up to eight seconds for one non-zero sample.
+The tap keeps recording throughout that provisional stream, while SCK inspects
+samples but writes nothing to stdout. Only after the scoped stream proves
+itself *and* widens successfully does the helper stop the tap, enable SCK output
+and report `capturing: screen`; if the trial fails, it is discarded and the
+tap is recreated. Recreating the tap is safe because `stop()` forgets the ids
+it destroyed and `start()` undoes whatever it managed to create before
+throwing.
+And it is not a one-shot verdict: a scoped screen stream may hear nothing only
+because its target went quiet, and the tap it returns to may still be muted or
+may stall later, so after an inconclusive round the watch is armed again, up to
+three times. The screen door is checked while the tap is still running and a
+temporary display-sleep activity keeps the required display available across
+the trial. When the attempts run out with the tap still silent, the helper writes
+`suspect: audio`: recording carries on, and the app says on screen that the far
+side has been quiet while other apps played, naming the pane to check. Silence
+there was the original bug.
+
+The trial stream is scoped to the process that provoked the doubt
+(`SCContentFilter(display:including:)`), so a non-zero sample can only have
+come from it — a notification chiming during the check used to vouch for a
+door that was deaf to the thing that mattered — and it is widened to the whole
+display only once it is accepted. And the suspicion is withdrawn if the tap
+later proves itself: a two-second watch keeps listening, and one real sample
+sends `capturing: tap` again, which takes the warning off the screen.
+
+`YAPPER_TAP_SIMULATE_MUTE=1` mutes the first tap only, so a test walks the
+whole path — muted tap, screen door, tap back and working; `=always` keeps
+every tap muted, which is what an unpermitted one really does;
+`=until-suspect` un-mutes them the moment the watch gives up, which is how the
+warning-then-recovery path is exercised. `YAPPER_SCK_SIMULATE_SILENT=1` makes
+the screen door deaf as well, so the two together take the watch to
+`suspect: audio`; `YAPPER_SCK_HIDE_TRIAL_APP=1` hides the process the trial
+would be scoped to, and `YAPPER_SCK_FAIL_WIDEN=1` refuses the widening.
+`YAPPER_TAP_MUTED_AFTER` shortens the sixty seconds.
+
+Two things this cannot do, and does not pretend to. **A trial needs a process
+screen capture can see**: `SCShareableContent.applications` lists apps, so
+when the only thing playing is a command line tool or a daemon there is
+nothing to scope a trial to, and the doubt is reported rather than guessed at.
+And **protected playback cannot be captured by ScreenCaptureKit at all** — on
+a Mac with no process tap (before macOS 14.4, or where the tap cannot be
+created) that audio is simply not recordable, which is why the screen door
+gets its own `suspect: screen` instead of a permission panel that would fix
+nothing. On macOS 14.2+ that warning requires another Core Audio process to be
+running; on 13 through 14.1, where process objects do not exist, it is the more
+conservative result of sixty seconds of all-zero capture and does not claim to
+know whether another app was playing. This is a lifetime watch, not a startup
+check: a real sample withdraws the warning, but the timer remains so a later
+protected or otherwise silent source can raise it again. A screen stream that
+was accepted through a scoped trial gets the same watch after it is widened.
+The tap-to-screen transition also holds a temporary display-sleep activity
+until the new route is settled, closing the gap before Electron takes its own
+display assertion. `YAPPER_TAP_SIMULATE_MUTE=1` exercises the path
+on a machine where the tap is permitted, `YAPPER_TAP_MUTED_AFTER=5` shortens
+the wait for that, and `YAPPER_TAP_DEBUG=1` prints the watch, one line a second.
 
 ## What has actually run on a Mac
 

@@ -71,10 +71,8 @@ function create({ probePath, onStatus = () => { } } = {}) {
   let dropped = 0;
   let state = 'off';        // off | starting | capturing | unavailable
   let stopping = false;     // an expected exit: stop() asked for it
-  // 'audio' or 'screen', named by the helper before it exits with 2 — the
-  // two doors do not lead to the same Settings pane.
-  let missingPermission = null;
   let restarts = 0;         // one silent retry per recording, no more
+  let startTimer = null;    // the 4 s "say something" deadline of the current launch
 
   const push = data => {
     chunks.push(data);
@@ -119,44 +117,110 @@ function create({ probePath, onStatus = () => { } } = {}) {
           onStatus({ ok: false, reason: 'spawn-failed', detail: err.message });
           return resolve(false);
         }
+        // Everything below belongs to this launch and only this one. A helper
+        // stopped and restarted quickly — two recordings back to back — has
+        // its close, its stderr and its deadline still in flight while the
+        // next one is starting; acting on them would null the new process,
+        // read the new one's "capturing" as the old one's, or release the
+        // display hold the new one just took.
+        const child = proc;
+        const mine = () => proc === child;
+        // 'audio' or 'screen', named by the helper before it exits with 2 —
+        // the two doors do not lead to the same Settings pane. Per launch: a
+        // refusal from the last one says nothing about this one.
+        let missingPermission = null;
 
         let settled = false;
         const settle = ok => { if (!settled) { settled = true; resolve(ok); } };
 
-        proc.stdout.on('data', push);
+        proc.stdout.on('data', d => { if (mine()) push(d); });
         // The helper says "capturing" on stderr once the stream is live, and
         // exits with 2 when the permission is the thing standing in the way.
         // Which permission depends on the door it took — a process tap wants
         // "System Audio Recording Only", ScreenCaptureKit wants Screen
         // Recording — and it names it before exiting so the app can point at
         // the pane that actually holds the switch.
-        proc.stderr.on('data', d => {
-          const text = d.toString();
-          const which = /permission:\s*(audio|screen)/.exec(text);
-          if (which) missingPermission = which[1];
-          const live = /capturing:\s*(tap|screen)/.exec(text);
-          if (live || /capturing/.test(text)) {
+        // One line at a time. A chunk can carry several lines at once — a
+        // "note:" followed by "capturing: screen" when the main process was
+        // busy — and judging the chunk by its first line lost the second.
+        let errBuf = '';
+        let namedFailure = false;   // the helper said what went wrong, in its own words
+        // One reading of one line, used for the lines that arrive and again
+        // for whatever was left unterminated when the helper exited.
+        const classify = line => {
+          if (!line) return;
+          // Advisory lines are for the log only.
+          if (/^note:/.test(line)) {
+            console.log('[audio] helper:', line.replace(/^note:\s*/, '').slice(0, 300));
+            return;
+          }
+          // Still capturing, but the helper doubts what it is capturing.
+          const doubt = /^suspect:\s*(audio|screen)\s*$/.exec(line);
+          if (doubt) { onStatus({ ok: false, reason: 'suspect', which: doubt[1] }); return; }
+          const which = /^permission:\s*(audio|screen)/.exec(line);
+          if (which) { missingPermission = which[1]; namedFailure = true; return; }
+          if (missingPermission) return;      // the lines after it explain it
+          // The protocol line, whole: an error that merely contains the word
+          // ("could not start capture: failed while capturing") is not it.
+          const live = /^capturing:\s*(tap|screen)\s*$/.exec(line);
+          if (live) {
             state = 'capturing';
-            // Which door it came through decides whether the display has to be
-            // held awake: a tap does not care, ScreenCaptureKit cannot capture
-            // without a display at all.
-            onStatus({ ok: true, via: live ? live[1] : 'screen' });
+            // Which door it came through decides whether the display has to
+            // be held awake: a tap does not care, ScreenCaptureKit cannot
+            // capture without a display at all.
+            onStatus({ ok: true, via: live[1] });
             settle(true);
-          } else if (text.trim() && !which) {
-            onStatus({ ok: false, reason: 'helper', detail: text.trim().slice(0, 200) });
+            return;
+          }
+          namedFailure = true;
+          onStatus({ ok: false, reason: 'helper', detail: line.slice(0, 200) });
+        };
+        proc.stderr.on('data', d => {
+          if (!mine() || stopping) return;   // a late line after stop() means nothing
+          errBuf += d.toString();
+          let nl;
+          while ((nl = errBuf.indexOf('\n')) >= 0) {
+            const line = errBuf.slice(0, nl).trim();
+            errBuf = errBuf.slice(nl + 1);
+            classify(line);
           }
         });
         proc.on('error', err => {
+          if (!mine()) return;
+          // `close` follows `error` for spawn failures. Count this as the
+          // named reason so that close does not emit a second helper-exit for
+          // the same launch and overwrite the more useful spawn detail.
+          namedFailure = true;
           state = 'unavailable';
           onStatus({ ok: false, reason: 'spawn-failed', detail: err.message });
           settle(false);
         });
         proc.on('close', code => {
+          if (!mine()) return;          // stop() already let go of it, or a newer launch owns the state
+          if (startTimer) { clearTimeout(startTimer); startTimer = null; }
           proc = null;
+          // A last line with no newline on it still says something — and it
+          // is read the same way as any other, so a truncated "permission:
+          // audio" still names its pane instead of becoming loose text.
+          const tail = errBuf.trim();
+          errBuf = '';
+          if (tail) classify(tail);
           const wasCapturing = state === 'capturing';
           if (state !== 'off') {
             state = code === 2 ? 'unavailable' : (wasCapturing ? 'off' : 'unavailable');
-            if (code === 2) onStatus({ ok: false, reason: 'permission', which: missingPermission });
+            // `midRecording` says this was working and is now gone — the
+            // renderer words that differently from a start-up refusal.
+            if (code === 2) {
+              onStatus({ ok: false, reason: 'permission', which: missingPermission, midRecording: wasCapturing });
+            } else if (!wasCapturing && !namedFailure) {
+              // It died before it ever captured and without naming a reason —
+              // a crash, a kill. Silence here left the caller believing
+              // system audio was on its way: the display was held awake for a
+              // source that never arrived and nobody was told the recording
+              // is one-sided. A helper that did name its failure has been
+              // reported already; saying it twice only repeats the panel.
+              onStatus({ ok: false, reason: 'helper-exit', detail: `exit ${code}` });
+            }
           }
           settle(false);
 
@@ -166,7 +230,11 @@ function create({ probePath, onStatus = () => { } } = {}) {
           // fault — the far side loses a second, not the rest of the meeting —
           // and if it will not come back, say so rather than let the user find
           // out afterwards.
-          if (wasCapturing && !stopping) {
+          // A permission exit is deterministic: the same helper started the
+          // same way will refuse the same way. Restarting it would only
+          // repeat the sequence and spend the one retry a transient fault
+          // deserves.
+          if (wasCapturing && !stopping && code !== 2) {
             if (restarts < 1) {
               restarts++;
               api.start().then(ok => {
@@ -179,7 +247,9 @@ function create({ probePath, onStatus = () => { } } = {}) {
         });
 
         // Never hang the start of a recording on a helper that says nothing.
-        setTimeout(() => {
+        startTimer = setTimeout(() => {
+          startTimer = null;
+          if (!mine()) return;
           if (!settled) onStatus({ ok: false, reason: 'timeout' });
           settle(state === 'capturing');
         }, 4000);
@@ -221,9 +291,10 @@ function create({ probePath, onStatus = () => { } } = {}) {
       // unlimited supply of retries from a helper that crashes on a loop.
       restarts = 0;
       chunks = []; buffered = 0;
+      if (startTimer) { clearTimeout(startTimer); startTimer = null; }
       if (proc) {
         try { proc.kill(); } catch { /* already gone */ }
-        proc = null;
+        proc = null;             // its handlers see they are no longer current
       }
     }
   };

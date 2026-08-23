@@ -625,21 +625,51 @@ const screenPrompt = $('screen-prompt');
 let missingPane = 'screen';       // which Settings pane the button should open
 
 window.yapper.onSystemAudioStatus(info => {
-  if (info.ok) return;
+  if (info.ok) {
+    // It works now — whatever was on screen about it no longer applies. Only
+    // what this handler put there: a microphone failure is still true.
+    screenPrompt.classList.add('hidden');
+    clearStatus(statusEl, 'sysaudio');
+    return;
+  }
+
+  // Capture is still running; the helper only doubts it is hearing anything.
+  if (info.reason === 'suspect') {
+    setStatus(statusEl, info.which === 'audio'
+      ? 'The other side of the call has been silent while other apps were playing. '
+        + 'If that is wrong, check System Audio Recording Only in Privacy & Security — '
+        + 'macOS applies it after Yapper is reopened.'
+      // The screen door cannot hear protected playback at all, and on this
+      // machine there is no other door: worth knowing before the meeting ends.
+      : 'System audio has remained silent. '
+        + 'Some apps (Safari playing protected video, for one) cannot be captured '
+        + 'this way on this Mac.',
+      false, 'sysaudio');
+    return;
+  }
 
   // The permission case gets buttons rather than a sentence. It used to say
   // "then record again", which does not work: macOS does not apply the grant
   // to a process that was already running, so following the instruction to the
   // letter produced another one-sided recording and no explanation.
-  if (info.reason === 'permission' || info.reason === 'helper') {
+  // Only an actual refusal gets it. Any other helper failure used to land
+  // here too and told the user to grant Screen Recording — a page whose switch
+  // may already be on, for a failure that was never about permission.
+  if (info.reason === 'permission') {
+    // A refusal is the definitive version of any doubt written earlier.
+    clearStatus(statusEl, 'sysaudio');
     // Which permission depends on the route the helper took. Naming the wrong
     // one sends the user to a page that does not contain the switch.
     missingPane = info.which === 'audio' ? 'audio' : 'screen';
-    $('sp-detail').textContent = missingPane === 'audio'
+    $('sp-detail').textContent = (missingPane === 'audio'
       ? 'Allow Yapper under System Audio Recording Only to capture the other '
         + 'side of the call. macOS applies it only after Yapper is reopened.'
       : 'Allow Yapper under Screen Recording to capture the other side of the '
-        + 'call. macOS applies it only after Yapper is reopened.';
+        + 'call. macOS applies it only after Yapper is reopened.')
+      // It was working and is now gone: say so, or the user learns afterwards.
+      + (info.midRecording && recording
+        ? ' System audio stopped partway through — from here only your microphone is being recorded.'
+        : '');
     $('sp-relaunch').disabled = recording;
     $('sp-relaunch').title = recording
       ? 'Stop the recording first — reopening now would discard it.'
@@ -655,7 +685,7 @@ window.yapper.onSystemAudioStatus(info => {
     info.reason === 'stopped'
       ? 'System audio stopped partway through — from here only your microphone is being recorded.'
       : 'Only your microphone is being recorded: system audio could not be started.',
-    true);
+    true, 'sysaudio');
 });
 
 $('sp-settings').addEventListener('click', () => window.yapper.openScreenSettings(missingPane));
@@ -756,11 +786,50 @@ $('home-setup-open').addEventListener('click', () => {
   provider.focus();
 });
 
-function setStatus(el, text, isError = false) {
+// The recorder can have two independent faults at once. A single `dataset`
+// owner prevents one source from clearing the other's line, but it cannot
+// preserve a line that was overwritten in between. Keep the active owned
+// statuses here; clearing one restores the newest remaining one.
+const ownedStatuses = new Map();
+let ownedStatusSequence = 0;
+
+function paintStatus(el, text, isError, source) {
   el.classList.remove('hidden');
   el.classList.toggle('error', isError);
   el.textContent = text;
+  el.dataset.source = source;
   el.scrollTop = el.scrollHeight;
+}
+
+function setStatus(el, text, isError = false, source = '') {
+  if (el === statusEl) {
+    if (source) {
+      ownedStatuses.set(source, { text, isError, source, sequence: ++ownedStatusSequence });
+    } else {
+      // General recorder/transcription progress supersedes recording-source
+      // warnings from the phase that just ended.
+      ownedStatuses.clear();
+    }
+  }
+  paintStatus(el, text, isError, source);
+}
+
+function clearStatus(el, source = '') {
+  if (el !== statusEl) { el.classList.add('hidden'); return; }
+  if (!source) {
+    ownedStatuses.clear();
+    el.dataset.source = '';
+    el.classList.add('hidden');
+    return;
+  }
+  ownedStatuses.delete(source);
+  if (el.dataset.source !== source) return;
+  const remaining = [...ownedStatuses.values()].sort((a, b) => b.sequence - a.sequence)[0];
+  if (remaining) paintStatus(el, remaining.text, remaining.isError, remaining.source);
+  else {
+    el.dataset.source = '';
+    el.classList.add('hidden');
+  }
 }
 
 function setStep(step, state) {
@@ -1221,6 +1290,16 @@ async function applyMicSelection() {
       node.connect(micBus);
       micStreams.set(key, stream);
       micNodes.set(key, node);
+      for (const track of stream.getAudioTracks()) {
+        track.addEventListener('ended', async () => {
+          // `dropMic` also stops tracks. Only a track that is still the live
+          // source owns this callback; an intentional replacement must not
+          // re-acquire the source it just removed.
+          if (micStreams.get(key) !== stream) return;
+          dropMic(key);
+          await applyMicSelection();
+        }, { once: true });
+      }
     } catch (err) {
       // Device busy or unplugged: skip it, another may work. But remember
       // why, because one refusal is not like the others — macOS denying the
@@ -1623,7 +1702,8 @@ function clearEndedPrompt() {
   endedPrompt.classList.add('hidden');
 }
 
-window.yapper.onMeetingEnded(() => {
+window.yapper.onMeetingEnded(ended => {
+  if (!ended) { clearEndedPrompt(); return; }
   if (!recording || endedTimer) return;
   let left = 60;
   const tick = () => {
@@ -1742,9 +1822,8 @@ async function startRecording() {
     // microphone always carries at least its own noise floor, so an exact zero
     // held for seconds is a dead device, and it is said out loud rather than
     // drawn quietly.
-    let micPeak = 0;
+    let lastMicSignalAt = performance.now();
     let silenceWarned = false;
-    const captureStartedAt = performance.now();
     // The meters used to redraw on every animation frame, which on a ProMotion
     // display is 120 times a second: two canvases, each frame, for the whole
     // meeting. That alone held the GPU process at a third of a core and the
@@ -1764,17 +1843,20 @@ async function startRecording() {
         else m.analyser.getByteTimeDomainData(m.buf);
       }
       const micNow = levelOf(analysers.mic);
-      if (micNow > micPeak) micPeak = micNow;
+      const now = performance.now();
+      if (micNow > 0) lastMicSignalAt = now;
       // A refusal is said at once; plain silence gets six seconds to be a
-      // headset waking up.
-      if (!silenceWarned && micPeak === 0
-          && (micError || performance.now() - captureStartedAt > 6000)) {
+      // headset waking up. This is consecutive silence, not a lifetime peak:
+      // a microphone that worked at the start can still die halfway through.
+      if (!silenceWarned && (micError || now - lastMicSignalAt > 6000)) {
         silenceWarned = true;
-        setStatus(statusEl, micSilenceMessage(!!analysers.sys), !analysers.sys || !!micError);
+        setStatus(statusEl, micSilenceMessage(!!analysers.sys), !analysers.sys || !!micError, 'mic');
       }
-      if (silenceWarned && micPeak > 0) {
+      if (silenceWarned && micNow > 0) {
         silenceWarned = false;
-        statusEl.classList.add('hidden');    // the device woke up; all is well
+        // The device woke up — but only this handler's own line goes away
+        // with it: a system-audio warning written since then is still true.
+        clearStatus(statusEl, 'mic');
       }
       // The bubble's capsule shows this same signal. Throttled: the bars only
       // have ~100 ms of resolution anyway, and paused means silent on purpose.
@@ -1803,6 +1885,10 @@ async function startRecording() {
 
     // open the file first: every block of samples goes straight to disk from
     // here on, so an interrupted meeting still leaves a playable recording
+    // Clear the previous recorder phase before starting the helper. A missing
+    // helper reports synchronously from inside recordingStart(); clearing here
+    // means that actionable line cannot be erased when the IPC resolves.
+    clearStatus(statusEl);
     currentFolder = await window.yapper.recordingStart(recParticipants());
     paused = false;     // the tap reads this on its very first block
     recording = true;
@@ -1814,13 +1900,12 @@ async function startRecording() {
     btnRecord.classList.add('hidden');
     recLive.classList.remove('hidden');
     pipelineEl.classList.add('hidden');
-    statusEl.classList.add('hidden');
     const sysAudio = !!(sys && sys.getAudioTracks().length);
     // applyMicSelection already knows the difference between permission denied,
     // a busy device and ordinary silence. Preserve that actionable explanation:
     // the generic no-source fallback used to overwrite it immediately on macOS.
     if (micError) {
-      setStatus(statusEl, micSilenceMessage(!!analysers.sys), true);
+      setStatus(statusEl, micSilenceMessage(!!analysers.sys), true, 'mic');
     } else if (micNodes.size === 0 && !sysAudio) {
       setStatus(statusEl, 'Warning: no audio source could be captured.');
     } else if (!sysAudio) {
@@ -1829,10 +1914,10 @@ async function startRecording() {
       // the normal case, and the only thing worth saying is when that helper
       // could not start — which arrives separately, on 'system-audio-status'.
       if (window.yapper.platform !== 'darwin') {
-        setStatus(statusEl, 'Warning: system audio could not be captured; only the mic is being recorded.');
+        setStatus(statusEl, 'Warning: system audio could not be captured; only the mic is being recorded.', false, 'sysaudio');
       }
     } else if (micNodes.size === 0) {
-      setStatus(statusEl, 'Warning: no microphone could be captured; only system audio is being recorded.');
+      setStatus(statusEl, 'Warning: no microphone could be captured; only system audio is being recorded.', false, 'mic');
     }
 
     window.yapper.setRecordingState(true);
@@ -1940,7 +2025,7 @@ async function stopAndProcess() {
     // removes an entire provider round trip from the visible stop path.
     const title = typedTitle || draft.title;
 
-    statusEl.classList.add('hidden');
+    clearStatus(statusEl);
     pipelineEl.classList.add('hidden');
     const meetingData = await window.yapper.loadMeeting(folder);
     openMeetingView(title || formatMeetingDate(folder.split(/[\\/]/).pop()), summary, transcript,
@@ -2834,7 +2919,7 @@ btnImport.addEventListener('click', async () => {
     const title = picked.title;
 
     if (summary) {
-      statusEl.classList.add('hidden');
+      clearStatus(statusEl);
       const meetingData = await window.yapper.loadMeeting(picked.folder);
       openMeetingView(title || formatMeetingDate(picked.folder.split(/[\\/]/).pop()),
         summary, transcript, true, participants, { transcribeMs, ...metrics }, meetingData.speakers);
@@ -2891,7 +2976,7 @@ btnNew.addEventListener('click', () => {
   currentFolder = null;
   if (noteStreamFolder) finishNotesStream();
   showView('record');
-  statusEl.classList.add('hidden');
+  clearStatus(statusEl);
   pipelineEl.classList.add('hidden');
   participantsRec.value = '';       // a new meeting starts with nobody in it
   refreshMeetingList();
@@ -3626,7 +3711,7 @@ async function provisionEngine() {
     }
     if (p.usable) usable = true;
     if (/engine ready/i.test(p.label || '')) {
-      statusEl.classList.add('hidden'); // everything is down; nothing left to say
+      clearStatus(statusEl); // everything is down; nothing left to say
       return;
     }
     const pct = p.pct != null ? ` — ${Math.round(p.pct)}%` : '';

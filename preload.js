@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld('yapper', {
   recordingFinish: (title, markers) => invoke('recording-finish', title, markers),
   markShortcut: on => ipcRenderer.send('mark-shortcut', on),
   onMarkMoment: cb => ipcRenderer.on('mark-moment', () => cb()),
-  onMeetingEnded: cb => ipcRenderer.on('meeting-ended', () => cb()),
+  onMeetingEnded: cb => ipcRenderer.on('meeting-ended', (_e, ended) => cb(ended !== false)),
   onStartRecording: cb => ipcRenderer.on('start-recording', () => cb()),
   bubblePause: () => ipcRenderer.send('bubble-pause'),
   onRemotePause: cb => ipcRenderer.on('remote-pause', () => cb()),

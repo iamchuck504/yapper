@@ -12,6 +12,8 @@
 // in the air. Reaching it needs a real recording, so it needs a microphone;
 // `stopAndProcess` re-enables the button and both live in `app.js`.
 const { app } = require('electron');
+const fs = require('fs');
+const path = require('path');
 const { sandbox, logger, mainWindow, watchdog, within } = require('./harness');
 
 const ROOT = sandbox('screen-prompt');
@@ -68,11 +70,89 @@ app.whenReady().then(async () => {
     check('a crash mid-meeting does not raise the permission prompt',
       (await state(win)).hidden, await state(win));
 
-    // A missing helper does, because the way out is the same: grant it and reopen.
-    win.webContents.send('system-audio-status', { ok: false, reason: 'helper' });
+    // A helper that failed for its own reasons is not a permission problem,
+    // and it used to be shown as one: "Allow Yapper under Screen Recording",
+    // a page whose switch may well already be on. Only a refusal names a pane.
+    win.webContents.send('system-audio-status', { ok: false, reason: 'helper', detail: 'aggregate device (!obj)' });
     await pause(400);
-    check('a missing helper does raise it',
-      (await state(win)).hidden === false, await state(win));
+    check('a helper failure that is not a refusal does not raise the permission prompt',
+      (await state(win)).hidden, await state(win));
+    win.webContents.send('system-audio-status', { ok: false, reason: 'helper-exit', detail: 'exit 5' });
+    await pause(400);
+    check('nor does the helper dying', (await state(win)).hidden, await state(win));
+
+    // And when it comes back — its own retry, or the screen door opening after
+    // the tap gave up — the warning goes away by itself.
+    win.webContents.send('system-audio-status', { ok: false, reason: 'permission', which: 'audio' });
+    await pause(400);
+    check('a refusal still raises it', (await state(win)).hidden === false, await state(win));
+    check('and names the pane it was refused', /System Audio Recording/i.test((await state(win)).text),
+      (await state(win)).text);
+    win.webContents.send('system-audio-status', { ok: true, via: 'screen' });
+    await pause(400);
+    check('capturing again takes the prompt down', (await state(win)).hidden, await state(win));
+
+    // A doubt is not a refusal: recording continues, so it is said in the
+    // status line rather than behind a panel that offers to reopen the app.
+    win.webContents.send('system-audio-status', { ok: false, reason: 'suspect', which: 'audio' });
+    await pause(400);
+    check('a suspected mute does not raise the permission prompt',
+      (await state(win)).hidden, await state(win));
+    const said = await win.webContents.executeJavaScript(
+      `(() => { const el = document.getElementById('status');
+        return el.classList.contains('hidden') ? '' : el.textContent; })()`);
+    check('but it is said, and names the pane to check',
+      /silent/i.test(said) && /System Audio Recording/i.test(said), said);
+
+    // The same doubt about the other door says something true about that one:
+    // there is no permission to grant, the door simply cannot hear everything.
+    win.webContents.send('system-audio-status', { ok: false, reason: 'suspect', which: 'screen' });
+    await pause(400);
+    const saidScreen = await win.webContents.executeJavaScript(
+      `(() => { const el = document.getElementById('status');
+        return el.classList.contains('hidden') ? '' : el.textContent; })()`);
+    check('a doubt about the screen door does not name a permission pane',
+      /silent/i.test(saidScreen) && !/System Audio Recording/i.test(saidScreen), saidScreen);
+    check('and it is owned by system audio', await win.webContents.executeJavaScript(
+      `document.getElementById('status').dataset.source`) === 'sysaudio');
+
+    // Capturing again takes it down; a line somebody else wrote does not.
+    win.webContents.send('system-audio-status', { ok: true, via: 'screen' });
+    await pause(400);
+    check('capturing again withdraws the doubt', await win.webContents.executeJavaScript(
+      `document.getElementById('status').classList.contains('hidden')`));
+    await win.webContents.executeJavaScript(
+      `setStatus(document.getElementById('status'), 'the microphone is asleep', true, 'mic'), true`);
+    win.webContents.send('system-audio-status', { ok: true, via: 'tap' });
+    await pause(400);
+    check('and a microphone failure survives a system-audio recovery',
+      await win.webContents.executeJavaScript(
+        `!document.getElementById('status').classList.contains('hidden')`));
+
+    // It must also survive a system-audio warning that temporarily owns the
+    // shared line. Merely tagging the last writer loses the mic message when
+    // the later source recovers; the owned-state registry restores it.
+    win.webContents.send('system-audio-status', { ok: false, reason: 'suspect', which: 'screen' });
+    await pause(400);
+    check('a system-audio doubt can temporarily replace the microphone line',
+      await win.webContents.executeJavaScript(
+        `document.getElementById('status').dataset.source`) === 'sysaudio');
+    win.webContents.send('system-audio-status', { ok: true, via: 'screen' });
+    await pause(400);
+    const restored = await win.webContents.executeJavaScript(`(() => {
+      const el = document.getElementById('status');
+      return { hidden: el.classList.contains('hidden'), source: el.dataset.source, text: el.textContent };
+    })()`);
+    check('and recovery restores the still-active microphone failure',
+      !restored.hidden && restored.source === 'mic' && /microphone is asleep/i.test(restored.text), restored);
+
+    const renderer = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8');
+    check('recording clears stale status before starting the native helper',
+      /clearStatus\(statusEl\);\s*currentFolder = await window\.yapper\.recordingStart/.test(renderer),
+      'a synchronous no-helper status could be hidden after the IPC resolves');
+    check('microphone silence is consecutive, not a lifetime peak',
+      /lastMicSignalAt/.test(renderer) && !/let micPeak\s*=/.test(renderer),
+      'a microphone that died after one sample would stay trusted');
   } catch (err) {
     fails++;
     say('FAIL  ' + (err.stack || err.message));
