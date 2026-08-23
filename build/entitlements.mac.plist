@@ -8,5 +8,10 @@
   <!-- Required by Electron for executable memory that is not backed by a file. -->
   <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
   <true/>
+  <!-- The microphone. Under hardened runtime this is an entitlement, not a
+       permission: without it macOS refuses the microphone silently, with no
+       prompt, and a meeting is recorded one-sided (0.1.10 shipped that way). -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
 </dict>
 </plist>

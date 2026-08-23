@@ -14,10 +14,11 @@ const EXPANDED = { w: 470, h: 280 };
 // it is pinned open.
 //
 // Hover does NOT come from DOM events. The pill is one big drag region so it
-// can be moved, and Electron never delivers mouse events over a drag region on
-// Windows — a mouseenter handler here would simply never fire. The main process
-// polls the cursor against the window's bounds and pushes enter/leave through
-// the same bubble-state channel everything else already uses.
+// can be moved, and Electron never delivers mouse events over a drag region —
+// not on Windows, and not on macOS either (measured: no mouseenter, mousemove
+// or mouseleave reach the page; see main.js). The main process polls the
+// cursor against the window's bounds and pushes enter/leave through the same
+// bubble-state channel everything else already uses.
 
 // As a pill, the window is exactly this one row, so its size is measured rather
 // than hardcoded. A fixed number cannot survive the timer growing an hours
@@ -69,6 +70,17 @@ function resizeTo(size) {
 
 const isOpen = () => pinned || hovered;
 
+function setHover(inside) {
+  if (inside) {
+    clearTimeout(closeTimer);
+    if (!hovered) { hovered = true; applyState(); }
+  } else {
+    // A grace period so skimming the edge does not flap the window size.
+    clearTimeout(closeTimer);
+    closeTimer = setTimeout(() => { hovered = false; applyState(); }, 250);
+  }
+}
+
 function applyState() {
   document.body.classList.toggle('pill', !isOpen());
   document.getElementById('btn-pin').classList.toggle('on', pinned);
@@ -117,14 +129,7 @@ window.yapper.onBubbleState(state => {
   if (!state) return;
 
   if (typeof state.hover === 'boolean') {
-    if (state.hover) {
-      clearTimeout(closeTimer);
-      if (!hovered) { hovered = true; applyState(); }
-    } else {
-      // A grace period so skimming the edge does not flap the window size.
-      clearTimeout(closeTimer);
-      closeTimer = setTimeout(() => { hovered = false; applyState(); }, 250);
-    }
+    setHover(state.hover);
     return;
   }
 
@@ -132,7 +137,9 @@ window.yapper.onBubbleState(state => {
     trail.pop();
     trail.unshift(Math.max(0, Math.min(1, state.level)));
     bars.forEach((bar, i) => {
-      bar.style.transform = `scaleY(${(0.2 + trail[i] * 0.8).toFixed(3)})`;
+      const t = `scaleY(${(0.2 + trail[i] * 0.8).toFixed(3)})`;
+      // An unchanged transform would still restart its 100 ms transition.
+      if (bar.dataset.t !== t) { bar.dataset.t = t; bar.style.transform = t; }
     });
     return;
   }

@@ -109,5 +109,28 @@ const mainSource = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8'
 check('the notes prompt preserves unknown numbered identities',
   /write the exact label[\s\S]{0,160}instead of vague phrases such as "the speaker"/i.test(mainSource), true);
 
-console.log(fails ? `\n${fails} failures` : '\nPASS');
-process.exit(fails ? 1 : 0);
+// A run can be cancelled once the far side turns out to have said nothing:
+// the helper stops, the promise resolves at once, and the result says why.
+(async () => {
+  const os = require('os');
+  const { diarizeFile } = require('../speaker-diarizer');
+  const none = diarizeFile(null, null);
+  check('an unavailable run still carries cancel()', typeof none.cancel === 'function', true);
+  none.cancel();
+  if (process.platform === 'darwin') {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yapper-diarize-cancel-'));
+    const wav = path.join(dir, 'sys.wav');
+    const helper = path.join(dir, 'slow-helper.sh');
+    fs.writeFileSync(wav, Buffer.alloc(64));
+    fs.writeFileSync(helper, '#!/bin/sh\nsleep 30\n', { mode: 0o755 });
+    const t0 = Date.now();
+    const run = diarizeFile(helper, wav, { timeoutMs: 20000 });
+    setTimeout(() => run.cancel(), 50);
+    const result = await run;
+    fs.rmSync(dir, { recursive: true, force: true });
+    check('cancel() resolves the run without waiting for the helper',
+      Date.now() - t0 < 5000 && result.reason === 'not needed' && result.segments.length === 0, true);
+  }
+  console.log(fails ? `\n${fails} failures` : '\nPASS');
+  process.exit(fails ? 1 : 0);
+})();

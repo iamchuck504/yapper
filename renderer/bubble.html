@@ -64,7 +64,9 @@
       border: 1px solid var(--border);
       border-radius: 11px;
       box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-      backdrop-filter: blur(14px);
+      /* No backdrop-filter: the window is transparent and there is nothing of
+         this document behind the card to blur, but the pass ran on every
+         composite all the same. */
       overflow: hidden;
     }
     /* Resting, the whole thing is a capsule: the level and the clock, nothing

@@ -746,17 +746,36 @@ body.light #btn-theme .icon-moon { display: block; }
   box-shadow: var(--shadow-1);
 }
 .rec-status-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+/* The pulse is a disc under the dot, grown with transform and faded with
+   opacity: both stay on the compositor. It used to animate box-shadow, which
+   repainted the dot — and its row — at the display's refresh rate for the
+   whole meeting. Same look: a soft ring spreading 7 px past the dot. */
 .rec-dot {
+  position: relative;
   width: 10px; height: 10px;
+}
+.rec-dot::before {                /* the dot, on top */
+  content: '';
+  position: absolute;
+  inset: 0;
   border-radius: 50%;
   background: var(--rec);
-  box-shadow: 0 0 0 0 var(--accent-soft);
+  z-index: 1;
+}
+.rec-dot::after {                 /* the pulse, underneath */
+  content: '';
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  z-index: 0;
+  transform: scale(0.4167);       /* 10 px of 24: hidden under the dot */
   animation: pulse 1.5s ease-out infinite;
 }
 @keyframes pulse {
-  0% { box-shadow: 0 0 0 0 var(--accent-soft); }
-  70% { box-shadow: 0 0 0 7px transparent; }
-  100% { box-shadow: 0 0 0 0 transparent; }
+  0% { transform: scale(0.4167); opacity: 1; }
+  70% { transform: scale(1); opacity: 0; }
+  100% { transform: scale(1); opacity: 0; }
 }
 @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 #timer { font-size: 18px; font-weight: 680; font-variant-numeric: tabular-nums; min-width: 52px; }
@@ -827,7 +846,8 @@ body.light #btn-theme .icon-moon { display: block; }
 .rec-side.flash { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
 
 /* paused: the whole panel goes quiet so the state is unmistakable */
-#rec-live.paused .rec-dot { animation: none; opacity: 0.35; }
+#rec-live.paused .rec-dot { opacity: 0.35; }
+#rec-live.paused .rec-dot::after { animation: none; opacity: 0; }
 #rec-live.paused .viz { opacity: 0.3; }
 #rec-live.paused #timer { color: var(--text-3); }
 

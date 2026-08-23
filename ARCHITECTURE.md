@@ -154,7 +154,7 @@ unpacked from the asar — nothing can be executed from inside one.
 | Helper | Lines | Answers |
 |---|---:|---|
 | `mac/system-audio.swift` | 339 | What the machine is playing, as 16 kHz mono PCM on stdout (a Core Audio process tap, falling back to ScreenCaptureKit) |
-| `mac/mic-probe.swift` | 58 | Which processes hold the microphone right now, as bundle ids (CoreAudio) |
+| `mac/mic-probe.swift` | 58 | Which processes hold the microphone right now, as bundle ids (CoreAudio); with `--watch` it stays resident and prints a line per change instead of being spawned every five seconds |
 | `mac/speaker-diarize/` | SwiftPM executable | Distinct remote voices and their time ranges, using FluidAudio's offline Core ML pipeline on macOS 14+ |
 
 The capture helpers are deliberately dumb: they answer one question on stdout and exit codes
@@ -326,7 +326,7 @@ that actually changed, try again.
 
 ## 5. IPC surface
 
-86 channels, all declared in `preload.js` — that file is the complete list of
+87 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
@@ -346,10 +346,10 @@ the library (`refresh-library`, `list-actions`), retrieval
 (`live-start`, `live-stop`), bubble (`bubble-show`, `bubble-hide`),
 `open-external`.
 
-**Fire-and-forget (12)** — `recording-chunk` (the audio itself), `set-theme`,
+**Fire-and-forget (13)** — `recording-chunk` (the audio itself), `set-theme`,
 `get-theme` (the one synchronous one: the theme has to be right on the first
 frame, so there is no round trip to wait for), `recording-state`,
-`autodetect-set`, `mark-shortcut`, `sys-gain` (macOS: the system meter's slider,
+`autodetect-set`, `spoken-language-set` (the language Whisper is told to expect; `auto` detects on every pass), `mark-shortcut`, `sys-gain` (macOS: the system meter's slider,
 since the mixing it controls happens in main), and five bubble messages.
 
 **Main → renderer (17)** — `ui-command` (a menu accelerator naming what it wants: search, export, rename…; the page decides what that means right now), `transcribe-progress`, `notes-progress` (partial
@@ -405,14 +405,25 @@ speech sample and stores the result. Two anchors, both measured on the same PC:
 | Tier | Threshold | Live | Final | Measured lag |
 |---|---|---|---|---|
 | `fast` | ≤ 250 ms | `small`, every 0.7 s | `small` | 2.6 s median, 4.8 s worst |
+| `balanced` | ≤ 250 ms on Apple Silicon | `small`, every 1.5 s | `small` | ~3.5 s median |
 | `steady` | ≤ 1200 ms | `base`, every 2 s | `small` | 4.4 s median, 5.6 s worst |
 | `modest` | slower | none | `small` | — |
 
 The lag figures come from replaying a minute of a real, noisy meeting at
 wall-clock speed and measuring the gap between what was said and what was
 confirmed (`build/tune-live.js`). If a machine turns out slower than it measured
-— battery, a busy CPU, another app on the GPU — the live loop stretches its own
-cadence rather than falling further behind every minute.
+— a busy CPU, another app on the GPU — the live loop stretches its own cadence
+rather than falling further behind every minute.
+
+`balanced` is `fast` for laptops. An M4 Pro measures ~100 ms, well inside
+`fast`, and that is the problem: a `small` pass over the 12 s window costs
+~300 ms there, so at 700 ms the GPU was busy 40% of the meeting, the fans came
+on and a call had to be stopped because the machine got hot. The loop's own
+self-defence never triggered — passes were not late, just relentless. So Apple
+Silicon runs the same model and window every 1.5 s (`engine.forThisMachine`,
+applied to stored settings too, since earlier versions wrote `fast`), and on
+battery `main.js` doubles whatever cadence the tier asks for. The head start
+still runs: both passes want `small`.
 
 **The calibration sample has to be real speech.** A synthetic tone measures
 25 ms where actual talking measures 185, because most of a pass is the decoder

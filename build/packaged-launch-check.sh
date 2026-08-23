@@ -15,6 +15,22 @@ APP="${1:?path to the packaged .app}"
 BIN="$APP/Contents/MacOS/$(defaults read "$(cd "$APP" && pwd)/Contents/Info.plist" CFBundleExecutable)"
 test -x "$BIN" || { echo "no executable at $BIN" >&2; exit 1; }
 
+# The microphone under hardened runtime is an entitlement, not a permission:
+# without com.apple.security.device.audio-input macOS refuses it silently — no
+# prompt, no error the app can see — and the meeting is recorded one-sided.
+# 0.1.10 shipped exactly that way and nothing noticed, because a launch check
+# cannot hear. Every bundle that touches audio has to carry it: the app and
+# the helpers Chromium runs its audio service in.
+for BUNDLE in "$APP" "$APP"/Contents/Frameworks/*Helper*.app; do
+  if ! codesign -d --entitlements :- "$BUNDLE" 2>/dev/null \
+      | grep -q "com.apple.security.device.audio-input"; then
+    echo "FAIL  $(basename "$BUNDLE") is signed without the microphone entitlement" >&2
+    echo "      (com.apple.security.device.audio-input — see build/entitlements.mac*.plist)" >&2
+    exit 1
+  fi
+done
+echo "ok    the app and its helpers carry the microphone entitlement"
+
 SCRATCH="$(mktemp -d)"
 LOG="$SCRATCH/launch.log"
 YAPPER_HOME="$SCRATCH" "$BIN" >"$LOG" 2>&1 &

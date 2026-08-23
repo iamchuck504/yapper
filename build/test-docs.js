@@ -77,6 +77,13 @@ for (const tier of Object.keys(engine.TIERS)) {
 const fast = engine.tierConfig('fast');
 check('the fast tier cadence agrees',
   doc.includes(`every ${fast.cadenceMs / 1000} s`), `the code says ${fast.cadenceMs} ms`);
+const balanced = engine.tierConfig('balanced');
+check('the balanced tier cadence agrees',
+  doc.includes(`every ${balanced.cadenceMs / 1000} s`), `the code says ${balanced.cadenceMs} ms`);
+check('balanced is fast at a sustainable pace, not a different promise',
+  balanced.liveModel === fast.liveModel && balanced.finalModel === fast.finalModel
+  && balanced.windowSec === fast.windowSec && balanced.cadenceMs > fast.cadenceMs,
+  'the two tiers drifted apart');
 check('what the document says about medium matches the code',
   /`small` is used everywhere/.test(doc)
   && !Object.values(engine.TIERS).some(t => t.liveModel === 'medium' || t.finalModel === 'medium'),

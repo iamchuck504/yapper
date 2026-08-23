@@ -1,5 +1,5 @@
 ﻿const { app, BrowserWindow, ipcMain: electronIpcMain, session, desktopCapturer, shell, dialog, screen,
-  Notification, globalShortcut, safeStorage, powerSaveBlocker,
+  Notification, globalShortcut, safeStorage, powerSaveBlocker, powerMonitor,
   Tray, Menu, nativeImage, systemPreferences, nativeTheme, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -299,23 +299,35 @@ function destroyBubble() {
 
 // The pill opens on hover, but hover cannot be seen from inside the page: the
 // pill is one big drag region so it can be moved, and Electron never delivers
-// mouse events over a drag region on Windows. So the cursor is watched from
-// here instead, against the window's bounds, and enter/leave is pushed through
-// the same bubble-state channel as everything else.
+// mouse events over a drag region — on Windows, and on macOS too (checked on
+// macOS 27 / Electron 39 with a real cursor: no mouseenter, no mousemove, no
+// mouseleave over a drag region; all three over the same window without it).
+// So the cursor is watched from here instead, against the window's bounds, and
+// enter/leave is pushed through the same bubble-state channel as everything
+// else. The bounds are cached — they only change when the window moves or is
+// resized — so each tick is one window-server call, not two.
 //
 // The expanded window is anchored at the same bottom-right corner and is
 // strictly larger, so opening always keeps the cursor inside — hover cannot
 // flap open/closed on its own.
 let bubbleHoverTimer = null;
 let bubbleHovered = false;
+let bubbleBounds = null;
 
 function startBubbleHoverWatch() {
   if (bubbleHoverTimer) return;
   bubbleHovered = false;
+  bubbleBounds = null;
+  const remember = () => { if (bubble && !bubble.isDestroyed()) bubbleBounds = bubble.getBounds(); };
+  if (bubble && !bubble.isDestroyed()) {
+    bubble.on('move', remember);
+    bubble.on('resize', remember);
+  }
   bubbleHoverTimer = setInterval(() => {
     if (!bubble || bubble.isDestroyed()) return;
     const p = screen.getCursorScreenPoint();
-    const b = bubble.getBounds();
+    if (!bubbleBounds) remember();
+    const b = bubbleBounds;
     const inside = p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
     if (inside !== bubbleHovered) {
       bubbleHovered = inside;
@@ -328,6 +340,7 @@ function stopBubbleHoverWatch() {
   if (bubbleHoverTimer) clearInterval(bubbleHoverTimer);
   bubbleHoverTimer = null;
   bubbleHovered = false;
+  bubbleBounds = null;
 }
 
 // The bubble is frameless, so Windows will happily let it be dragged off the
@@ -1409,7 +1422,7 @@ function startHeadStart(folder, participants) {
   }
   const opts = {
     model: tier.finalModel,
-    language: process.env.YAPPER_LANG || 'auto',
+    language: spokenLanguageNow(),
     prompt: transcriptionHint(participants)
   };
   // When the recording keeps per-side tracks, the head start works on those —
@@ -1460,6 +1473,12 @@ async function headStartFor(folder) {
     const snap = run.snapshot();
     if (snap.at > 0) out[key] = snap;
   }
+  // A meeting with no far side drops its tracks and transcribes the mix; the
+  // head start only ever ran on the tracks, so it used to be thrown away for
+  // every solo memo and the whole file decoded again. The mix is byte-for-byte
+  // the microphone track then (mixPcm adds zeros; sysSignal would be set by
+  // anything else), so the microphone's windows are the mix's windows.
+  if (headStart.micIsMixed && out.mic && !out.mixed) out.mixed = out.mic;
   return out;
 }
 
@@ -1555,7 +1574,12 @@ function sendSysWave(pcm) {
     const v = pcm.readInt16LE(Math.min(samples - 1, Math.floor(i * stride)) * 2);
     out[i] = 128 + Math.max(-128, Math.min(127, Math.round(v / 256)));
   }
-  broadcast('system-wave', out);
+  // Only the main window draws this; the bubble has no listener for it, and a
+  // window that is minimized or covered is not drawing either. The renderer's
+  // ring refills within a second of the window coming back.
+  if (win && !win.isDestroyed() && win.isVisible() && !win.isMinimized()) {
+    win.webContents.send('system-wave', out);
+  }
 }
 
 ipcMain.on('sys-gain', (_e, g) => {
@@ -1613,6 +1637,9 @@ ipcMain.handle('recording-finish', async (_e, title, markers) => {
     for (const f of [MIC_TRACK, SYS_TRACK]) {
       try { fs.unlinkSync(resolveDirectFile(folder, path.join(folder, f))); } catch { /* already gone */ }
     }
+    // The head start worked on the microphone track, which is what the mix
+    // is when the other side never made a sound — so its windows still count.
+    if (headStart && headStart.folder === folder) headStart.micIsMixed = true;
   }
   title = typeof title === 'string' ? title.trim().slice(0, 500) : '';
   if (title) writeMeetingText(folder, 'title.txt', title, { maxBytes: 1000 });
@@ -1798,7 +1825,7 @@ ipcMain.handle('transcribe', async (_e, folder) => {
 
   const opts = {
     model: tier.finalModel,
-    language: process.env.YAPPER_LANG || 'auto',
+    language: spokenLanguageNow(),
     prompt: transcriptionHint(readParticipants(folder))
   };
   // Whatever was transcribed while the meeting ran, per track. Its windows are
@@ -1819,22 +1846,33 @@ ipcMain.handle('transcribe', async (_e, folder) => {
       // helper is optional and its failure never costs the transcript.
       let waitingForSpeakers = false;
       let diarizationDone = false;
-      const diarizationRun = speakerDiarizer.diarizeFile(helperPath('speaker-diarize'), sysWav, {
+      const diarizationRaw = speakerDiarizer.diarizeFile(helperPath('speaker-diarize'), sysWav, {
         onProgress: (done, total) => {
           if (waitingForSpeakers && total > 0) {
             send(`\rIdentifying remote speakers locally… ${Math.round(done / total * 100)}%`);
           }
         }
-      }).then(result => { diarizationDone = true; return result; });
+      });
+      const diarizationRun = diarizationRaw.then(result => { diarizationDone = true; return result; });
       const micLines = await engine.transcribeFile(micWav,
         { ...opts, from: head && head.mic, onProgress: progress(0, 50) });
       const sysLines = await engine.transcribeFile(sysWav,
         { ...opts, from: head && head.sys, onProgress: progress(50, 50) });
-      waitingForSpeakers = true;
-      if (!diarizationDone) send('\rIdentifying remote speakers locally…');
-      diarization = await diarizationRun;
-      const remote = speakerDiarizer.labelRemoteLines(sysLines, diarization.segments);
-      lines = engine.mergeSpeakerTracks(micLines, remote.lines);
+      if (!sysLines.length) {
+        // Nobody spoke on the far side — a notification ping is enough to keep
+        // the track — so there is nobody to tell apart: labelling an empty list
+        // gives back an empty list, whatever the helper finds. It is still
+        // chewing the whole file on the Neural Engine; waiting on it would be a
+        // progress bar for nothing.
+        diarizationRaw.cancel();
+        lines = micLines;
+      } else {
+        waitingForSpeakers = true;
+        if (!diarizationDone) send('\rIdentifying remote speakers locally…');
+        diarization = await diarizationRun;
+        const remote = speakerDiarizer.labelRemoteLines(sysLines, diarization.segments);
+        lines = engine.mergeSpeakerTracks(micLines, remote.lines);
+      }
     } else {
       lines = await engine.transcribeFile(wav,
         { ...opts, from: head && head.mixed, onProgress: progress(0, 100) });
@@ -2299,22 +2337,33 @@ async function ensureTier() {
   // server is called dead, so it has to survive a restart — otherwise every
   // launch runs on the loose fallback deadline until something recalibrates.
   if (s.tierMs) engine.setPace(s.tierMs);
-  if (s.tier && s.tierFor === flavour) return s.tier;
+  if (s.tier && s.tierFor === flavour) {
+    // A stored `fast` on Apple Silicon predates `balanced`; it is moved over
+    // once, here, so the setting stops saying something this machine should
+    // not run.
+    const tier = engine.forThisMachine(s.tier);
+    if (tier !== s.tier) {
+      console.log(`[engine] stored tier ${s.tier} -> ${tier} on this hardware`);
+      writeSettings({ tier });
+    }
+    return tier;
+  }
   try {
     const res = await engine.calibrate();
-    if (!res) return s.tier || engine.guessTier();
-    console.log(`[engine] calibrated: ${res.msPerPass} ms per pass -> ${res.tier} tier`);
+    if (!res) return engine.forThisMachine(s.tier || engine.guessTier());
+    const tier = engine.forThisMachine(res.tier);
+    console.log(`[engine] calibrated: ${res.msPerPass} ms per pass -> ${tier} tier`);
     // Only the keys this function owns. `s` was read before a calibration that
     // takes seconds — on a CPU-only machine, many seconds — and writing the
     // whole of it here replays every field as it was back then, undoing
     // whatever the user changed while the engine was being measured. That is
     // not hypothetical: test-theme caught a theme picked mid-calibration being
     // reverted, on the first Windows run.
-    writeSettings({ tier: res.tier, tierFor: flavour, tierMs: res.msPerPass });
-    return res.tier;
+    writeSettings({ tier, tierFor: flavour, tierMs: res.msPerPass });
+    return tier;
   } catch (err) {
     console.log('[engine] calibration failed:', err.message);
-    return s.tier || engine.guessTier();
+    return engine.forThisMachine(s.tier || engine.guessTier());
   }
 }
 
@@ -3167,12 +3216,55 @@ function probePath() {
   return helperPath('mic-probe');
 }
 
+// The probe stays resident while auto-detection is on (`--watch`): CoreAudio
+// tells it about changes, it prints a line per change, and the poll below
+// reads the latest line instead of launching a process every five seconds.
+// The one-shot spawn stays as the fallback for a watcher that died or has not
+// answered yet, so detection never depends on the resident one being healthy.
+let micWatch = null;   // { proc, users, buf }
+
+function startMicWatch() {
+  if (micWatch || process.platform !== 'darwin') return;
+  const probe = probePath();
+  if (!fs.existsSync(probe)) return;
+  let p;
+  try {
+    p = spawn(probe, ['--watch'], { stdio: ['pipe', 'pipe', 'ignore'] });
+  } catch {
+    return;
+  }
+  const w = { proc: p, users: null, buf: '' };
+  micWatch = w;
+  p.stdout.on('data', d => {
+    w.buf += d.toString('utf8');
+    let nl;
+    while ((nl = w.buf.indexOf('\n')) >= 0) {
+      const line = w.buf.slice(0, nl).trim();
+      w.buf = w.buf.slice(nl + 1);
+      w.users = line === '?' ? null
+        : [...new Set(line.split('\t').map(s => s.trim()).filter(Boolean))];
+    }
+  });
+  const gone = () => { if (micWatch === w) micWatch = null; };
+  p.on('error', gone);
+  p.on('close', gone);
+}
+
+function stopMicWatch() {
+  const w = micWatch;
+  micWatch = null;
+  if (!w) return;
+  try { w.proc.stdin.end(); } catch { /* already gone */ }
+  setTimeout(() => { try { w.proc.kill(); } catch { /* already gone */ } }, 1000).unref();
+}
+
 /**
  * Bundle ids capturing audio right now, or null when the question could not be
  * asked. null is not "nobody": a probe that fails must never be read as the
  * meeting having ended.
  */
 function micUsersMac() {
+  if (micWatch && micWatch.users) return Promise.resolve(micWatch.users.slice());
   return new Promise(resolve => {
     const probe = probePath();
     if (!fs.existsSync(probe)) return resolve(null);
@@ -3278,6 +3370,7 @@ function startMeetingWatch() {
     return;
   }
   meetingCurrent = null;
+  startMicWatch();
   meetingTimer = setInterval(pollMeetings, 5000);
 }
 
@@ -3285,7 +3378,28 @@ function stopMeetingWatch() {
   if (meetingTimer) clearInterval(meetingTimer);
   meetingTimer = null;
   meetingCurrent = null;
+  stopMicWatch();
 }
+
+// The language spoken in meetings. `auto` asks Whisper to detect it on every
+// request — an extra encoder pass, ~80 ms on an M4 Pro, on every live window
+// and every head-start window. A fixed language skips that; it is the user's
+// choice because a call that switches languages mid-way wants detection.
+// YAPPER_LANG still wins, for the harnesses that pin it.
+let spokenLanguage = null;   // read from settings on first use
+
+function spokenLanguageNow() {
+  if (process.env.YAPPER_LANG) return process.env.YAPPER_LANG;
+  if (spokenLanguage === null) spokenLanguage = readSettings().spokenLanguage || 'auto';
+  return spokenLanguage;
+}
+
+ipcMain.on('spoken-language-set', (_e, lang) => {
+  const v = typeof lang === 'string' && /^[a-z]{2,3}$/.test(lang) ? lang : 'auto';
+  if (v === spokenLanguage) return;
+  spokenLanguage = v;
+  writeSettings({ spokenLanguage: v });
+});
 
 ipcMain.on('autodetect-set', (_e, enabled) => {
   autoDetectOn = !!enabled;
@@ -3356,13 +3470,25 @@ ipcMain.handle('live-start', async (_e, participants) => {
     console.log(`[live] ${tier.liveModel} not downloaded yet; using ${liveModel}`);
   }
 
+  // On battery, half as many passes. The live loop already stretches its own
+  // cadence when passes run late, but on a laptop they do not run late — the
+  // GPU is fast and simply drains the battery at full pace. The text lands a
+  // little later; the meeting lasts longer than the charge otherwise would.
+  let cadenceMs = tier.cadenceMs;
+  let onBattery = false;
+  try { onBattery = powerMonitor.isOnBatteryPower(); } catch { /* not on every platform */ }
+  if (onBattery && cadenceMs) {
+    cadenceMs *= 2;
+    console.log(`[live] on battery: one pass every ${cadenceMs} ms instead of ${tier.cadenceMs}`);
+  }
+
   try {
     const ok = await live.start({
       model: liveModel,
-      cadenceMs: tier.cadenceMs,
+      cadenceMs,
       windowSec: tier.windowSec,
       maxHoldSec: tier.maxHoldSec,
-      language: process.env.YAPPER_LANG || 'auto',
+      language: spokenLanguageNow(),
       prompt: transcriptionHint(participants),
       onLine: obj => broadcast('live-transcript', JSON.stringify(obj))
     });

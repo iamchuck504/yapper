@@ -43,11 +43,17 @@ function parseHelperOutput(text) {
 function diarizeFile(helper, audioFile, options = {}) {
   if (process.platform !== 'darwin' || !helper || !audioFile
       || !fs.existsSync(helper) || !fs.existsSync(audioFile)) {
-    return Promise.resolve({ segments: [], available: false, reason: 'unavailable' });
+    const none = Promise.resolve({ segments: [], available: false, reason: 'unavailable' });
+    none.cancel = () => { };
+    return none;
   }
 
   const timeoutMs = Math.max(1000, Number(options.timeoutMs) || DEFAULT_TIMEOUT_MS);
-  return new Promise(resolve => {
+  // The promise carries a `cancel()`: the caller may learn, once the far side
+  // is transcribed, that there is nothing to label — and the helper should
+  // stop chewing the file then rather than finish for nobody.
+  let cancel = () => { };
+  const promise = new Promise(resolve => {
     let proc;
     let stdout = Buffer.alloc(0);
     let stderr = '';
@@ -65,6 +71,11 @@ function diarizeFile(helper, audioFile, options = {}) {
     } catch (err) {
       return finish({ segments: [], available: false, reason: err.message });
     }
+    cancel = () => {
+      if (settled) return;
+      try { proc.kill('SIGTERM'); } catch { /* already gone */ }
+      finish({ segments: [], available: true, reason: 'not needed' });
+    };
 
     proc.stdout.on('data', chunk => {
       if (stdout.length + chunk.length > MAX_HELPER_OUTPUT) {
@@ -97,6 +108,8 @@ function diarizeFile(helper, audioFile, options = {}) {
     }, timeoutMs);
     timer.unref();
   });
+  promise.cancel = () => cancel();
+  return promise;
 }
 
 function displaySegments(segments) {

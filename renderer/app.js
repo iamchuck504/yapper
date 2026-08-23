@@ -179,8 +179,11 @@ let analysers = { sys: null, mic: null };
 let liveActive = false;
 let liveParagraphs = []; // stable text, split into paragraphs on long pauses
 let liveTentative = '';  // unstable tail, still being refined
+let liveDirty = false;   // text arrived while the transcript was not on screen
 let timerInterval = null;
 let levelRaf = null;
+let levelTimer = null;     // the pause between meter frames
+let micError = null;       // why the last microphone acquisition failed, if it did
 let currentFolder = null;
 let currentNotesMd = '';
 let resultDateStr = '';
@@ -190,6 +193,8 @@ let noteStreamFolder = '';
 let noteStreamStartedAt = 0;
 let noteStreamFirstTextMs = null;
 let noteStreamFrame = 0;
+let noteStreamTimer = 0;     // the pause between streaming paints
+let noteStreamPaintAt = 0;   // when the draft was last painted
 let noteStreamPending = null;
 let noteStreamPreviousMd = '';
 
@@ -411,6 +416,19 @@ autoDetectToggle.addEventListener('change', () => {
   autoDetectEnabled = autoDetectToggle.checked;
   localStorage.setItem('yapper-autodetect', autoDetectEnabled ? 'on' : 'off');
   window.yapper.setAutoDetect(autoDetectEnabled);
+});
+
+// The language Whisper is told to expect. Lives in the main process (it is
+// the transcriber's setting) and is pushed there the same way auto-detect is.
+const spokenLangSelect = $('spoken-lang');
+let spokenLang = localStorage.getItem('yapper-spoken-lang') || 'auto';
+if (![...spokenLangSelect.options].some(o => o.value === spokenLang)) spokenLang = 'auto';
+spokenLangSelect.value = spokenLang;
+window.yapper.setSpokenLanguage(spokenLang);
+spokenLangSelect.addEventListener('change', () => {
+  spokenLang = spokenLangSelect.value;
+  localStorage.setItem('yapper-spoken-lang', spokenLang);
+  window.yapper.setSpokenLanguage(spokenLang);
 });
 
 // ---------- what happens to the audio ----------
@@ -706,6 +724,8 @@ function showView(name) {
   $('btn-home').classList.toggle('active', name === 'home');
   $('btn-settings').classList.toggle('active', name === 'settings');
   hostOptionsCard(name === 'settings');
+  if (name === 'record' && liveDirty) renderLiveTranscript();
+  if (name === 'meeting' && noteStreamPending) scheduleStreamingPaint();
 }
 
 $('btn-settings').addEventListener('click', () => {
@@ -946,11 +966,28 @@ function splitStreamingDraft(raw) {
   return { title: '', summary: text };
 }
 
+// The draft used to be re-parsed and rebuilt on every animation frame while
+// tokens streamed in — sixty rebuilds a second of a document that grows to
+// several kilobytes, for the whole generation. Ten a second reads the same;
+// and a meeting view that is not on screen is painted once, when it is.
+const NOTE_PAINT_MS = 100;
+
+function scheduleStreamingPaint() {
+  if (noteStreamFrame || noteStreamTimer) return;
+  const wait = Math.max(0, NOTE_PAINT_MS - (performance.now() - noteStreamPaintAt));
+  noteStreamTimer = setTimeout(() => {
+    noteStreamTimer = 0;
+    noteStreamFrame = requestAnimationFrame(paintStreamingDraft);
+  }, wait);
+}
+
 function paintStreamingDraft() {
   noteStreamFrame = 0;
+  if (!noteStreamPending || !noteStreamFolder) { noteStreamPending = null; return; }
+  if (viewMeeting.classList.contains('hidden')) return;   // kept pending for showView
   const draft = noteStreamPending;
   noteStreamPending = null;
-  if (!draft || !noteStreamFolder) return;
+  noteStreamPaintAt = performance.now();
   if (draft.title) resultTitle.textContent = draft.title;
   if (draft.summary.trim()) renderNotes(draft.summary, false);
 }
@@ -975,7 +1012,9 @@ function beginNotesStream(folder, title, transcript, participants, keepNotes = f
 
 function finishNotesStream(timing = null) {
   if (noteStreamFrame) cancelAnimationFrame(noteStreamFrame);
+  if (noteStreamTimer) clearTimeout(noteStreamTimer);
   noteStreamFrame = 0;
+  noteStreamTimer = 0;
   noteStreamPending = null;
   noteStreamFolder = '';
   noteStreamPreviousMd = '';
@@ -986,7 +1025,9 @@ function finishNotesStream(timing = null) {
 
 function failNotesStream(message, retry = false) {
   if (noteStreamFrame) cancelAnimationFrame(noteStreamFrame);
+  if (noteStreamTimer) clearTimeout(noteStreamTimer);
   noteStreamFrame = 0;
+  noteStreamTimer = 0;
   noteStreamPending = null;
   noteStreamFolder = '';
   const previous = noteStreamPreviousMd;
@@ -1049,8 +1090,12 @@ window.yapper.onNotesProgress(progress => {
       ? progress.firstTextMs : performance.now() - noteStreamStartedAt;
   }
   noteStreamPending = splitStreamingDraft(progress.text);
-  if (!noteStreamFrame) noteStreamFrame = requestAnimationFrame(paintStreamingDraft);
-  setStatus(regenStatusEl, `Writing notes… first text in ${seconds(noteStreamFirstTextMs)}`);
+  scheduleStreamingPaint();
+  // The same string after the first chunk; setStatus forces a layout each time.
+  const status = `Writing notes… first text in ${seconds(noteStreamFirstTextMs)}`;
+  if (regenStatusEl.textContent !== status || regenStatusEl.classList.contains('hidden')) {
+    setStatus(regenStatusEl, status);
+  }
 });
 
 // The notes may describe everybody's work. Nothing enters the personal list
@@ -1167,6 +1212,7 @@ async function applyMicSelection() {
   for (const key of [...micNodes.keys()]) {
     if (!desired.includes(key)) dropMic(key);
   }
+  let failed = null;
   for (const key of desired) {
     if (micNodes.has(key)) continue;
     try {
@@ -1175,8 +1221,34 @@ async function applyMicSelection() {
       node.connect(micBus);
       micStreams.set(key, stream);
       micNodes.set(key, node);
-    } catch { /* device busy/unavailable — skip it */ }
+    } catch (err) {
+      // Device busy or unplugged: skip it, another may work. But remember
+      // why, because one refusal is not like the others — macOS denying the
+      // microphone outright (a missing permission, or a build signed without
+      // the entitlement) leaves the graph running on nothing, and the only
+      // sign used to be a flat meter. 0.1.10 recorded a whole call that way.
+      failed = err;
+    }
   }
+  micError = micNodes.size ? null : failed;
+}
+
+/** What to tell the person when the microphone is silent, given how it failed. */
+function micSilenceMessage(withSys) {
+  if (micError && micError.name === 'NotAllowedError') {
+    return 'macOS is not letting Yapper use the microphone. Allow it under '
+      + 'System Settings → Privacy & Security → Microphone, then pick the '
+      + 'microphone again in Settings — recording continues meanwhile'
+      + (withSys ? ', with the other side only.' : '.');
+  }
+  if (micError) {
+    return `The microphone could not be opened (${micError.name || 'error'}). `
+      + 'Pick another one in Settings — recording continues meanwhile'
+      + (withSys ? ', with the other side only.' : '.');
+  }
+  return withSys
+    ? 'The microphone has captured only silence so far. If it is a wireless headset, check that it is on.'
+    : 'Nothing but silence has been captured so far — check that the headset or microphone is on.';
 }
 
 micSelect.addEventListener('change', async () => {
@@ -1347,11 +1419,24 @@ async function stopLivePreview() {
   try { await window.yapper.liveStop(); } catch { /* ignore */ }
 }
 
+function liveTranscriptOnScreen() {
+  return liveTranscriptEl.checkVisibility
+    ? liveTranscriptEl.checkVisibility() : liveTranscriptEl.offsetParent !== null;
+}
+
 function renderLiveTranscript() {
+  if (!liveParagraphs.length && !liveTentative) {
+    liveTranscriptEl.innerHTML = '';   // stays :empty so the hint shows
+    liveDirty = false;
+    return;
+  }
+  // Rebuilding hundreds of paragraphs for a panel that is collapsed or on
+  // another view is work nobody sees. It is done once, when the panel is.
+  if (!liveTranscriptOnScreen()) { liveDirty = true; return; }
+  liveDirty = false;
   const stick = liveTranscriptEl.scrollHeight - liveTranscriptEl.scrollTop
     - liveTranscriptEl.clientHeight < 40;
   liveTranscriptEl.innerHTML = '';
-  if (!liveParagraphs.length && !liveTentative) return;   // stays :empty so the hint shows
 
   liveParagraphs.forEach((para, i) => {
     const p = document.createElement('p');
@@ -1382,6 +1467,9 @@ window.yapper.onLiveTranscript(line => {
   let msg;
   try { msg = JSON.parse(line); } catch { return; }
   if (msg.status || msg.error) return;
+  // A pass that confirmed nothing and changed nothing — most passes over a
+  // pause — used to rebuild the whole transcript anyway.
+  if (!msg.commit && (msg.tentative || '') === liveTentative) return;
   if (msg.commit) {
     if (msg.gap || !liveParagraphs.length) liveParagraphs.push(msg.commit);
     else liveParagraphs[liveParagraphs.length - 1] += ' ' + msg.commit;
@@ -1394,6 +1482,7 @@ window.yapper.onLiveTranscript(line => {
 $('live-head').addEventListener('click', () => {
   const collapsed = liveWrap.classList.toggle('collapsed');
   localStorage.setItem('yapper-live-collapsed', collapsed ? 'yes' : 'no');
+  if (!collapsed && liveDirty) renderLiveTranscript();
 });
 if (localStorage.getItem('yapper-live-collapsed') === 'yes') liveWrap.classList.add('collapsed');
 
@@ -1458,6 +1547,9 @@ function drawWave(m) {
 
 // About 6% of full scale: below this the input is silence or its noise floor.
 const VIZ_FLOOR = 8;
+
+// Meters redraw this often. 30 fps looks like 120 and costs a quarter of it.
+const METER_FRAME_MS = 1000 / 30;
 
 /** Peak deviation in a viz's current buffer, 0..1 — what the bubble's bars show. */
 function levelOf(m) {
@@ -1642,6 +1734,8 @@ async function startRecording() {
     await applyMicSelection();
 
     let levelSentAt = 0;
+    let levelSent = -1;       // the last level the bubble was given
+    let levelRepeats = 0;     // how many times in a row it was the same
     // A device can exist and still deliver pure digital zeros — a wireless
     // headset that fell asleep, a hardware mute. The graph runs, the waveform
     // draws a flat line, and two hours later the recording is silence. A live
@@ -1651,18 +1745,32 @@ async function startRecording() {
     let micPeak = 0;
     let silenceWarned = false;
     const captureStartedAt = performance.now();
+    // The meters used to redraw on every animation frame, which on a ProMotion
+    // display is 120 times a second: two canvases, each frame, for the whole
+    // meeting. That alone held the GPU process at a third of a core and the
+    // renderer at a quarter. Thirty frames a second reads exactly the same,
+    // and a meter nobody can see — the panel closed, the window covered — is
+    // not painted at all. The samples are still read every frame, because the
+    // silence check and the bubble's bars come from them.
     const updateLevels = () => {
+      levelRaf = null;
+      const frameAt = performance.now();
+      const visible = !document.hidden;
       for (const m of [analysers.sys, analysers.mic]) {
-        if (m) drawWave(m);
+        if (!m) continue;
+        const shown = m.canvas.checkVisibility
+          ? m.canvas.checkVisibility() : m.canvas.offsetParent !== null;
+        if (visible && shown) drawWave(m);
+        else m.analyser.getByteTimeDomainData(m.buf);
       }
       const micNow = levelOf(analysers.mic);
       if (micNow > micPeak) micPeak = micNow;
-      if (!silenceWarned && micPeak === 0 && performance.now() - captureStartedAt > 6000) {
+      // A refusal is said at once; plain silence gets six seconds to be a
+      // headset waking up.
+      if (!silenceWarned && micPeak === 0
+          && (micError || performance.now() - captureStartedAt > 6000)) {
         silenceWarned = true;
-        setStatus(statusEl, analysers.sys
-          ? 'The microphone has captured only silence so far. If it is a wireless headset, check that it is on.'
-          : 'Nothing but silence has been captured so far — check that the headset or microphone is on.',
-          !analysers.sys);
+        setStatus(statusEl, micSilenceMessage(!!analysers.sys), !analysers.sys || !!micError);
       }
       if (silenceWarned && micPeak > 0) {
         silenceWarned = false;
@@ -1674,12 +1782,22 @@ async function startRecording() {
         const now = performance.now();
         if (now - levelSentAt > 110) {
           levelSentAt = now;
-          window.yapper.bubbleState({
-            level: Math.max(levelOf(analysers.sys), levelOf(analysers.mic))
-          });
+          const level = Math.max(levelOf(analysers.sys), levelOf(analysers.mic));
+          // The bubble's bars trail the last few levels, so an unchanged level
+          // is sent a few more times to let them settle — and then not at all.
+          // Nine identical messages a second through a silence kept the bubble
+          // re-compositing for nothing.
+          if (Math.abs(level - levelSent) < 0.01) levelRepeats++;
+          else levelRepeats = 0;
+          levelSent = level;
+          if (levelRepeats <= 4) window.yapper.bubbleState({ level });
         }
       }
-      levelRaf = requestAnimationFrame(updateLevels);
+      const wait = Math.max(0, METER_FRAME_MS - (performance.now() - frameAt));
+      levelTimer = setTimeout(() => {
+        levelTimer = null;
+        levelRaf = requestAnimationFrame(updateLevels);
+      }, wait);
     };
     updateLevels();
 
@@ -1726,11 +1844,16 @@ async function startRecording() {
     btnPause.classList.remove('on');
     btnPause.querySelector('.pause-label').textContent = 'Pause';
 
+    let timerText = '';
     timerInterval = setInterval(() => {
+      // Twice a second so a pause lands within half a second of the button;
+      // the text itself changes once a second, and only then is it written.
       const text = stamp(elapsed());
+      if (text === timerText) return;
+      timerText = text;
       timerEl.textContent = text;
       btnNewLabel.textContent = `Recording — ${text}`;
-      window.yapper.bubbleState({ timer: text });
+      if (bubbleEnabled) window.yapper.bubbleState({ timer: text });
     }, 500);
   } catch (err) {
     await abortRecording(err);
@@ -1740,8 +1863,11 @@ async function startRecording() {
 function cleanupCapture() {
   if (timerInterval) clearInterval(timerInterval);
   if (levelRaf) cancelAnimationFrame(levelRaf);
+  if (levelTimer) clearTimeout(levelTimer);
   timerInterval = null;
   levelRaf = null;
+  levelTimer = null;
+  micError = null;
   window.yapper.setRecordingState(false);
   window.yapper.markShortcut(false);
   window.yapper.bubbleHide();

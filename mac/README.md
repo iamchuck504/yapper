@@ -170,6 +170,15 @@ the ad-hoc signature Electron ships with, so the bundle id and signature
 identity disagreed. Release builds now use the Developer ID identity plus
 hardened runtime and explicit inherited entitlements.
 
+Hardened runtime added a failure of its own: 0.1.10 recorded a whole call
+without the microphone. Under hardened runtime the microphone is an
+*entitlement* (`com.apple.security.device.audio-input`), and the plists only
+carried the two Electron needs to run. macOS refuses the microphone silently in
+that case — no prompt, no error the renderer can tell from an unplugged headset
+— while system audio keeps working, so the transcript comes out one-sided. Both
+plists in `build/` now carry it and `build/packaged-launch-check.sh` refuses a
+package whose app or helpers are signed without it.
+
 ## What has actually run on a Mac
 
 The shakedown happened on 2026-07-30, on an M4 Pro running macOS 27. What was

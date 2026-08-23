@@ -107,6 +107,7 @@ contextBridge.exposeInMainWorld('yapper', {
 
   // meeting auto-detection
   setAutoDetect: enabled => ipcRenderer.send('autodetect-set', enabled),
+  setSpokenLanguage: lang => ipcRenderer.send('spoken-language-set', lang),
   setRecordingState: recording => ipcRenderer.send('recording-state', recording),
   onMeetingDetected: cb => ipcRenderer.on('meeting-detected', (_e, info) => cb(info)),
 

@@ -269,6 +269,19 @@
           <span class="mic-hint">cleans up your mic — adjustable while recording</span>
         </div>
         <div class="opt-row">
+          <span class="opt-label">Spoken language</span>
+          <select id="spoken-lang" title="The language spoken in your meetings">
+            <option value="auto">Detect automatically</option>
+            <option value="en">English</option>
+            <option value="es">Español</option>
+            <option value="pt">Português</option>
+            <option value="fr">Français</option>
+            <option value="de">Deutsch</option>
+            <option value="it">Italiano</option>
+          </select>
+          <span class="mic-hint">a fixed language skips detection on every pass — lighter on the machine; keep auto for calls that switch languages</span>
+        </div>
+        <div class="opt-row">
           <span class="opt-label">Participants</span>
           <input id="participants-rec" class="text-input" type="text" placeholder="Attendee names, comma-separated — improves name spelling &amp; attribution" autocomplete="off" spellcheck="false" />
         </div>

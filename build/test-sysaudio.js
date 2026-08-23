@@ -97,6 +97,17 @@ idle.start().then(started => {
   }
 });
 
+// main.js leans on this: a meeting whose far side never made a sound drops its
+// tracks and transcribes the mix, reusing the head start made on the
+// microphone track — which is only right if mixing digital silence into the
+// microphone changes nothing.
+{
+  const mic = pcm(1, -2, 30000, -30000, 12345, 0);
+  const mixed = mixPcm(mic, Buffer.alloc(mic.length));
+  check('mixing digital silence leaves the microphone byte for byte',
+    mixed.equals(mic) && mixed !== mic, `got ${samplesOf(mixed)}`);
+}
+
 function done() {
   console.log(fails ? `\n${fails} failures` : '\nPASS');
   process.exit(fails ? 1 : 0);

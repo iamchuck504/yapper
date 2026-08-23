@@ -101,6 +101,17 @@ const TIERS = {
     live: true, liveModel: 'small', finalModel: 'small',
     cadenceMs: 700, windowSec: 12, maxHoldSec: 1.5
   },
+  // A laptop's `fast`. Same model, same window, more room between passes. On
+  // an M4 Pro a `small` pass over 12 s costs ~300 ms, so at 700 ms the GPU was
+  // busy 40% of the meeting: the fans came on, the battery menu said the app
+  // was using significant energy, and a call had to be stopped because the
+  // machine got hot. At 1.5 s the confirmed text lands about a second later
+  // and the GPU works a fifth of the time. The head start still runs — the
+  // models agree — and battery power stretches this cadence further (main.js).
+  balanced: {
+    live: true, liveModel: 'small', finalModel: 'small',
+    cadenceMs: 1500, windowSec: 12, maxHoldSec: 2
+  },
   // live works, but it has to breathe: smaller model, longer cadence. Measured
   // on this machine's CPU with the GPU build hidden (i7-12700K): 4.2 s median,
   // 6.3 s worst, and it does not drift further behind as the meeting runs.
@@ -131,8 +142,22 @@ function isAppleSilicon() {
 
 /** A first guess, used before any measurement exists. */
 function guessTier() {
-  if (hasNvidiaGpu() || isAppleSilicon()) return 'fast';
+  if (hasNvidiaGpu()) return 'fast';
+  if (isAppleSilicon()) return 'balanced';
   return os.cpus().length >= 8 ? 'steady' : 'modest';
+}
+
+/**
+ * The tier this machine should actually run, given what it measured or has
+ * stored. The benchmark only says how fast a pass is; it does not know that
+ * the fast machine is a laptop sitting on someone's knees. Apple Silicon
+ * measures well inside `fast` and should not run it: `balanced` is the same
+ * promise at a sustainable pace. Settings written before `balanced` existed
+ * say `fast` for these machines, so this is applied on the way out of
+ * storage as well, not only after a calibration.
+ */
+function forThisMachine(name) {
+  return name === 'fast' && isAppleSilicon() ? 'balanced' : name;
 }
 
 /** The model calibration always measures with, so the numbers are comparable. */
@@ -336,7 +361,12 @@ async function start(model, { threads } = {}) {
     // a request longer than 30 s is decoded in chunks; without this the name
     // biasing would only apply to the first half-minute of each window
     '--carry-initial-prompt',
-    '-sns'                      // drop [BLANK_AUDIO] / [INAUDIBLE] style tokens
+    '-sns',                     // drop [BLANK_AUDIO] / [INAUDIBLE] style tokens
+    // verbose_json otherwise runs a separate language-detection pass on every
+    // request just to fill `language_probabilities`, which nothing here reads.
+    // Measured on an M4 Pro: 84 ms of every live window — a quarter of the
+    // pass at the balanced cadence — and the text comes back byte-identical.
+    '-nlp'
   ];
   if (process.env.YAPPER_WHISPER_ARGS) {
     args.push(...process.env.YAPPER_WHISPER_ARGS.split(' ').filter(Boolean));
@@ -1100,7 +1130,8 @@ function mergeSpeakerTracks(micLines, sysLines) {
 module.exports = {
   platformKey, binDir, serverPath, isInstalled, setHome, setCalibrationWav,
   modelPath, hasModel,
-  TIERS, tierConfig, canGetAhead, guessTier, tierFromBenchmark, hasNvidiaGpu, isAppleSilicon,
+  TIERS, tierConfig, canGetAhead, guessTier, tierFromBenchmark, forThisMachine, hasNvidiaGpu,
+  isAppleSilicon,
   CALIBRATION_MODEL, calibrate,
   start, stop, busy, serialize, tryExclusive, loaded, transcribeWav, transcribeFile,
   deduplicate, undoStutter, deadlineFor, setPace, progressive, isSilentPcm,

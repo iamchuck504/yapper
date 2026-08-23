@@ -39,17 +39,18 @@ Transcription runs on **whisper.cpp** (`whisper-server` on localhost). No Python
 
 On first launch Yapper **measures this machine** instead of guessing from the brand: it runs a few 10 s passes and stores the result in settings.
 
-Anchors measured on the same PC with the calibration sample: RTX 4080 SUPER **75 ms**, i7-12700K CPU-only **736 ms**. On an M4 Pro with the Metal build, **102 ms** — comfortably in `fast`.
+Anchors measured on the same PC with the calibration sample: RTX 4080 SUPER **75 ms**, i7-12700K CPU-only **736 ms**. On an M4 Pro with the Metal build, **102 ms** — comfortably in `fast`, which is exactly why Apple Silicon runs `balanced` instead: a pass costs so little that `fast` would keep the GPU busy 40% of the meeting, and the laptop hot.
 
 | Tier | When | Live | Final | Measured lag |
 |---|---|---|---|---|
 | `fast` | a `base` pass ≤ 250 ms (GPU) | `small`, every 0.7 s | `small` | 2.6 s |
+| `balanced` | the same, on Apple Silicon | `small`, every 1.5 s | `small` | ~3.5 s |
 | `steady` | ≤ 1200 ms | `base`, every 2 s | `small` | 4.4 s |
 | `modest` | slower than that | no live | `small` | — |
 
 **`medium` is used nowhere**, despite transcribing better on paper. Live, its passes are so slow that two consecutive windows stop agreeing and less text gets confirmed. And in the final pass it falls into repetition loops on real meeting audio: on a minute of a noisy huddle it returned *"I'm not asking you to do it. I actually very much"* six times in a row, with and without beam search, where `small` transcribed the same thing cleanly. On clean speech (the JFK sample) both are fine; meetings are not clean speech.
 
-If a machine turns out slower than it measured (battery, busy CPU, another app on the GPU), live **stretches its own cadence** rather than falling further and further behind.
+If a machine turns out slower than it measured (busy CPU, another app on the GPU), live **stretches its own cadence** rather than falling further and further behind. On battery it starts at half the pace to begin with.
 
 ## Who writes the notes
 

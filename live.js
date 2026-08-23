@@ -169,9 +169,27 @@ async function pass(s) {
   if (s.stopped) return;
   const again = () => { if (!s.stopped) s.timer = setTimeout(() => pass(s), s.cadenceMs); };
 
+  // Never decode more than the window. The buffer was only trimmed *after* a
+  // pass, which is fine while audio arrives in real time — but if it piles up,
+  // because a pass was slow or the machine came back from sleep, one pass would
+  // try to decode minutes of audio, take minutes to do it, and fall further
+  // behind while more arrived. The live view is a preview: skipping ahead to the
+  // present beats reading the past. The file on disk still has all of it.
+  //
+  // This sits before every early return below on purpose. It used to sit after
+  // them, so while the server was busy with something else — a "Transcribe
+  // now" on an older meeting, which can run for minutes — nothing trimmed the
+  // buffer, and it grew at 32 KB a second for as long as that lasted.
+  const maxBytes = Math.floor(s.windowSec * BYTES_PER_SEC);
+  if (s.bytes > maxBytes) {
+    const skipped = (s.bytes - maxBytes) / BYTES_PER_SEC;
+    dropFront(s, s.bytes - maxBytes);
+    if (DEBUG) console.log(`[live] backlog: skipped ${skipped.toFixed(1)} s to stop falling further behind`);
+  }
+
   // A full-file transcription — someone hitting "Transcribe now" on an older
   // meeting mid-recording — holds the same single server. Step aside rather
-  // than fight over it: the buffer is capped below, so the wait costs the
+  // than fight over it: the buffer is capped above, so the wait costs the
   // skipped seconds and nothing else.
   if (engine.busy()) return again();
 
@@ -187,19 +205,6 @@ async function pass(s) {
   }
 
   if (s.bytes < MIN_AUDIO_SEC * BYTES_PER_SEC) return again();
-
-  // Never decode more than the window. The buffer was only trimmed *after* a
-  // pass, which is fine while audio arrives in real time — but if it piles up,
-  // because a pass was slow or the machine came back from sleep, one pass would
-  // try to decode minutes of audio, take minutes to do it, and fall further
-  // behind while more arrived. The live view is a preview: skipping ahead to the
-  // present beats reading the past. The file on disk still has all of it.
-  const maxBytes = Math.floor(s.windowSec * BYTES_PER_SEC);
-  if (s.bytes > maxBytes) {
-    const skipped = (s.bytes - maxBytes) / BYTES_PER_SEC;
-    dropFront(s, s.bytes - maxBytes);
-    if (DEBUG) console.log(`[live] backlog: skipped ${skipped.toFixed(1)} s to stop falling further behind`);
-  }
 
   const pcm = Buffer.concat(s.chunks, s.bytes);
 
