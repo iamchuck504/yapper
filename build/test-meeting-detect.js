@@ -75,6 +75,9 @@ check('a failed probe is not mistaken for silence', /users === null/.test(poll),
   'null would be treated as an empty list and cut the recording');
 check('the match comes from the module, not a loose map',
   /matchMeetingApp\(users\)/.test(poll), 'main.js went back to doing it on its own');
+check('a recording with no meeting app in it is never told the meeting ended',
+  /meetingSeenWhileRecording/.test(poll) && /else if \(meetingSeenWhileRecording\)/.test(poll),
+  'a memo with no call running would be stopped on its own after 70 s');
 
 // ---- the probe itself, where there is one ----
 const probe = path.join(__dirname, 'mic-probe');

@@ -3292,6 +3292,12 @@ let autoDetectOn = false;
 let rendererRecording = false;
 
 let meetingGoneStreak = 0;
+// Whether a meeting app has held the microphone at any point during the
+// current recording. "The meeting app let go" only means something if there
+// was one: without this, a memo recorded with no call running — a test with a
+// YouTube video playing, say — got "Stopping on its own in 60 s" after ten
+// seconds and was cut off at 73 s, twice in one evening.
+let meetingSeenWhileRecording = false;
 
 async function pollMeetings() {
   if (process.platform !== 'win32' && process.platform !== 'darwin') return;
@@ -3304,9 +3310,14 @@ async function pollMeetings() {
   // While recording, watch for the opposite signal: the meeting app letting go
   // of the microphone. Two clear polls (~10 s) avoids reacting to a blip.
   if (rendererRecording) {
-    meetingGoneStreak = hit ? 0 : meetingGoneStreak + 1;
-    if (meetingGoneStreak === 2 && win && !win.isDestroyed()) {
-      win.webContents.send('meeting-ended');
+    if (hit) {
+      meetingSeenWhileRecording = true;
+      meetingGoneStreak = 0;
+    } else if (meetingSeenWhileRecording) {
+      meetingGoneStreak += 1;
+      if (meetingGoneStreak === 2 && win && !win.isDestroyed()) {
+        win.webContents.send('meeting-ended');
+      }
     }
     return;
   }
@@ -3417,6 +3428,9 @@ ipcMain.on('recording-state', (_e, recording) => {
   refreshTray();               // the menu bar says start or stop, never both
   refreshAppMenu();            // and so does File
   meetingGoneStreak = 0;
+  // A recording started from the detection prompt already knows its meeting
+  // app; one started by hand learns of it from the next poll, if there is one.
+  meetingSeenWhileRecording = rendererRecording && !!meetingCurrent;
   // once a recording ends, allow the same app to trigger a fresh prompt later
   if (!rendererRecording) meetingCurrent = null;
 });

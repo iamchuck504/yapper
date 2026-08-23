@@ -179,6 +179,22 @@ that case — no prompt, no error the renderer can tell from an unplugged headse
 plists in `build/` now carry it and `build/packaged-launch-check.sh` refuses a
 package whose app or helpers are signed without it.
 
+The same re-signing broke system audio the other way round, and more quietly.
+Before the entitlement, the Core Audio process tap could not be created at all
+and the helper fell back to ScreenCaptureKit, whose Screen Recording permission
+was already granted — so it worked. With the entitlement the tap *is* created,
+but its own permission (**System Audio Recording Only**, under Privacy &
+Security → Screen & System Audio Recording) had never been granted to the new
+code identity, and macOS did not prompt: the old ad-hoc record was there with a
+code requirement that no longer matched, so tccd neither matched it nor asked
+again. A tap in that state does not fail — it delivers exact zeros for as long
+as it runs. 0.1.11 recorded a YouTube video through the microphone (it heard
+the speakers) with a system track of silence. The helper now watches its own
+tap: three seconds of zeros while the default output device is running means
+the tap is muted, and it switches to ScreenCaptureKit, which asks for its own
+permission and names it. `YAPPER_TAP_SIMULATE_MUTE=1` exercises that path on a
+machine where the tap is permitted; `YAPPER_TAP_DEBUG=1` prints the watch.
+
 ## What has actually run on a Mac
 
 The shakedown happened on 2026-07-30, on an M4 Pro running macOS 27. What was

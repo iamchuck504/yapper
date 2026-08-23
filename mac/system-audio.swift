@@ -131,6 +131,60 @@ final class TapCapture {
     note("capturing: tap")
   }
 
+  // A tap the user has not permitted does not fail: it is created, it starts,
+  // and it delivers exact digital zeros for as long as it runs — no error, and
+  // no prompt when the permission record is stale (a re-signed app, for one).
+  // 0.1.11 recorded a YouTube video that way: the microphone heard it through
+  // the speakers, the system track was silence end to end. So the tap watches
+  // itself. Zeros are only suspicious while the Mac is actually playing
+  // something; three seconds of them with the default output device running
+  // means the tap is muted, and the screen door is tried instead.
+  private(set) var heardSignal = false
+  private var zeroSeconds = 0.0
+  private let muteWatch = DispatchQueue(label: "yapper.tap.watch")
+
+  // A test seam: a tap that is permitted cannot be made to go mute on demand,
+  // and the fallback has to be exercised on the machine that has the permission.
+  private let simulateMute = ProcessInfo.processInfo.environment["YAPPER_TAP_SIMULATE_MUTE"] == "1"
+
+  private func sawSamples(_ channel: UnsafeMutablePointer<Int16>, count: Int) {
+    if heardSignal { return }
+    if simulateMute { for i in 0..<count { channel[i] = 0 } }
+    var allZero = true
+    for i in 0..<count where channel[i] != 0 { allZero = false; break }
+    muteWatch.async {
+      if !allZero { self.heardSignal = true; self.zeroSeconds = 0 }
+      else { self.zeroSeconds += Double(count) / SAMPLE_RATE }
+    }
+  }
+
+  /// True when the tap has produced nothing but zeros for `seconds` while the
+  /// default output device was playing — the signature of a muted tap.
+  func looksMuted(after seconds: Double) -> Bool {
+    muteWatch.sync { !heardSignal && zeroSeconds >= seconds } && outputDeviceRunning()
+  }
+
+  func debugState() -> String {
+    let z = muteWatch.sync { zeroSeconds }
+    return "heard=\(heardSignal) zeroSeconds=\(String(format: "%.1f", z)) outputRunning=\(outputDeviceRunning())"
+  }
+
+  private func outputDeviceRunning() -> Bool {
+    var dev = AudioObjectID(kAudioObjectUnknown)
+    var size = UInt32(MemoryLayout<AudioObjectID>.size)
+    var addr = AudioObjectPropertyAddress(
+      mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+      mScope: kAudioObjectPropertyScopeGlobal,
+      mElement: kAudioObjectPropertyElementMain)
+    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &dev) == noErr,
+          dev != kAudioObjectUnknown else { return false }
+    var running: UInt32 = 0
+    size = UInt32(MemoryLayout<UInt32>.size)
+    addr.mSelector = kAudioDevicePropertyDeviceIsRunningSomewhere
+    guard AudioObjectGetPropertyData(dev, &addr, 0, nil, &size, &running) == noErr else { return false }
+    return running != 0
+  }
+
   private func handle(_ inData: UnsafePointer<AudioBufferList>) {
     guard let inFmt = inputFormat, let converter else { return }
     let list = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inData))
@@ -166,6 +220,7 @@ final class TapCapture {
     if convErr != nil || outBuf.frameLength == 0 { return }
 
     guard let channel = outBuf.int16ChannelData else { return }
+    sawSamples(channel[0], count: Int(outBuf.frameLength))
     sink.write(Data(bytes: channel[0], count: Int(outBuf.frameLength) * 2))
   }
 
@@ -334,6 +389,27 @@ if #available(macOS 14.4, *), !forceSCK {
 if tap == nil {
   let capturer = ScreenAudio()
   Task { await capturer.start() }
+} else if #available(macOS 14.4, *), let t = tap as? TapCapture {
+  // The tap started, which proves nothing (see TapCapture.looksMuted). Check
+  // once a second until it has been heard from; give up on it after three
+  // seconds of zeros with something playing. The screen door then asks for
+  // its own permission, and names it, instead of recording silence.
+  let watch = DispatchSource.makeTimerSource(queue: .main)
+  watch.schedule(deadline: .now() + 1, repeating: 1)
+  let tapDebug = ProcessInfo.processInfo.environment["YAPPER_TAP_DEBUG"] == "1"
+  watch.setEventHandler {
+    if tapDebug { note("tap watch: \(t.debugState())") }
+    if t.heardSignal { watch.cancel(); return }
+    if t.looksMuted(after: 3) {
+      watch.cancel()
+      note("tap silent while audio plays (permission not granted?); falling back to screen capture")
+      t.stop()
+      tap = nil
+      let capturer = ScreenAudio()
+      Task { await capturer.start() }
+    }
+  }
+  watch.resume()
 }
 
 RunLoop.main.run()
