@@ -114,6 +114,7 @@ contextBridge.exposeInMainWorld('yapper', {
   // macOS only: system audio is captured natively, so whether it worked is
   // something only the main process knows.
   onSystemAudioStatus: cb => ipcRenderer.on('system-audio-status', (_e, info) => cb(info)),
+  onWindowVisible: cb => ipcRenderer.on('window-visible', (_e, visible) => cb(!!visible)),
 
   // macOS only: the two halves of granting Screen Recording that the user
   // cannot reach from inside the app.

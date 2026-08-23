@@ -180,8 +180,13 @@ let liveActive = false;
 let liveParagraphs = []; // stable text, split into paragraphs on long pauses
 let liveTentative = '';  // unstable tail, still being refined
 let liveDirty = false;   // text arrived while the transcript was not on screen
+// Whether this window is on screen, as the main process sees it. `document
+// .hidden` cannot answer this while a recording is running: background
+// throttling is lifted then, and Chromium reports a hidden or minimized
+// window as visible precisely so the page keeps working.
+let windowOnScreen = true;
+window.yapper.onWindowVisible(v => { windowOnScreen = v; });
 let timerInterval = null;
-let levelRaf = null;
 let levelTimer = null;     // the pause between meter frames
 let micError = null;       // why the last microphone acquisition failed, if it did
 let currentFolder = null;
@@ -1224,12 +1229,12 @@ async function populateMicSelect() {
   micSelection = micSelect.value;
 }
 
-function acquireMic(key) {
-  const on = noiseReduction !== 'off';
+function acquireMic(key, reduction = noiseReduction) {
+  const on = reduction !== 'off';
   const audio = {
     echoCancellation: on,
     noiseSuppression: on,
-    autoGainControl: noiseReduction === 'strong'
+    autoGainControl: reduction === 'strong'
   };
   if (key !== 'default') audio.deviceId = { exact: key };
   return navigator.mediaDevices.getUserMedia({ audio });
@@ -1256,8 +1261,7 @@ async function setNoiseReduction(level) {
   applyNoiseFilter();
   // the getUserMedia constraints differ per level, so re-acquire mics if recording
   if (audioCtx) {
-    for (const key of [...micNodes.keys()]) dropMic(key);
-    await applyMicSelection();
+    await applyMicSelection({ reset: true });
   }
 }
 
@@ -1272,10 +1276,43 @@ function dropMic(key) {
 
 // Reconcile the live mic sources to match the current selection. Safe to call
 // before recording (no-op) or mid-recording (hot-swaps on the live micBus).
-async function applyMicSelection() {
-  if (!audioCtx || !micBus) return;
+// One at a time. Two runs overlapping — a device ending while a noise-
+// reduction change or a picker change is in flight — could both pass the
+// `micNodes.has(key)` check and both connect the same device to the bus: the
+// loser's node stays connected but untracked, so `dropMic` can never
+// disconnect it or stop its track, and that microphone is mixed into the
+// recording twice for the rest of the meeting.
+let captureGeneration = 0;
+let micSelectionRun = Promise.resolve();
+function applyMicSelection({ reset = false } = {}) {
+  // Bind this request to the graph and intent that asked for it. getUserMedia
+  // can stay pending while a recording stops or a new one starts; a late
+  // answer must be stopped, never attached to whatever globals exist then.
+  const request = {
+    generation: captureGeneration,
+    context: audioCtx,
+    bus: micBus,
+    selection: micSelection,
+    reduction: noiseReduction,
+    reset
+  };
+  const run = () => reconcileMics(request);
+  const next = micSelectionRun.then(run, run);
+  micSelectionRun = next.catch(() => { });
+  return next;
+}
+
+async function reconcileMics(request) {
+  const { generation, context, bus, selection, reduction, reset } = request;
+  const current = () => generation === captureGeneration
+    && context === audioCtx && bus === micBus && !!context && !!bus;
+  if (!current()) return;
+  if (reset) {
+    for (const key of [...micNodes.keys()]) dropMic(key);
+  }
   const mics = await listMics();
-  let desired = micSelection === 'all' ? mics.map(d => d.deviceId) : [micSelection];
+  if (!current()) return;
+  let desired = selection === 'all' ? mics.map(d => d.deviceId) : [selection];
   if (desired.length === 0) desired = ['default'];
 
   for (const key of [...micNodes.keys()]) {
@@ -1284,10 +1321,15 @@ async function applyMicSelection() {
   let failed = null;
   for (const key of desired) {
     if (micNodes.has(key)) continue;
+    let stream = null;
     try {
-      const stream = await acquireMic(key);
-      const node = audioCtx.createMediaStreamSource(stream);
-      node.connect(micBus);
+      stream = await acquireMic(key, reduction);
+      if (!current()) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
+      const node = context.createMediaStreamSource(stream);
+      node.connect(bus);
       micStreams.set(key, stream);
       micNodes.set(key, node);
       for (const track of stream.getAudioTracks()) {
@@ -1295,12 +1337,18 @@ async function applyMicSelection() {
           // `dropMic` also stops tracks. Only a track that is still the live
           // source owns this callback; an intentional replacement must not
           // re-acquire the source it just removed.
-          if (micStreams.get(key) !== stream) return;
+          if (!current() || micStreams.get(key) !== stream) return;
           dropMic(key);
           await applyMicSelection();
         }, { once: true });
       }
     } catch (err) {
+      // createMediaStreamSource/connect can fail after acquisition. A stream
+      // that was never installed in the maps has no later owner to stop it.
+      if (stream && micStreams.get(key) !== stream) {
+        stream.getTracks().forEach(t => t.stop());
+      }
+      if (!current()) return;
       // Device busy or unplugged: skip it, another may work. But remember
       // why, because one refusal is not like the others — macOS denying the
       // microphone outright (a missing permission, or a build signed without
@@ -1309,7 +1357,7 @@ async function applyMicSelection() {
       failed = err;
     }
   }
-  micError = micNodes.size ? null : failed;
+  if (current()) micError = micNodes.size ? null : failed;
 }
 
 /** What to tell the person when the microphone is silent, given how it failed. */
@@ -1373,8 +1421,9 @@ initGainSliders();
 navigator.mediaDevices.addEventListener('devicechange', async () => {
   await populateMicSelect();
   if (audioCtx) {
-    if (micSelection === 'default') dropMic('default'); // re-acquire to follow OS default
-    await applyMicSelection();
+    // Re-acquire through the same serialized transaction so a device event
+    // cannot overlap a picker/noise change and leave an untracked source.
+    await applyMicSelection({ reset: micSelection === 'default' });
   }
 });
 
@@ -1630,6 +1679,14 @@ const VIZ_FLOOR = 8;
 // Meters redraw this often. 30 fps looks like 120 and costs a quarter of it.
 const METER_FRAME_MS = 1000 / 30;
 
+/** Has this input delivered anything but exact zeros in its current window? */
+function hasSignal(m) {
+  if (!m || !m.fbuf || !m.analyser.getFloatTimeDomainData) return true;
+  m.analyser.getFloatTimeDomainData(m.fbuf);
+  for (let i = 0; i < m.fbuf.length; i++) if (m.fbuf[i] !== 0) return true;
+  return false;
+}
+
 /** Peak deviation in a viz's current buffer, 0..1 — what the bubble's bars show. */
 function levelOf(m) {
   if (!m) return 0;
@@ -1759,6 +1816,11 @@ async function startRecording() {
       sysStream = sys;
     }
 
+    // A fresh generation owns every asynchronous microphone acquisition made
+    // below. The previous queue must not delay this recording if an old
+    // getUserMedia request is still waiting on the OS.
+    captureGeneration++;
+    micSelectionRun = Promise.resolve();
     audioCtx = new AudioContext();
     dest = audioCtx.createMediaStreamDestination();
     micBus = audioCtx.createGain();
@@ -1782,7 +1844,16 @@ async function startRecording() {
       analyser.fftSize = 512;
       sourceNode.connect(analyser);
       return { analyser, canvas, ctx: canvas.getContext('2d'), color,
-        buf: new Uint8Array(analyser.fftSize), gainOf: () => (canvas === vizSys ? gainSys : gainMic) };
+        buf: new Uint8Array(analyser.fftSize),
+        // The meter reads bytes; whether the microphone is alive is asked of
+        // the floats. A byte is 1/256 of full scale, so everything below
+        // about -48 dBFS — a quiet room, a soft voice at the far end of a
+        // table — is 128, indistinguishable from a device delivering nothing.
+        // The claim being made is "exact digital zeros", and only the float
+        // data can support it: a live microphone always carries its own noise
+        // floor, however faint.
+        fbuf: new Float32Array(analyser.fftSize),
+        gainOf: () => (canvas === vizSys ? gainSys : gainMic) };
     };
 
     analysers = { sys: null, mic: null };
@@ -1832,19 +1903,24 @@ async function startRecording() {
     // not painted at all. The samples are still read every frame, because the
     // silence check and the bubble's bars come from them.
     const updateLevels = () => {
-      levelRaf = null;
+      levelTimer = null;
       const frameAt = performance.now();
-      const visible = !document.hidden;
+      const visible = windowOnScreen && !document.hidden;
       for (const m of [analysers.sys, analysers.mic]) {
         if (!m) continue;
-        const shown = m.canvas.checkVisibility
-          ? m.canvas.checkVisibility() : m.canvas.offsetParent !== null;
-        if (visible && shown) drawWave(m);
+        const shown = visible && (m.canvas.checkVisibility
+          ? m.canvas.checkVisibility() : m.canvas.offsetParent !== null);
+        // Painting is for what someone can see; reading is what the silence
+        // check and the bubble's meter live on, and that happens either way.
+        if (shown) drawWave(m);
         else m.analyser.getByteTimeDomainData(m.buf);
       }
       const micNow = levelOf(analysers.mic);
       const now = performance.now();
-      if (micNow > 0) lastMicSignalAt = now;
+      // Deliberate silence is not a fault: the slider goes to zero, and
+      // someone recording only the far side of a call means it.
+      const micMuted = !!micBus && micBus.gain.value === 0;
+      if (micMuted || hasSignal(analysers.mic)) lastMicSignalAt = now;
       // A refusal is said at once; plain silence gets six seconds to be a
       // headset waking up. This is consecutive silence, not a lifetime peak:
       // a microphone that worked at the start can still die halfway through.
@@ -1852,7 +1928,7 @@ async function startRecording() {
         silenceWarned = true;
         setStatus(statusEl, micSilenceMessage(!!analysers.sys), !analysers.sys || !!micError, 'mic');
       }
-      if (silenceWarned && micNow > 0) {
+      if (silenceWarned && (micMuted || hasSignal(analysers.mic))) {
         silenceWarned = false;
         // The device woke up — but only this handler's own line goes away
         // with it: a system-audio warning written since then is still true.
@@ -1876,10 +1952,14 @@ async function startRecording() {
         }
       }
       const wait = Math.max(0, METER_FRAME_MS - (performance.now() - frameAt));
-      levelTimer = setTimeout(() => {
-        levelTimer = null;
-        levelRaf = requestAnimationFrame(updateLevels);
-      }, wait);
+      // A timer, not an animation frame. The meters are drawn from this loop,
+      // but what it is really doing is *measuring* — the level the bubble
+      // shows, and whether the microphone has delivered anything but exact
+      // zeros — and animation frames stop entirely in a window that is not on
+      // screen. A meeting recorded with Zoom in front of Yapper would have
+      // gone unmeasured: no bubble meter, and no warning for a dead
+      // microphone, which is the one failure this loop exists to catch.
+      levelTimer = setTimeout(updateLevels, wait);
     };
     updateLevels();
 
@@ -1951,11 +2031,14 @@ async function startRecording() {
 }
 
 function cleanupCapture() {
+  // Invalidate pending listMics/getUserMedia work before tearing down the
+  // graph. Any stream that arrives afterwards sees a stale generation and is
+  // stopped instead of being connected to this or the next recording.
+  captureGeneration++;
+  micSelectionRun = Promise.resolve();
   if (timerInterval) clearInterval(timerInterval);
-  if (levelRaf) cancelAnimationFrame(levelRaf);
   if (levelTimer) clearTimeout(levelTimer);
   timerInterval = null;
-  levelRaf = null;
   levelTimer = null;
   micError = null;
   window.yapper.setRecordingState(false);

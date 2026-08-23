@@ -106,23 +106,23 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 3620 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `main.js` | 3739 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
 | `engine.js` | 1149 | whisper.cpp lifecycle, the tier table, calibration, Metal-to-CPU fallback, WAV read/write, full-file transcription |
-| `digest.js` | 346 | The day, assembled from the notes; the week, written from them and checked |
+| `digest.js` | 357 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
-| `llm.js` | 552 | Note providers (§6), including streamed and cancelable responses, behind one `generate()` call |
+| `llm.js` | 553 | Note providers (§6), including streamed and cancelable responses, behind one `generate()` call |
 | `live.js` | 316 | Live transcription: rolling window, LocalAgreement-2 confirmation |
-| `actions.js` | 253 | Parsing user-selected action items from notes, and folding duplicates together |
+| `actions.js` | 254 | Parsing user-selected action items from notes, and folding duplicates together |
 | `provision.js` | 505 | First-run engine download for installed copies (Windows and macOS): pinned, SHA-256 verified, size-bounded, resumable and retried |
-| `library.js` | 167 | The index over every meeting: build, refresh, select by day or week |
-| `sysaudio.js` | 302 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
+| `library.js` | 169 | The index over every meeting: build, refresh, select by day or week |
+| `sysaudio.js` | 317 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
 | `speaker-diarizer.js` | 242 | Optional macOS Core ML diarization, timestamp alignment, stable labels and per-meeting name maps |
 | `meetings.js` | 89 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
 | `security.js` | 99 | Canonical meeting and import paths; blocks traversal and folder/file symlink escapes |
 | `storage.js` | 77 | Atomic bounded meeting-file access plus replacement for settings, reminders, caches and indexes |
-| `preload.js` | 121 | The only bridge between renderer and main |
+| `preload.js` | 129 | The only bridge between renderer and main |
 
 `keystore.js` and `bounds.js` are separate files for one reason: they are pure
 functions, so they can be tested without booting Electron, and `keystore.js`
@@ -133,11 +133,11 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 3701 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
+| `renderer/app.js` | 3831 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
 | `renderer/style.css` | 1782 | Everything visual, light and dark |
 | `renderer/index.html` | 554 | Main window markup |
 | `renderer/bubble.html` | 198 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
-| `renderer/bubble.js` | 174 | Its behaviour, including sizing itself to its own contents |
+| `renderer/bubble.js` | 181 | Its behaviour, including sizing itself to its own contents |
 | `renderer/splash.html` | 116 | Boot screen, including the first-run calibration status; follows the theme |
 | `renderer/pcm-worklet.js` | 33 | The audio-thread tap that produces PCM |
 
@@ -153,8 +153,8 @@ unpacked from the asar — nothing can be executed from inside one.
 
 | Helper | Lines | Answers |
 |---|---:|---|
-| `mac/system-audio.swift` | 958 | What the machine is playing, as 16 kHz mono PCM on stdout (a Core Audio process tap, falling back to ScreenCaptureKit) |
-| `mac/mic-probe.swift` | 144 | Which processes hold the microphone right now, as bundle ids (CoreAudio); with `--watch` it stays resident and prints changes plus a health heartbeat instead of being spawned every five seconds |
+| `mac/system-audio.swift` | 959 | What the machine is playing, as 16 kHz mono PCM on stdout (a Core Audio process tap, falling back to ScreenCaptureKit) |
+| `mac/mic-probe.swift` | 145 | Which processes hold the microphone right now, as bundle ids (CoreAudio); with `--watch` it stays resident and prints changes plus a health heartbeat instead of being spawned every five seconds |
 | `mac/speaker-diarize/` | SwiftPM executable | Distinct remote voices and their time ranges, using FluidAudio's offline Core ML pipeline on macOS 14+ |
 
 The capture helpers are deliberately dumb: they answer one question on stdout and exit codes
@@ -326,7 +326,7 @@ that actually changed, try again.
 
 ## 5. IPC surface
 
-87 channels, all declared in `preload.js` — that file is the complete list of
+88 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
@@ -352,11 +352,14 @@ frame, so there is no round trip to wait for), `recording-state`,
 `autodetect-set`, `spoken-language-set` (the language Whisper is told to expect; `auto` detects on every pass), `mark-shortcut`, `sys-gain` (macOS: the system meter's slider,
 since the mixing it controls happens in main), and five bubble messages.
 
-**Main → renderer (17)** — `ui-command` (a menu accelerator naming what it wants: search, export, rename…; the page decides what that means right now), `transcribe-progress`, `notes-progress` (partial
+**Main → renderer (18)** — `ui-command` (a menu accelerator naming what it wants: search, export, rename…; the page decides what that means right now), `transcribe-progress`, `notes-progress` (partial
 notes plus first-text timing), `live-transcript`,
 `meeting-detected`, `meeting-ended`, `start-recording`, `mark-moment`,
 `remote-stop`, `remote-pause`, `bubble-state`, `keep-audio-changed`,
 `engine-setup-progress`, `update-ready`, `system-audio-status`,
+`window-visible` (whether the window is really on screen: while recording,
+background throttling is lifted and Chromium then calls a hidden window
+visible, so the page cannot tell on its own what is worth painting),
 `weekly-written` (the weekly review is written in the background; this is how
 the week on screen learns it can re-read the cache),
 `system-wave` (macOS: the samples the System meter draws, which never reach

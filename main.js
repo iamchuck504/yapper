@@ -734,6 +734,25 @@ function createWindow() {
   });
   lockWindowToPage(win, MAIN_PAGE_URL);
 
+  // Whether this window is actually on screen. The page cannot answer that
+  // for itself once background throttling is off: Chromium then keeps
+  // `document.hidden` false for a window that is hidden or minimized, which
+  // is the point — the page keeps running — but it also means the page would
+  // happily paint into a canvas nobody can see. So the answer comes from
+  // here, where it is known, and is sent whenever it changes.
+  const sayVisible = () => {
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send('window-visible', win.isVisible() && !win.isMinimized());
+  };
+  for (const e of ['show', 'hide', 'minimize', 'restore', 'maximize', 'unmaximize']) win.on(e, sayVisible);
+  win.webContents.on('did-finish-load', sayVisible);
+  win.webContents.on('render-process-gone', (_event, details) => {
+    abandonRendererRecording(`renderer ${details.reason || 'gone'}`);
+  });
+  win.webContents.on('did-start-navigation', (_event, _url, inPlace, isMainFrame) => {
+    if (isMainFrame && !inPlace) abandonRendererRecording('main-frame navigation');
+  });
+
   // Belt and braces for the taskbar: running unpackaged, the process is
   // electron.exe, and Windows will happily show its icon for the button unless
   // the window says otherwise.
@@ -1317,11 +1336,15 @@ const sysAudio = sysaudio.create({
     // which cannot capture without a lit display. A tap does not need it, a
     // helper that died does not need it, and a status that arrives after the
     // file was closed (the helper drains before it exits) must not re-take it.
-    // A doubt is not a stop: capture continues, so the route in force — and
-    // with it the display hold — is left exactly as it was.
-    if (info.reason !== 'suspect') {
-      holdDisplayAwake(!!info.ok && info.via !== 'tap' && recFd !== null);
-    }
+    // Only a status that actually settles which route is in force may move
+    // it. A doubt does not (capture continues), and neither does a timeout —
+    // the screen door can legitimately take longer than four seconds, since
+    // it waits up to ten for a sleeping display to come back, and letting the
+    // display sleep in exactly that window is how it ends up finding none.
+    // A line the helper wrote that we did not recognise says nothing either.
+    const settles = info.ok || info.terminal
+      || ['stopped', 'helper-exit', 'permission', 'no-helper', 'spawn-failed'].includes(info.reason);
+    if (settles) holdDisplayAwake(!!info.ok && info.via !== 'tap' && recFd !== null);
     if (info.ok) {
       console.log(`[audio] capturing system audio via ${info.via || 'screen'}`);
       // Sent as well as the failures: a helper that failed and then came back
@@ -1384,6 +1407,43 @@ function closeRecFile() {
   recFd = null;
 }
 
+/// Chromium slows a window nobody is looking at down to one timer a second.
+/// That is right for a web page and wrong while recording: the microphone
+/// level, the check that the microphone is not delivering pure silence, and
+/// the bubble's meter are all measured in the main window, and a meeting is
+/// normally recorded with the call in front of Yapper. So the throttle is
+/// lifted for exactly as long as a recording is open — not for the life of
+/// the app, which would cost battery for nothing — and never for the bubble,
+/// the splash or the PDF window.
+function throttleWhileIdle(on) {
+  if (!win || win.isDestroyed()) return;
+  try { win.webContents.setBackgroundThrottling(on); } catch { /* window going away */ }
+}
+
+// The renderer owns the Web Audio graph. If its process dies or its main
+// frame reloads, no future `recording-state: false` can arrive from that page.
+// Retire the main-process half here: finalize the recoverable WAV, stop native
+// capture, put Chromium back in its idle power mode, and make the controls
+// outside the page tell the truth again.
+function abandonRendererRecording(reason) {
+  if (recFd === null && !rendererRecording) {
+    throttleWhileIdle(true);
+    return;
+  }
+  console.log(`[recording] renderer disappeared (${reason}); closing the open recording`);
+  rendererRecording = false;
+  closeRecFile();
+  stopHeadStart();
+  throttleWhileIdle(true);
+  destroyBubble();
+  enableMarkShortcut(false);
+  meetingGoneStreak = 0;
+  meetingEra++;
+  meetingCurrent = null;
+  refreshTray();
+  refreshAppMenu();
+}
+
 ipcMain.handle('recording-start', async (_e, participants) => {
   closeRecFile();
   pendingImport = null;
@@ -1410,6 +1470,9 @@ ipcMain.handle('recording-start', async (_e, participants) => {
   }
   sysRemainder = 0;
   startHeadStart(recFolder, participants);
+  // Only after the main-process setup succeeded. A synchronous open/write
+  // failure must not leave the app unthrottled while idle.
+  throttleWhileIdle(false);
   return recFolder;
 });
 
@@ -3267,7 +3330,7 @@ function startMicWatch() {
   } catch {
     return;
   }
-  const w = { proc: p, users: null, buf: '', updatedAt: 0 };
+  const w = { proc: p, users: null, buf: '', updatedAt: Date.now() };
   micWatch = w;
   p.stdout.on('data', d => {
     w.buf += d.toString('utf8');
@@ -3510,6 +3573,9 @@ ipcMain.on('autodetect-set', (_e, enabled) => {
 
 ipcMain.on('recording-state', (_e, recording) => {
   rendererRecording = !!recording;
+  // Including every way a recording ends: stopping, aborting, a start that
+  // failed halfway — they all come through here.
+  throttleWhileIdle(!rendererRecording);
   // Do not let a scheduled weekly review start while a meeting is being
   // recorded. The new meeting will queue a fresh review after its notes land.
   if (rendererRecording && weeklyPrewarmTimer) clearTimeout(weeklyPrewarmTimer);

@@ -165,13 +165,41 @@ sleep 30
   });
 }
 
+// A diagnostic line says what failed; the subsequent close is what proves the
+// launch is over and there is no source still on its way. Main needs both
+// facts so it can keep the display awake during a slow/provisional launch but
+// release it after a definitive startup failure.
+function terminalHelperFailure() {
+  const os = require('os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yapper-sysaudio-terminal-'));
+  const stub = path.join(dir, 'stub-helper.sh');
+  fs.writeFileSync(stub, `#!/bin/sh
+echo "aggregate device failed" >&2
+exit 5
+`, { mode: 0o755 });
+  const seen = [];
+  const it = create({ probePath: stub, onStatus: info => seen.push(info) });
+  return it.start().then(ok => {
+    check('a named helper failure does not claim capture started',
+      ok === false && !seen.some(i => i.ok), JSON.stringify(seen));
+    const first = seen.find(i => i.reason === 'helper' && !i.terminal);
+    const terminal = seen.find(i => i.reason === 'helper' && i.terminal);
+    check('the helper detail is reported immediately',
+      first && /aggregate device failed/.test(first.detail), JSON.stringify(seen));
+    check('and its close marks that failure terminal',
+      terminal && terminal.detail === first.detail, JSON.stringify(seen));
+    it.stop();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+}
+
 // ---- taking, with no helper running ----
 const idle = create({ probePath: path.join(__dirname, 'no-such-helper') });
 check('with no helper there is no capture state', idle.state === 'off');
 check('y take() devuelve null, no silencio', idle.take(64) === null,
   'it would write zeros over the microphone');
 
-stderrProtocol().then(() => idle.start()).then(started => {
+stderrProtocol().then(terminalHelperFailure).then(() => idle.start()).then(started => {
   check('starting with no helper resolves false rather than throwing', started === false);
   check('and it is marked unavailable', idle.state === 'unavailable', idle.state);
 

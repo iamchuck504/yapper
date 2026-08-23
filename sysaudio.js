@@ -145,9 +145,10 @@ function create({ probePath, onStatus = () => { } } = {}) {
         // busy — and judging the chunk by its first line lost the second.
         let errBuf = '';
         let namedFailure = false;   // the helper said what went wrong, in its own words
+        let namedFailureInfo = null;
         // One reading of one line, used for the lines that arrive and again
         // for whatever was left unterminated when the helper exited.
-        const classify = line => {
+        const classify = (line, { dead = false } = {}) => {
           if (!line) return;
           // Advisory lines are for the log only.
           if (/^note:/.test(line)) {
@@ -163,7 +164,10 @@ function create({ probePath, onStatus = () => { } } = {}) {
           // The protocol line, whole: an error that merely contains the word
           // ("could not start capture: failed while capturing") is not it.
           const live = /^capturing:\s*(tap|screen)\s*$/.exec(line);
-          if (live) {
+          // Except from a helper that has already exited: a line cut off by
+          // its death would otherwise announce a capture that is over before
+          // it was read, and take the display block with it.
+          if (live && !dead) {
             state = 'capturing';
             // Which door it came through decides whether the display has to
             // be held awake: a tap does not care, ScreenCaptureKit cannot
@@ -173,7 +177,8 @@ function create({ probePath, onStatus = () => { } } = {}) {
             return;
           }
           namedFailure = true;
-          onStatus({ ok: false, reason: 'helper', detail: line.slice(0, 200) });
+          namedFailureInfo = { ok: false, reason: 'helper', detail: line.slice(0, 200) };
+          onStatus(namedFailureInfo);
         };
         proc.stderr.on('data', d => {
           if (!mine() || stopping) return;   // a late line after stop() means nothing
@@ -192,7 +197,8 @@ function create({ probePath, onStatus = () => { } } = {}) {
           // the same launch and overwrite the more useful spawn detail.
           namedFailure = true;
           state = 'unavailable';
-          onStatus({ ok: false, reason: 'spawn-failed', detail: err.message });
+          namedFailureInfo = { ok: false, reason: 'spawn-failed', detail: err.message };
+          onStatus(namedFailureInfo);
           settle(false);
         });
         proc.on('close', code => {
@@ -204,7 +210,7 @@ function create({ probePath, onStatus = () => { } } = {}) {
           // audio" still names its pane instead of becoming loose text.
           const tail = errBuf.trim();
           errBuf = '';
-          if (tail) classify(tail);
+          if (tail) classify(tail, { dead: true });
           const wasCapturing = state === 'capturing';
           if (state !== 'off') {
             state = code === 2 ? 'unavailable' : (wasCapturing ? 'off' : 'unavailable');
@@ -212,6 +218,12 @@ function create({ probePath, onStatus = () => { } } = {}) {
             // renderer words that differently from a start-up refusal.
             if (code === 2) {
               onStatus({ ok: false, reason: 'permission', which: missingPermission, midRecording: wasCapturing });
+            } else if (!wasCapturing && namedFailureInfo && namedFailureInfo.reason === 'helper') {
+              // The detailed line was useful immediately, but only `close`
+              // proves there is no source and no retry in flight. Repeat the
+              // same status with terminality so main can release the display
+              // hold without treating every helper diagnostic as a stop.
+              onStatus({ ...namedFailureInfo, terminal: true });
             } else if (!wasCapturing && !namedFailure) {
               // It died before it ever captured and without naming a reason —
               // a crash, a kill. Silence here left the caller believing
