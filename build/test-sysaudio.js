@@ -20,7 +20,11 @@ function check(name, ok, detail) {
 // The Swift helper is not importable into this Node test, but these are
 // structural runtime invariants worth pinning: a trial may not substitute a
 // second app, and the macOS 13 fallback may not silently omit its mute watch.
-const swift = fs.readFileSync(path.join(__dirname, '..', 'mac', 'system-audio.swift'), 'utf8');
+// Read with its line endings normalised: git checks this out with CRLF on
+// Windows, and the bounded gaps in the patterns below ({0,320} and the
+// like) count those extra characters — an invariant would fail there for
+// a reason that has nothing to do with the code it is describing.
+const swift = fs.readFileSync(path.join(__dirname, '..', 'mac', 'system-audio.swift'), 'utf8').replace(/\r\n/g, '\n');
 checkSwiftInvariant('a trial checks the exact process that provoked the doubt',
   /canTrial\(pid: other\.pid\)/.test(swift)
     && /capturer\.trialPID = other\.pid/.test(swift)

@@ -59,7 +59,9 @@ if (process.platform === 'darwin' && fs.existsSync(HELPER)) {
 // to decode the same window forever. Read from the source, since the handler
 // cannot be reached without Electron.
 {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  // Normalised: git checks main.js out with CRLF on Windows, and the bounded
+  // gaps below count those extra characters.
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
   const from = main.indexOf('function abandonRendererRecording');
   const body = from < 0 ? '' : main.slice(from, main.indexOf('\n}', from));
   check('a dead renderer closes the recording it was driving — which also stops the native helper',

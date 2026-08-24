@@ -105,7 +105,9 @@ if (process.platform === 'darwin' && fs.existsSync(helper)) {
   console.log('skip  native helper self-test (not built on this platform)');
 }
 
-const mainSource = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+// Normalised: git checks main.js out with CRLF on Windows, and the bounded
+// gaps below count those extra characters.
+const mainSource = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
 check('the notes prompt preserves unknown numbered identities',
   /write the exact label[\s\S]{0,160}instead of vague phrases such as "the speaker"/i.test(mainSource), true);
 
