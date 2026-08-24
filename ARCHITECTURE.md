@@ -115,7 +115,7 @@ that ship are the files that run.
 | `actions.js` | 254 | Parsing user-selected action items from notes, and folding duplicates together |
 | `provision.js` | 505 | First-run engine download for installed copies (Windows and macOS): pinned, SHA-256 verified, size-bounded, resumable and retried |
 | `library.js` | 169 | The index over every meeting: build, refresh, select by day or week |
-| `sysaudio.js` | 317 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
+| `sysaudio.js` | 335 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
 | `speaker-diarizer.js` | 242 | Optional macOS Core ML diarization, timestamp alignment, stable labels and per-meeting name maps |
 | `meetings.js` | 89 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
@@ -133,7 +133,7 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 3832 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
+| `renderer/app.js` | 3837 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
 | `renderer/style.css` | 1782 | Everything visual, light and dark |
 | `renderer/index.html` | 554 | Main window markup |
 | `renderer/bubble.html` | 198 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
@@ -153,7 +153,7 @@ unpacked from the asar — nothing can be executed from inside one.
 
 | Helper | Lines | Answers |
 |---|---:|---|
-| `mac/system-audio.swift` | 969 | What the machine is playing, as 16 kHz mono PCM on stdout (a Core Audio process tap, falling back to ScreenCaptureKit) |
+| `mac/system-audio.swift` | 957 | What the machine is playing, as 16 kHz mono PCM on stdout (a Core Audio process tap, falling back to ScreenCaptureKit) |
 | `mac/mic-probe.swift` | 145 | Which processes hold the microphone right now, as bundle ids (CoreAudio); with `--watch` it stays resident and prints changes plus a health heartbeat instead of being spawned every five seconds |
 | `mac/speaker-diarize/` | SwiftPM executable | Distinct remote voices and their time ranges, using FluidAudio's offline Core ML pipeline on macOS 14+ |
 

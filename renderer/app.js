@@ -1924,7 +1924,12 @@ async function startRecording() {
       // A refusal is said at once; plain silence gets six seconds to be a
       // headset waking up. This is consecutive silence, not a lifetime peak:
       // a microphone that worked at the start can still die halfway through.
-      if (!silenceWarned && (micError || now - lastMicSignalAt > 6000)) {
+      // Never against something this same tick just counted as alive: with
+      // the slider at zero *and* the microphone refused, the two branches
+      // took turns thirty times a second — the warning was written and wiped
+      // within a frame, so the one line that says what to do about a refusal
+      // (written by startRecording) was erased and never seen again.
+      if (!silenceWarned && !micAlive && (micError || now - lastMicSignalAt > 6000)) {
         silenceWarned = true;
         setStatus(statusEl, micSilenceMessage(!!analysers.sys), !analysers.sys || !!micError, 'mic');
       }

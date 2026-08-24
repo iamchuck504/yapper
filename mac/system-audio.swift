@@ -347,24 +347,11 @@ enum TapError: Error, CustomStringConvertible {
   /// may become the single stdout producer.
   func enableOutput() { outputLock.withLock { $0 = true } }
 
-  /// Whether ScreenCaptureKit could capture right now: the permission holds
-  /// and there is a display to attach a filter to. Asked *before* the tap is
-  /// stopped, because the wait for a sleeping display to wake is up to ten
-  /// seconds and doing it with no source running is ten seconds of a meeting
-  /// nobody is recording.
-  static func ready() async -> Bool {
-    do {
-      let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-      return !content.displays.isEmpty
-    } catch {
-      return false
-    }
-  }
-
-  /// Whether ScreenCaptureKit can be pointed at this exact process. A trial
-  /// against some *other* audible application is not interchangeable: it can
-  /// hear a notification and still be deaf to the protected playback that
-  /// made the tap look suspect in the first place.
+  /// Whether ScreenCaptureKit can be pointed at this exact process. This also
+  /// proves permission and a usable display before the tap is stopped: a
+  /// trial against some other audible application is not interchangeable,
+  /// since it can hear a notification and still be deaf to the protected
+  /// playback that made this process provoke the check.
   static func canTrial(pid: pid_t) async -> Bool {
     if ProcessInfo.processInfo.environment["YAPPER_SCK_HIDE_TRIAL_APP"] == "1" { return false }
     guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),

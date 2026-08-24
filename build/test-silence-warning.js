@@ -227,6 +227,26 @@ app.whenReady().then(async () => {
     return false;
   })(), 'wait for the held microphone request', 5000);
 
+  // The two together: the slider at zero *and* a microphone that was refused.
+  // The line that says what to do about a refusal is written by
+  // startRecording and belongs to the microphone; this loop used to write its
+  // own warning and wipe it again inside the same frame, which took that line
+  // with it — thirty times a second, for the rest of the meeting.
+  await $(`(() => {
+    micError = new DOMException('denied for the test', 'NotAllowedError');
+    const s = document.getElementById('gain-mic');
+    s.value = '0'; s.dispatchEvent(new Event('input'));
+    setStatus(document.getElementById('status'),
+      'macOS is not letting Yapper use the microphone.', true, 'mic');
+  })()`);
+  await new Promise(r => setTimeout(r, 1200));
+  const refused = await $(`(() => { const el = document.getElementById('status');
+    return el.classList.contains('hidden') ? '' : el.textContent; })()`);
+  check('a refusal with the slider at zero keeps the line that says what to do about it',
+    /not letting Yapper use the microphone/.test(refused), refused || '(the status was wiped)');
+  await $(`(() => { micError = null;
+    const s = document.getElementById('gain-mic'); s.value = '1'; s.dispatchEvent(new Event('input')); })()`);
+
   // Nothing may outlive the recording. The loop is stopped by the same path
   // an aborted start takes, and the analyser it was reading goes quiet.
   await $(`abortRecording(new Error('end of the silence test'))`);

@@ -193,13 +193,53 @@ exit 5
   });
 }
 
+// stop() deliberately lets go of the child before its close event arrives.
+// That close still owns the pending start() promise: without settling it, an
+// aborted recording start waits forever because its four-second timer was
+// cleared at the same time. This helper says nothing, so only stop/close can
+// resolve the launch.
+function stoppedStartSettles() {
+  const os = require('os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yapper-sysaudio-stopped-start-'));
+  const stub = path.join(dir, 'stub-helper.sh');
+  fs.writeFileSync(stub, '#!/bin/sh\nIFS= read -r line\n', { mode: 0o755 });
+  const it = create({ probePath: stub });
+  let answer = 'pending';
+  const pending = it.start().then(ok => { answer = ok; return ok; });
+  return new Promise(r => setTimeout(r, 100)).then(() => {
+    it.stop();
+    // Promise reactions run before the child-process close event. This asks
+    // whether stop() itself settled the launch instead of getting lucky when
+    // the helper happened to close quickly.
+    return Promise.resolve().then(() => Promise.resolve());
+  }).then(() => {
+    check('stopping a helper that has not answered settles its pending start immediately',
+      answer === false, JSON.stringify(answer));
+    return pending;
+  }).then(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+}
+
 // ---- taking, with no helper running ----
 const idle = create({ probePath: path.join(__dirname, 'no-such-helper') });
 check('with no helper there is no capture state', idle.state === 'off');
 check('y take() devuelve null, no silencio', idle.take(64) === null,
   'it would write zeros over the microphone');
 
-stderrProtocol().then(terminalHelperFailure).then(() => idle.start()).then(started => {
+// The two stub helpers above are shell scripts, and the protocol they act out
+// belongs to a helper that only exists on macOS — Windows mixes system audio
+// in the renderer's own graph and never spawns one. Windows cannot execute a
+// `#!/bin/sh` file, so running them there fails for a reason that has nothing
+// to do with the code under test.
+const posixOnly = process.platform === 'win32'
+  ? () => { console.log('skip  the stub-helper protocol: the helper is macOS-only and needs a POSIX shell'); }
+  : null;
+const protocolChecks = posixOnly
+  ? Promise.resolve().then(posixOnly)
+  : stderrProtocol().then(terminalHelperFailure).then(stoppedStartSettles);
+
+protocolChecks.then(() => idle.start()).then(started => {
   check('starting with no helper resolves false rather than throwing', started === false);
   check('and it is marked unavailable', idle.state === 'unavailable', idle.state);
 

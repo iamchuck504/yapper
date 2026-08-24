@@ -73,6 +73,7 @@ function create({ probePath, onStatus = () => { } } = {}) {
   let stopping = false;     // an expected exit: stop() asked for it
   let restarts = 0;         // one silent retry per recording, no more
   let startTimer = null;    // the 4 s "say something" deadline of the current launch
+  let startSettler = null;  // lets stop() retire a launch before its close event
 
   const push = data => {
     chunks.push(data);
@@ -131,7 +132,13 @@ function create({ probePath, onStatus = () => { } } = {}) {
         let missingPermission = null;
 
         let settled = false;
-        const settle = ok => { if (!settled) { settled = true; resolve(ok); } };
+        const settle = ok => {
+          if (settled) return;
+          settled = true;
+          if (startSettler === settle) startSettler = null;
+          resolve(ok);
+        };
+        startSettler = settle;
 
         proc.stdout.on('data', d => { if (mine()) push(d); });
         // The helper says "capturing" on stderr once the stream is live, and
@@ -202,7 +209,14 @@ function create({ probePath, onStatus = () => { } } = {}) {
           settle(false);
         });
         proc.on('close', code => {
-          if (!mine()) return;          // stop() already let go of it, or a newer launch owns the state
+          if (!mine()) {
+            // stop() already let go of it, or a newer launch owns the state.
+            // Whoever is still waiting on this launch's start() gets its
+            // answer all the same: a promise nobody ever resolves is a hang
+            // waiting for the first caller who decides to await it.
+            settle(false);
+            return;
+          }
           if (startTimer) { clearTimeout(startTimer); startTimer = null; }
           proc = null;
           // A last line with no newline on it still says something — and it
@@ -304,6 +318,10 @@ function create({ probePath, onStatus = () => { } } = {}) {
       restarts = 0;
       chunks = []; buffered = 0;
       if (startTimer) { clearTimeout(startTimer); startTimer = null; }
+      // Do not wait for close: a process can keep its stdio alive while it
+      // drains, and this promise belongs to the recording start that Stop has
+      // already cancelled. A newer launch gets its own settler.
+      if (startSettler) startSettler(false);
       if (proc) {
         try { proc.kill(); } catch { /* already gone */ }
         proc = null;             // its handlers see they are no longer current
