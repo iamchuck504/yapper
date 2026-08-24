@@ -1915,12 +1915,12 @@ async function startRecording() {
         if (shown) drawWave(m);
         else m.analyser.getByteTimeDomainData(m.buf);
       }
-      const micNow = levelOf(analysers.mic);
       const now = performance.now();
       // Deliberate silence is not a fault: the slider goes to zero, and
       // someone recording only the far side of a call means it.
       const micMuted = !!micBus && micBus.gain.value === 0;
-      if (micMuted || hasSignal(analysers.mic)) lastMicSignalAt = now;
+      const micAlive = micMuted || hasSignal(analysers.mic);
+      if (micAlive) lastMicSignalAt = now;
       // A refusal is said at once; plain silence gets six seconds to be a
       // headset waking up. This is consecutive silence, not a lifetime peak:
       // a microphone that worked at the start can still die halfway through.
@@ -1928,7 +1928,7 @@ async function startRecording() {
         silenceWarned = true;
         setStatus(statusEl, micSilenceMessage(!!analysers.sys), !analysers.sys || !!micError, 'mic');
       }
-      if (silenceWarned && (micMuted || hasSignal(analysers.mic))) {
+      if (silenceWarned && micAlive) {
         silenceWarned = false;
         // The device woke up — but only this handler's own line goes away
         // with it: a system-audio warning written since then is still true.

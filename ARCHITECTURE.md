@@ -106,7 +106,7 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 3739 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `main.js` | 3751 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
 | `engine.js` | 1149 | whisper.cpp lifecycle, the tier table, calibration, Metal-to-CPU fallback, WAV read/write, full-file transcription |
 | `digest.js` | 357 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
@@ -133,7 +133,7 @@ reachable in a test.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 3831 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
+| `renderer/app.js` | 3832 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
 | `renderer/style.css` | 1782 | Everything visual, light and dark |
 | `renderer/index.html` | 554 | Main window markup |
 | `renderer/bubble.html` | 198 | The always-on-top overlay: a capsule at rest, the live transcript on hover |

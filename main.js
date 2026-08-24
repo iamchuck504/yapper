@@ -1434,6 +1434,17 @@ function abandonRendererRecording(reason) {
   rendererRecording = false;
   closeRecFile();
   stopHeadStart();
+  // And the live transcript: its loop reschedules itself unconditionally, so
+  // without this it would keep asking whisper for the same window forever
+  // after the recording it belonged to stopped existing.
+  liveStopInternal();
+  // Stopping the loop leaves the server it was talking to: whisper-server
+  // holds its model in memory (and on the GPU) with nobody left to ask it
+  // anything, and on this path there is no final transcription to end and
+  // release it. Killing it also ends the inference already in flight, whose
+  // answer nothing can receive now. It is safe twice — `stop()` lets go of
+  // the process before it waits — and the next recording starts a fresh one.
+  engine.stop().catch(() => { /* already gone */ });
   throttleWhileIdle(true);
   destroyBubble();
   enableMarkShortcut(false);
