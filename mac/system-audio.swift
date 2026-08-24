@@ -282,7 +282,7 @@ enum TapError: Error, CustomStringConvertible {
 /// The older door, kept for macOS 13 and for machines the tap will not open
 /// on. Nothing about the screen is read: the video side is configured down to
 /// a 2×2 frame once a second and thrown away.
-final class ScreenAudio: NSObject, SCStreamOutput, SCStreamDelegate {
+@MainActor final class ScreenAudio: NSObject, SCStreamOutput, SCStreamDelegate {
   private var stream: SCStream?
   // A provisional stream is allowed to inspect samples, but not to write
   // them: the tap remains the recorder until the trial has both heard its
@@ -487,7 +487,7 @@ final class ScreenAudio: NSObject, SCStreamOutput, SCStreamDelegate {
     stream = nil
   }
 
-  func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+  nonisolated func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
     guard type == .audio, CMSampleBufferDataIsReady(sampleBuffer) else { return }
 
     var blockBuffer: CMBlockBuffer?
@@ -529,7 +529,7 @@ final class ScreenAudio: NSObject, SCStreamOutput, SCStreamDelegate {
     if outputLock.withLock({ $0 }) { sink.write(pcm) }
   }
 
-  func stream(_ stream: SCStream, didStopWithError error: Error) {
+  nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
     let trial = trialLock.withLock { state -> Bool in
       if state.onTrial { state.died = true }
       return state.onTrial
@@ -569,7 +569,7 @@ let forceSCK = ProcessInfo.processInfo.environment["YAPPER_FORCE_SCK"] == "1"
 /// is active and breaks that cycle when cancelled. Capturing a bare dispatch
 /// source in its own handler leaves every cancelled mute-watch generation
 /// retaining its TapCapture for the rest of the helper's life.
-final class MainQueueTimer: @unchecked Sendable {
+@MainActor final class MainQueueTimer {
   private var source: DispatchSourceTimer?
 
   init(after: TimeInterval, every: TimeInterval) {
@@ -578,8 +578,13 @@ final class MainQueueTimer: @unchecked Sendable {
     self.source = source
   }
 
-  func setEventHandler(_ body: @escaping (MainQueueTimer) -> Void) {
-    source?.setEventHandler { [self] in body(self) }
+  func setEventHandler(_ body: @MainActor @Sendable @escaping (MainQueueTimer) -> Void) {
+    source?.setEventHandler { [self] in
+      // The source was created on DispatchQueue.main. Tell Swift the same
+      // fact so everything driven by this timer stays in one isolation
+      // domain instead of being treated as an arbitrary concurrent callback.
+      MainActor.assumeIsolated { body(self) }
+    }
   }
 
   func resume() { source?.resume() }
@@ -662,16 +667,16 @@ func stillPlaying(_ who: (id: AudioObjectID, pid: pid_t, label: String)) -> Bool
 // which puts every change on the main queue — the watch decides from Tasks,
 // and two of them dropping this reference at once would deallocate a stream
 // that is still capturing.
-nonisolated(unsafe) var screenCapturer: ScreenAudio?
-
-func holdCapturer(_ c: ScreenAudio?) {
-  if Thread.isMainThread { screenCapturer = c } else { DispatchQueue.main.sync { screenCapturer = c } }
+@MainActor enum CapturerStore {
+  static var current: ScreenAudio?
 }
+
+@MainActor func holdCapturer(_ c: ScreenAudio?) { CapturerStore.current = c }
 
 /// The one way through the screen door, from every place that gives up on the
 /// tap. Advisory lines carry the `note:` prefix so the app logs them and does
 /// nothing else — a bare line reads as a failure there.
-func fallBackToScreen(_ why: String) {
+@MainActor func fallBackToScreen(_ why: String) {
   note("note: \(why); falling back to screen capture")
   let capturer = ScreenAudio()
   holdCapturer(capturer)
@@ -690,7 +695,7 @@ func fallBackToScreen(_ why: String) {
 /// a real sample withdraws the doubt, and a later silent spell can raise it
 /// again instead of trusting one sample forever.
 @available(macOS 14.2, *)
-func watchScreenOnlyModern(_ capturer: ScreenAudio) {
+@MainActor func watchScreenOnlyModern(_ capturer: ScreenAudio) {
   let mutedAfter = Int(ProcessInfo.processInfo.environment["YAPPER_TAP_MUTED_AFTER"] ?? "") ?? 60
   var silentTicks = 0
   var said = false
@@ -718,7 +723,7 @@ func watchScreenOnlyModern(_ capturer: ScreenAudio) {
 /// honest way to prove that another application was producing sound. The
 /// remaining useful signal is prolonged all-zero capture. It is deliberately
 /// only a doubt: the stream stays up, and its first real sample withdraws it.
-func watchScreenOnlyLegacy(_ capturer: ScreenAudio) {
+@MainActor func watchScreenOnlyLegacy(_ capturer: ScreenAudio) {
   let mutedAfter = Int(ProcessInfo.processInfo.environment["YAPPER_TAP_MUTED_AFTER"] ?? "") ?? 60
   var silentTicks = 0
   var said = false
@@ -741,7 +746,7 @@ func watchScreenOnlyLegacy(_ capturer: ScreenAudio) {
   watch.resume()
 }
 
-func watchScreenOnly(_ capturer: ScreenAudio) {
+@MainActor func watchScreenOnly(_ capturer: ScreenAudio) {
   if #available(macOS 14.2, *) { watchScreenOnlyModern(capturer) }
   else { watchScreenOnlyLegacy(capturer) }
 }
@@ -782,7 +787,7 @@ func suspect(_ which: String, _ why: String) {
 /// the rest of the meeting, and a five-minute cap left one trusted forever if
 /// nothing played until then.
 @available(macOS 14.4, *)
-func armMuteWatch(_ t: TapCapture, attemptsLeft: Int) {
+@MainActor func armMuteWatch(_ t: TapCapture, attemptsLeft: Int) {
   // Every way a round can end goes through here: either there is another
   // attempt, or the doubt is said out loud. Nothing may return quietly with
   // the tap still silent — that is the shape of the original bug, an app
@@ -926,33 +931,39 @@ func armMuteWatch(_ t: TapCapture, attemptsLeft: Int) {
   watch.resume()
 }
 
-var tap: AnyObject?
-if #available(macOS 14.4, *), !forceSCK {
-  let t = TapCapture()
-  do {
-    try t.start()
-    tap = t
-  } catch let e as TapError {
-    if e.isPermission {
-      fail("permission: audio\nsystem audio permission missing: \(e)", code: 2)
+// Top-level executable code is not inferred to belong to the main actor even
+// though this helper has not entered its run loop yet. Establish that fact
+// explicitly: all ownership changes and health-watch setup below are main
+// actor work, just like every timer callback that follows.
+MainActor.assumeIsolated {
+  var tap: AnyObject?
+  if #available(macOS 14.4, *), !forceSCK {
+    let t = TapCapture()
+    do {
+      try t.start()
+      tap = t
+    } catch let e as TapError {
+      if e.isPermission {
+        fail("permission: audio\nsystem audio permission missing: \(e)", code: 2)
+      }
+      // Anything else is this machine refusing the tap, not the user refusing
+      // permission. Take the door that has worked since macOS 13 — after
+      // letting go of whatever the tap got as far as creating.
+      t.stop()
+      fallBackToScreen("tap unavailable (\(e))")
+    } catch {
+      t.stop()
+      fallBackToScreen("tap unavailable (\(error))")
     }
-    // Anything else is this machine refusing the tap, not the user refusing
-    // permission. Take the door that has worked since macOS 13 — after
-    // letting go of whatever the tap got as far as creating.
-    t.stop()
-    fallBackToScreen("tap unavailable (\(e))")
-  } catch {
-    t.stop()
-    fallBackToScreen("tap unavailable (\(error))")
   }
-}
 
-if tap == nil {
-  if screenCapturer == nil {
-    fallBackToScreen(forceSCK ? "YAPPER_FORCE_SCK is set" : "no process tap before macOS 14.4")
+  if tap == nil {
+    if CapturerStore.current == nil {
+      fallBackToScreen(forceSCK ? "YAPPER_FORCE_SCK is set" : "no process tap before macOS 14.4")
+    }
+  } else if #available(macOS 14.4, *), let t = tap as? TapCapture {
+    armMuteWatch(t, attemptsLeft: 3)
   }
-} else if #available(macOS 14.4, *), let t = tap as? TapCapture {
-  armMuteWatch(t, attemptsLeft: 3)
 }
 
 RunLoop.main.run()

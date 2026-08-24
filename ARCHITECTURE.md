@@ -153,7 +153,7 @@ unpacked from the asar — nothing can be executed from inside one.
 
 | Helper | Lines | Answers |
 |---|---:|---|
-| `mac/system-audio.swift` | 959 | What the machine is playing, as 16 kHz mono PCM on stdout (a Core Audio process tap, falling back to ScreenCaptureKit) |
+| `mac/system-audio.swift` | 969 | What the machine is playing, as 16 kHz mono PCM on stdout (a Core Audio process tap, falling back to ScreenCaptureKit) |
 | `mac/mic-probe.swift` | 145 | Which processes hold the microphone right now, as bundle ids (CoreAudio); with `--watch` it stays resident and prints changes plus a health heartbeat instead of being spawned every five seconds |
 | `mac/speaker-diarize/` | SwiftPM executable | Distinct remote voices and their time ranges, using FluidAudio's offline Core ML pipeline on macOS 14+ |
 
