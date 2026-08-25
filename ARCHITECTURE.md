@@ -106,7 +106,7 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 3751 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `main.js` | 3888 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
 | `engine.js` | 1149 | whisper.cpp lifecycle, the tier table, calibration, Metal-to-CPU fallback, WAV read/write, full-file transcription |
 | `digest.js` | 357 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
@@ -120,22 +120,27 @@ that ship are the files that run.
 | `meetings.js` | 89 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
+| `loginitem.js` | 371 | Where this copy is running from, and every rule about opening at login and removing itself |
 | `security.js` | 99 | Canonical meeting and import paths; blocks traversal and folder/file symlink escapes |
 | `storage.js` | 77 | Atomic bounded meeting-file access plus replacement for settings, reminders, caches and indexes |
 | `preload.js` | 129 | The only bridge between renderer and main |
 
-`keystore.js` and `bounds.js` are separate files for one reason: they are pure
-functions, so they can be tested without booting Electron, and `keystore.js`
-takes `safeStorage` as an argument so the "no keystore available" path is
-reachable in a test.
+`keystore.js`, `bounds.js` and `loginitem.js` are separate files for one
+reason: they are pure functions, so they can be tested without booting
+Electron, and each takes what it cannot compute as an argument — `keystore.js`
+takes `safeStorage`, so the "no keystore available" path is reachable in a
+test; `loginitem.js` takes the three filesystem answers it needs and the
+Electron calls it would otherwise make, so `build/test-login-item.js` can put a
+running copy on a mounted disk image, make macOS refuse a registration, or make
+the Trash refuse the bundle, and check what happens next.
 
 ### Renderer
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 3837 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
+| `renderer/app.js` | 3866 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
 | `renderer/style.css` | 1782 | Everything visual, light and dark |
-| `renderer/index.html` | 554 | Main window markup |
+| `renderer/index.html` | 594 | Main window markup |
 | `renderer/bubble.html` | 198 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
 | `renderer/bubble.js` | 181 | Its behaviour, including sizing itself to its own contents |
 | `renderer/splash.html` | 116 | Boot screen, including the first-run calibration status; follows the theme |

@@ -382,7 +382,11 @@ The rules around it:
   button beside the title is the shortcut, and it commits to a side rather than
   flipping Auto. Applies everywhere, including the capsule and the startup
   splash.
-- **Start at login** — on by default, switchable.
+- **Start at login** — on by default on Windows. On macOS it is off until it is
+  switched on, and the switch reports what macOS actually did with it: it can
+  want approving in System Settings first, and it cannot be turned on at all
+  from a copy running inside the dmg or from a temporary folder, because the
+  registration would name a path that is gone by the next login.
 - **Updates** — checked at launch and every four hours. **Windows** downloads in
   the background and applies on quit, or immediately from the sidebar pill.
   Signed **macOS** releases use the same ready-to-restart flow. Updating does

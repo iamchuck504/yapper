@@ -178,7 +178,7 @@ or the **Yapper** shortcut on the desktop (Windows) / in Applications (macOS).
 - **Cancelable generation**: while notes are being written, Regenerate becomes **Cancel**. It stops the model request itself; the transcript remains safe and a canceled rewrite restores the previous complete notes.
 - **Personal action list**: action items remain visible in every meeting, but none are copied into your list automatically. Use **+ my list** on only the items that belong to you; repeated selections of the same task fold into one row.
 - **Export** (menu): notes as PDF, notes as Markdown, **the full transcript as Markdown** (bold timestamps, new paragraph after a minute of silence), transcript as .txt, or notes + transcript in a single .md.
-- **Start with Windows** / **Start at login**: launches Yapper when you sign in (on by default, switched off from the toggle).
+- **Start with Windows** / **Start at login**: launches Yapper when you sign in. On Windows it is on by default; on macOS it is off until you switch it on, and the switch shows what macOS did rather than what was asked — it can need allowing in System Settings, and a copy running from the dmg cannot register at all.
 - **Language**: English by default; Español or *As spoken* switch the body of the notes (the section headings stay in English, the app reads them). The notes are shown as colour-coded cards: Summary (violet), Key points (cyan), Decisions (green), Action items (amber), Open questions (pink), Blockers/Risks (red), Next steps (teal).
 
 ## Sharing with colleagues

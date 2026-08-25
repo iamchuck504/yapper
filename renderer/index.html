@@ -304,7 +304,8 @@
           <span class="opt-label">Live</span>
           <label class="switch"><input type="checkbox" id="opt-bubble" /><span class="track"></span>Floating bubble</label>
           <label class="switch"><input type="checkbox" id="opt-autodetect" /><span class="track"></span>Auto-detect meetings</label>
-          <label class="switch"><input type="checkbox" id="opt-startup" /><span class="track"></span><span id="startup-label">Start with Windows</span></label>
+          <label class="switch"><input type="checkbox" id="opt-startup" aria-describedby="startup-hint" /><span class="track"></span><span id="startup-label">Start with Windows</span></label>
+          <span id="startup-hint" class="mic-hint" role="status" aria-live="polite" hidden></span>
         </div>
         <div class="opt-row" id="bubble-corner-row">
           <span class="opt-label">Bubble starts</span>

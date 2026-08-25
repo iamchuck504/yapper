@@ -404,10 +404,40 @@ bubbleToggle.checked = bubbleEnabled;
 autoDetectToggle.checked = autoDetectEnabled;
 window.yapper.setAutoDetect(autoDetectEnabled);
 
-// "start with Windows" lives in the main process (it writes the login item)
-window.yapper.getOpenAtLogin().then(on => { startupToggle.checked = on; });
+// "start with Windows" lives in the main process (it writes the login item),
+// and on macOS the main process is only reporting what the system said. It can
+// answer something other than what was asked: refused, waiting to be allowed in
+// System Settings, or unavailable because this copy is running from a disk
+// image and registering it would name a path that is gone tomorrow. So the
+// answer decides what the switch shows, never the click.
+const startupHint = $('startup-hint');
+let startupSeq = 0;
+
+function showStartupState(r) {
+  const state = (r && r.state) || 'error';
+  startupToggle.checked = state === 'enabled';
+  // Unavailable is the one case where the switch itself is wrong to offer:
+  // there is nothing this copy may change.
+  startupToggle.disabled = state === 'unavailable';
+  const why = (r && (r.why || r.message)) || '';
+  startupHint.textContent = why;
+  startupHint.hidden = !why;
+}
+
+function askStartup(request) {
+  const seq = ++startupSeq;
+  startupToggle.disabled = true;
+  return request()
+    .catch(e => ({ state: 'error', message: `Yapper could not read this setting. ${e.message || e}` }))
+    // Two quick clicks: only the newest answer may paint, or the switch ends
+    // up showing the state from the click before last.
+    .then(r => { if (seq === startupSeq) showStartupState(r); });
+}
+
+askStartup(() => window.yapper.getOpenAtLogin());
 startupToggle.addEventListener('change', () => {
-  window.yapper.setOpenAtLogin(startupToggle.checked);
+  const wanted = startupToggle.checked;
+  askStartup(() => window.yapper.setOpenAtLogin(wanted));
 });
 
 bubbleToggle.addEventListener('change', () => {

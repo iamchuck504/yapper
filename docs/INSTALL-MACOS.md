@@ -44,6 +44,12 @@ curl -fsSL https://github.com/iamchuck504/yapper-releases/releases/latest/downlo
 Take `Yapper-<version>-arm64.dmg` (~95 MB), open it, drag Yapper to
 Applications, then open it normally.
 
+Drag it across before you open it. Yapper runs from inside the dmg, but macOS
+gives a copy started there a temporary read-only home, and a few settings —
+**Start at login** among them — cannot be turned on from one, because they
+would record a location that is gone once the disk image is ejected. Yapper
+says so rather than pretending it worked.
+
 ## 2. Gatekeeper verification
 
 Release builds are signed with the Developer ID Application certificate for
@@ -156,6 +162,25 @@ Keys are sealed with the macOS Keychain, never written in plain text, and never
 returned to the interface after saving. **Careful with free tiers:** most train
 on what you send, and the app says so when you pick one.
 
+## Start at login
+
+Off until you turn it on, in **Settings → Start at login**. Nothing registers
+Yapper to open at login on your behalf.
+
+The switch reports macOS rather than its own memory of what you asked for.
+macOS 13 and later keeps that registration itself, which means two things
+worth knowing:
+
+- If you turn it off in **System Settings → General → Login Items** (**Login
+  Items & Extensions** on macOS 15 and up), Yapper agrees with you. It does not
+  turn itself back on at the next launch.
+- macOS sometimes wants the entry allowed there before it takes effect. The
+  switch says so instead of showing itself as on.
+
+It cannot be turned on from a copy running inside the dmg, from a temporary
+folder, or from the read-only copy macOS makes of an app opened outside
+`/Applications`. Move Yapper to `/Applications` and open it from there.
+
 ## Updating
 
 Signed macOS copies check the release feed at launch and every four hours. The
@@ -179,9 +204,27 @@ Either way:
 
 ## Uninstalling
 
-Drag `/Applications/Yapper.app` to the Trash. Your meetings are **not** deleted:
-they live in `~/Documents/Meetings` as ordinary folders. To remove everything
-else:
+**Yapper → Uninstall Yapper…**, from the menu bar. In order, it stops itself
+opening at login, checks with macOS that it really has, moves itself to the
+Trash, and — only if you tick the box — moves its settings and the downloaded
+engine to the Trash too. Your meetings are **not** deleted: they live in
+`~/Documents/Meetings` as ordinary folders and are never a target.
+
+If any step cannot be completed it stops there and says so, rather than
+half-removing the app. If it cannot withdraw the login item, nothing is moved.
+If the Trash refuses the app — a copy installed for every user is owned by
+`root` — your settings are left alone. If it could not remove the settings or
+the engine, it tells you which path is still there.
+
+The entry only appears in a copy that is really installed. From the dmg, or
+from a temporary folder, the bundle you are running is not the one you keep.
+
+Prefer that to dragging the app to the Trash yourself. macOS keeps the "open at
+login" registration in its own database rather than inside the app, so deleting
+the app strands an entry that System Settings goes on listing with nothing
+behind it. If you have already dragged it to the Trash, remove that entry by
+hand in System Settings → General → **Login Items** (**Login Items &
+Extensions** on macOS 15 and up), and then:
 
 ```bash
 rm -rf ~/Library/Application\ Support/yapper

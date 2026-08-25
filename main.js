@@ -17,7 +17,10 @@ if (process.env.YAPPER_HOME) {
   app.setPath('documents', home);
 }
 
+const os = require('os');
+
 const { clampToArea } = require('./bounds');
+const loginitem = require('./loginitem');
 const engine = require('./engine');
 const live = require('./live');
 const llm = require('./llm');
@@ -520,6 +523,9 @@ function buildAppMenu() {
         { role: 'hideOthers' },
         { role: 'unhide' },
         { type: 'separator' },
+        // Here rather than buried in Settings: it is the last thing anybody
+        // wants from an app, and the only place it can be done completely.
+        ...(canUninstallSelf() ? [{ label: 'Uninstall Yapper…', click: () => uninstallSelf() }] : []),
         { role: 'quit', label: 'Quit Yapper' }
       ]
     }] : []),
@@ -817,16 +823,61 @@ function writeSettings(s, drop = []) {
 const LEGACY_LLM_KEYS = ['llmKey', 'llmModel', 'llmBaseUrl'];
 
 // Start with Windows. Defaults to on, but only the first time — after that the
-// user's choice is what counts.
-function applyOpenAtLogin(enabled) {
-  // macOS registers the bundle, and works it out on its own. Handing it
-  // process.execPath registers Yapper.app/Contents/MacOS/Yapper — the binary
-  // inside, which is not what LaunchServices reopens at login, so the setting
-  // reads as on while nothing ever starts.
-  if (process.platform === 'darwin') {
-    app.setLoginItemSettings({ openAtLogin: enabled });
-    return;
+// user's choice is what counts. macOS does not work that way and no longer
+// pretends to: loginitem.js holds everything that can be decided about it, and
+// nothing there registers anything the user did not ask for.
+
+// The three questions loginitem.js asks of the filesystem. They live here so
+// the decisions that depend on them can be tested without one.
+const bundleIO = {
+  isDirectory(p) { try { return fs.statSync(p).isDirectory(); } catch { return false; } },
+  realpath(p) { try { return fs.realpathSync(p); } catch { return null; } },
+  // EROFS is a read-only filesystem — a mounted disk image, which is not an
+  // installation. EACCES and EPERM are a directory this account may not write
+  // to, which is what /Applications answers on a Mac where the user is not an
+  // admin, and that is a perfectly permanent install. Telling those apart is
+  // why this is not a check for /Volumes: people do keep applications on an
+  // external disk.
+  writeStatus(p) {
+    try { fs.accessSync(p, fs.constants.W_OK); return 'writable'; } catch (e) {
+      if (e.code === 'EROFS') return 'read-only';
+      if (e.code === 'ENOENT') return 'missing';
+      return 'denied';
+    }
   }
+};
+
+// Where this copy is running from, worked out once: the path of a running
+// process does not change under it.
+let macRunCache = null;
+function macRun() {
+  if (!macRunCache) {
+    macRunCache = loginitem.classifyRun({
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      exe: app.getPath('exe'),
+      tempDirs: [os.tmpdir(), '/private/var/folders', '/private/tmp', '/tmp'],
+      io: bundleIO
+    });
+  }
+  return macRunCache;
+}
+
+function loginItemDeps() {
+  return {
+    run: macRun,
+    getLoginItem: () => app.getLoginItemSettings(),
+    setLoginItem: on => app.setLoginItemSettings({ openAtLogin: on }),
+    readSettings,
+    writeSettings
+  };
+}
+
+function applyOpenAtLogin(enabled) {
+  // macOS is not registered from here at all — startup registering anything is
+  // the bug loginitem.js exists to prevent. Windows is unchanged: it needs
+  // process.execPath and the app directory, and its settings file is the
+  // record, because there the path is what gets registered.
   if (process.platform === 'win32') {
     app.setLoginItemSettings({
       openAtLogin: enabled,
@@ -837,6 +888,14 @@ function applyOpenAtLogin(enabled) {
 }
 
 function initOpenAtLogin() {
+  if (process.platform === 'darwin') {
+    const now = loginitem.initMac(loginItemDeps());
+    // The support answer to "the switch is on and nothing starts at login", and
+    // to "why is the uninstaller missing": which copy this is decides both.
+    console.log(`[login-item] ${macRun().kind} copy · open at login: ${now.state}`
+      + ` · uninstall ${canUninstallSelf() ? 'offered' : 'not offered'}`);
+    return now.state === 'enabled';
+  }
   const s = readSettings();
   if (s.openAtLogin === undefined) {
     s.openAtLogin = true;
@@ -846,7 +905,82 @@ function initOpenAtLogin() {
   return s.openAtLogin;
 }
 
-ipcMain.handle('get-open-at-login', async () => readSettings().openAtLogin !== false);
+// What the switch shows. On macOS the system is the record — it can refuse, it
+// can want approving first, and the user can revoke it in System Settings
+// without telling us — so the answer carries why and not just on or off.
+function openAtLoginState() {
+  if (process.platform !== 'darwin') {
+    return { state: readSettings().openAtLogin !== false ? 'enabled' : 'disabled' };
+  }
+  const run = macRun();
+  if (!loginitem.canRegister(run)) return { state: 'unavailable', kind: run.kind, why: run.why };
+  return { ...loginitem.readState(app.getLoginItemSettings()), kind: run.kind };
+}
+
+ipcMain.handle('get-open-at-login', async () => openAtLoginState());
+
+// ---------- uninstalling ----------
+// Dragging the bundle to the Trash is how a Mac app is removed, and it is the
+// one route that cannot clean up after itself: the login item is a record in
+// the system's background-task database, not a file in the bundle, so deleting
+// the bundle strands an entry that System Settings goes on listing and that
+// nothing here can reach — by then there is no app left to withdraw it.
+//
+// Windows ships a real uninstaller, so this is macOS only, and only from a
+// permanent install: from a disk image or a translocated copy the bundle is
+// not the one the user keeps, and in a dev run it is the checkout's Electron.
+function canUninstallSelf() {
+  return loginitem.canUninstall(macRun());
+}
+
+function uninstallDeps() {
+  const parent = win && !win.isDestroyed() ? win : null;
+  const ask = opts => (parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts));
+  return {
+    run: macRun,
+    getLoginItem: () => app.getLoginItemSettings(),
+    setLoginItem: on => app.setLoginItemSettings({ openAtLogin: on }),
+    confirm: async () => {
+      const { response, checkboxChecked } = await ask({
+        type: 'warning',
+        buttons: ['Move to Trash', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        message: 'Remove Yapper from this Mac?',
+        detail: 'Yapper stops itself opening at login and moves itself to the '
+          + 'Trash.\n\nYour meetings are not touched: they stay in '
+          + `${MEETINGS_DIR} as ordinary folders.`,
+        checkboxLabel: 'Also move settings and the downloaded engine (~600 MB) to the Trash',
+        checkboxChecked: false
+      });
+      return { proceed: response === 0, alsoData: checkboxChecked };
+    },
+    // The Trash rather than rm: 600 MB of engine and every setting is a lot to
+    // take on one click, and this way the click is reversible until it is
+    // emptied. Existence is checked here so "it was not there" is a code the
+    // caller can recognise, whatever shape Electron's error takes.
+    trash: async p => {
+      if (!fs.existsSync(p)) return { ok: false, code: 'ENOENT' };
+      try { await shell.trashItem(p); return { ok: true }; } catch (e) {
+        return { ok: false, code: e.code, message: e.message };
+      }
+    },
+    dataPlan: () => loginitem.dataPlan({
+      userData: app.getPath('userData'),
+      engineHome: engineHome(),
+      meetings: MEETINGS_DIR,
+      io: bundleIO
+    }),
+    report: async r => {
+      await ask({ type: 'warning', buttons: ['OK'], message: r.message, detail: r.detail });
+    },
+    quit: () => app.quit()
+  };
+}
+
+async function uninstallSelf() {
+  await loginitem.uninstall(uninstallDeps());
+}
 
 ipcMain.handle('get-bubble-corner', async () => bubbleCorner());
 
@@ -1048,12 +1182,16 @@ ipcMain.on('set-theme', (_e, theme) => {
   writeSettings(s);
 });
 
+// The only place a registration is asked for. It answers with what macOS did,
+// which is not always what was asked: it can refuse, and it can decide the user
+// has to allow it in System Settings first.
 ipcMain.handle('set-open-at-login', async (_e, enabled) => {
+  if (process.platform === 'darwin') return loginitem.setMac(loginItemDeps(), !!enabled);
   const s = readSettings();
   s.openAtLogin = !!enabled;
   writeSettings(s);
   applyOpenAtLogin(s.openAtLogin);
-  return s.openAtLogin;
+  return { state: s.openAtLogin ? 'enabled' : 'disabled' };
 });
 
 // ---------- startup splash ----------
