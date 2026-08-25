@@ -831,21 +831,38 @@ const LEGACY_LLM_KEYS = ['llmKey', 'llmModel', 'llmBaseUrl'];
 // the decisions that depend on them can be tested without one.
 const bundleIO = {
   isDirectory(p) { try { return fs.statSync(p).isDirectory(); } catch { return false; } },
-  realpath(p) { try { return fs.realpathSync(p); } catch { return null; } },
-  // EROFS is a read-only filesystem — a mounted disk image, which is not an
-  // installation. EACCES and EPERM are a directory this account may not write
-  // to, which is what /Applications answers on a Mac where the user is not an
-  // admin, and that is a perfectly permanent install. Telling those apart is
-  // why this is not a check for /Volumes: people do keep applications on an
-  // external disk.
+  // Structured, because the difference between "it is not there" and "I was
+  // not allowed to look" decides whether a path may be deleted. Handing back
+  // the path unchanged on failure is what would let a comparison against a
+  // canonical path quietly become a comparison against a guess.
+  realpath(p) {
+    try { return { path: fs.realpathSync(p) }; } catch (e) { return { code: e.code || 'EIO' }; }
+  },
+  identity(p) {
+    try { const st = fs.statSync(p); return { dev: st.dev, ino: st.ino }; }
+    catch (e) { return { code: e.code || 'EIO' }; }
+  },
+  // EROFS is a read-only filesystem. EACCES and EPERM are a directory this
+  // account may not write to, which is what /Applications answers on a Mac
+  // where the user is not an admin — still an install. Anything else is a
+  // question that did not get answered, and 'error' is what says so: it must
+  // not be folded into 'denied', which is a permission and reads as fine.
   writeStatus(p) {
     try { fs.accessSync(p, fs.constants.W_OK); return 'writable'; } catch (e) {
       if (e.code === 'EROFS') return 'read-only';
       if (e.code === 'ENOENT') return 'missing';
-      return 'denied';
+      if (e.code === 'EACCES' || e.code === 'EPERM') return 'denied';
+      return 'error';
     }
   }
 };
+
+// Where an installed copy lives. Not a guess from the shape of a path: a copy
+// has to be directly under one of these before it may register itself or
+// remove itself. loginitem.js says why, and what it costs.
+function installRoots() {
+  return ['/Applications', path.join(app.getPath('home'), 'Applications')];
+}
 
 // Where this copy is running from, worked out once: the path of a running
 // process does not change under it.
@@ -857,6 +874,7 @@ function macRun() {
       isPackaged: app.isPackaged,
       exe: app.getPath('exe'),
       tempDirs: [os.tmpdir(), '/private/var/folders', '/private/tmp', '/tmp'],
+      installRoots: installRoots(),
       io: bundleIO
     });
   }
@@ -917,7 +935,13 @@ function openAtLoginState() {
   return { ...loginitem.readState(app.getLoginItemSettings()), kind: run.kind };
 }
 
-ipcMain.handle('get-open-at-login', async () => openAtLoginState());
+// What the renderer paints comes back with the answer, decided in loginitem.js
+// where it is tested, rather than worked out again in the page.
+function openAtLoginReply(result) {
+  return { ...result, view: loginitem.switchView(result) };
+}
+
+ipcMain.handle('get-open-at-login', async () => openAtLoginReply(openAtLoginState()));
 
 // ---------- uninstalling ----------
 // Dragging the bundle to the Trash is how a Mac app is removed, and it is the
@@ -926,9 +950,12 @@ ipcMain.handle('get-open-at-login', async () => openAtLoginState());
 // the bundle strands an entry that System Settings goes on listing and that
 // nothing here can reach — by then there is no app left to withdraw it.
 //
-// Windows ships a real uninstaller, so this is macOS only, and only from a
-// permanent install: from a disk image or a translocated copy the bundle is
-// not the one the user keeps, and in a dev run it is the checkout's Electron.
+// Windows ships a real uninstaller, so this is macOS only, and only from a copy
+// installed under an approved root: from a disk image, a temporary folder or
+// Downloads the bundle is not the one the user keeps, and in a dev run it is
+// the checkout's Electron. What may be removed is decided in loginitem.js, and
+// nothing is removed until its preflight has proved the app, its settings and
+// the meetings folder are separate places.
 function canUninstallSelf() {
   return loginitem.canUninstall(macRun());
 }
@@ -947,8 +974,10 @@ function uninstallDeps() {
         defaultId: 1,
         cancelId: 1,
         message: 'Remove Yapper from this Mac?',
-        detail: 'Yapper stops itself opening at login and moves itself to the '
-          + 'Trash.\n\nYour meetings are not touched: they stay in '
+        detail: 'Yapper stops itself opening at login, checks with macOS that it '
+          + 'really has, and then moves itself to the Trash. If any of that '
+          + 'cannot be done it stops and tells you, rather than half-removing '
+          + 'itself.\n\nYour meetings are not touched: they stay in '
           + `${MEETINGS_DIR} as ordinary folders.`,
         checkboxLabel: 'Also move settings and the downloaded engine (~600 MB) to the Trash',
         checkboxChecked: false
@@ -965,10 +994,14 @@ function uninstallDeps() {
         return { ok: false, code: e.code, message: e.message };
       }
     },
-    dataPlan: () => loginitem.dataPlan({
+    // Everything that would be touched, worked out and proved separate before
+    // the login item — the step that cannot be undone — is touched at all.
+    preflight: alsoData => loginitem.uninstallPreflight({
+      bundle: macRun().bundle,
       userData: app.getPath('userData'),
       engineHome: engineHome(),
       meetings: MEETINGS_DIR,
+      alsoData,
       io: bundleIO
     }),
     report: async r => {
@@ -1186,12 +1219,14 @@ ipcMain.on('set-theme', (_e, theme) => {
 // which is not always what was asked: it can refuse, and it can decide the user
 // has to allow it in System Settings first.
 ipcMain.handle('set-open-at-login', async (_e, enabled) => {
-  if (process.platform === 'darwin') return loginitem.setMac(loginItemDeps(), !!enabled);
+  if (process.platform === 'darwin') {
+    return openAtLoginReply(loginitem.setMac(loginItemDeps(), !!enabled));
+  }
   const s = readSettings();
   s.openAtLogin = !!enabled;
   writeSettings(s);
   applyOpenAtLogin(s.openAtLogin);
-  return { state: s.openAtLogin ? 'enabled' : 'disabled' };
+  return openAtLoginReply({ state: s.openAtLogin ? 'enabled' : 'disabled' });
 });
 
 // ---------- startup splash ----------

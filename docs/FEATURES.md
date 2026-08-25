@@ -383,10 +383,11 @@ The rules around it:
   flipping Auto. Applies everywhere, including the capsule and the startup
   splash.
 - **Start at login** — on by default on Windows. On macOS it is off until it is
-  switched on, and the switch reports what macOS actually did with it: it can
-  want approving in System Settings first, and it cannot be turned on at all
-  from a copy running inside the dmg or from a temporary folder, because the
-  registration would name a path that is gone by the next login.
+  switched on, it only works from an Applications folder on the startup disk
+  (`/Applications` or `~/Applications` — not a disk image, a temporary folder,
+  or an external disk), and the switch reports what macOS actually did: it can
+  register and then wait to be allowed in System Settings, in which case the
+  switch stays on and switching it off withdraws it.
 - **Updates** — checked at launch and every four hours. **Windows** downloads in
   the background and applies on quit, or immediately from the sidebar pill.
   Signed **macOS** releases use the same ready-to-restart flow. Updating does

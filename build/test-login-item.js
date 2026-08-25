@@ -1,13 +1,13 @@
 // Behaviour, not text. The rules in loginitem.js decide whether a login item
 // gets registered and whether the uninstaller is allowed to delete anything, so
 // what has to be checked is what they do — with the filesystem and Electron
-// replaced by fakes that record every call.
+// replaced by fakes that record every call and can refuse to answer the way a
+// real filesystem refuses.
 //
 // A regex over main.js cannot do that: invert the classification and the source
-// still matches. Every case here fails if the predicate is flipped, if the
-// result of withdrawing the login item is ignored, or if a step runs out of
-// order.
-const path = require('path');
+// still matches. Every case here fails if a predicate is flipped, if the result
+// of withdrawing the login item is ignored, if a canonicalisation failure is
+// swallowed, or if a step runs out of order.
 const L = require('../loginitem');
 
 let fails = 0;
@@ -19,17 +19,32 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 // ---------- fakes ----------
 
-/** @param {{dirs?:string[], links?:object, write?:object}} o */
-function fakeIO({ dirs = [], links = {}, write = {} } = {}) {
+/**
+ * A filesystem that can say no. `links` maps a path to its real path, to an
+ * `{code}` refusal, or to null for "not there"; anything unlisted resolves to
+ * itself. `ids` gives device/inode identity, defaulting to one per path so
+ * different paths are different directories.
+ */
+function fakeIO({ dirs = [], links = {}, write = {}, ids = {} } = {}) {
+  const has = Object.prototype.hasOwnProperty;
   return {
     isDirectory: p => dirs.includes(p),
-    // `null` means realpath failed — the path is gone.
-    realpath: p => (Object.prototype.hasOwnProperty.call(links, p) ? links[p] : p),
+    realpath(p) {
+      if (!has.call(links, p)) return { path: p };
+      const v = links[p];
+      if (v === null) return { code: 'ENOENT' };
+      if (typeof v === 'object') return v;              // {code} or {path}
+      return { path: v };
+    },
+    identity(p) {
+      if (has.call(ids, p)) return ids[p];
+      return { dev: 1, ino: `ino:${p}` };
+    },
     writeStatus: p => write[p] || 'writable'
   };
 }
 
-/** An Electron whose every answer is scripted and every call is recorded. */
+/** An Electron whose every answer is scripted and every call recorded. */
 function fakeSystem({ status = 'not-registered', after = null, settings = {} } = {}) {
   const calls = [];
   let now = status;
@@ -39,8 +54,11 @@ function fakeSystem({ status = 'not-registered', after = null, settings = {} } =
     getLoginItem: () => { calls.push(['get']); return { status: now, openAtLogin: now === 'enabled' }; },
     setLoginItem: on => {
       calls.push(['set', on]);
-      // `after` is what macOS decides, which is not always what was asked.
-      now = after !== null ? after : (on ? 'enabled' : 'not-registered');
+      // What macOS decides, which is not always what was asked. Withdrawing
+      // always lands on not-registered — including from requires-approval,
+      // which is a registration that exists and can be taken back.
+      if (!on) now = 'not-registered';
+      else now = after !== null ? after : 'enabled';
     },
     readSettings: () => ({ ...settings }),
     writeSettings: s => { Object.assign(settings, s); calls.push(['write', { ...s }]); }
@@ -51,6 +69,8 @@ const setCalls = sys => sys.calls.filter(c => c[0] === 'set');
 
 // ---------- 1. where is this copy running from ----------
 
+const ROOTS = ['/Applications', '/Users/ana/Applications'];
+const TEMPS = ['/private/var/folders', '/private/tmp', '/tmp'];
 const APPS = '/Applications/Yapper.app';
 const APPS_EXE = `${APPS}/Contents/MacOS/Yapper`;
 
@@ -58,6 +78,11 @@ const runs = [
   ['a normal install in /Applications', {
     exe: APPS_EXE, io: fakeIO({ dirs: [APPS] })
   }, L.KIND.PERMANENT, APPS],
+
+  ['an install in the user\'s own Applications folder', {
+    exe: '/Users/ana/Applications/Yapper.app/Contents/MacOS/Yapper',
+    io: fakeIO({ dirs: ['/Users/ana/Applications/Yapper.app'] })
+  }, L.KIND.PERMANENT, '/Users/ana/Applications/Yapper.app'],
 
   ['/Applications on a Mac where this account is not an admin', {
     exe: APPS_EXE, io: fakeIO({ dirs: [APPS], write: { '/Applications': 'denied' } })
@@ -76,36 +101,63 @@ const runs = [
     })
   }, L.KIND.READ_ONLY, '/Volumes/Yapper 1.4.0/Yapper.app'],
 
-  ['a real install on an external disk, which /Volumes alone would have condemned', {
+  // The one the old rule got wrong: writable, not temporary, and still not an
+  // installation.
+  ['a read-write disk image, which is writable and still not an install', {
+    exe: '/Volumes/Yapper RW/Yapper.app/Contents/MacOS/Yapper',
+    io: fakeIO({ dirs: ['/Volumes/Yapper RW/Yapper.app'] })
+  }, L.KIND.UNAPPROVED, '/Volumes/Yapper RW/Yapper.app'],
+
+  ['a copy left in Downloads', {
+    exe: '/Users/ana/Downloads/Yapper.app/Contents/MacOS/Yapper',
+    io: fakeIO({ dirs: ['/Users/ana/Downloads/Yapper.app'] })
+  }, L.KIND.UNAPPROVED, '/Users/ana/Downloads/Yapper.app'],
+
+  ['an Applications folder on an external disk — refused, deliberately', {
     exe: '/Volumes/Samsung T7/Applications/Yapper.app/Contents/MacOS/Yapper',
     io: fakeIO({ dirs: ['/Volumes/Samsung T7/Applications/Yapper.app'] })
-  }, L.KIND.PERMANENT, '/Volumes/Samsung T7/Applications/Yapper.app'],
+  }, L.KIND.UNAPPROVED, '/Volumes/Samsung T7/Applications/Yapper.app'],
+
+  ['a bundle buried inside a folder under an approved root', {
+    exe: '/Applications/Utilities extra/Yapper.app/Contents/MacOS/Yapper',
+    io: fakeIO({ dirs: ['/Applications/Utilities extra/Yapper.app'] })
+  }, L.KIND.UNAPPROVED, '/Applications/Utilities extra/Yapper.app'],
 
   ['unpacked into a temp folder', {
     exe: '/private/tmp/dl/Yapper.app/Contents/MacOS/Yapper',
     io: fakeIO({ dirs: ['/private/tmp/dl/Yapper.app'] })
   }, L.KIND.TEMPORARY, '/private/tmp/dl/Yapper.app'],
 
-  ['renamed and kept somewhere else', {
-    exe: '/Users/ana/Applications/Notes Recorder.app/Contents/MacOS/Yapper',
-    io: fakeIO({ dirs: ['/Users/ana/Applications/Notes Recorder.app'] })
-  }, L.KIND.PERMANENT, '/Users/ana/Applications/Notes Recorder.app'],
+  ['renamed, but still installed', {
+    exe: '/Applications/Notes Recorder.app/Contents/MacOS/Yapper',
+    io: fakeIO({ dirs: ['/Applications/Notes Recorder.app'] })
+  }, L.KIND.PERMANENT, '/Applications/Notes Recorder.app'],
 
   ['an upper-case extension, which macOS will still run', {
     exe: '/Applications/YAPPER.APP/Contents/MacOS/Yapper',
     io: fakeIO({ dirs: ['/Applications/YAPPER.APP'] })
   }, L.KIND.PERMANENT, '/Applications/YAPPER.APP'],
 
-  ['a symlinked path that still lands in a bundle', {
+  ['an alias of the whole bundle, which lands on the same directory', {
     exe: '/Volumes/Data/Applications/Yapper.app/Contents/MacOS/Yapper',
     io: fakeIO({
-      dirs: ['/System/Volumes/Data/Applications/Yapper.app'],
+      dirs: [APPS],
       links: {
-        '/Volumes/Data/Applications/Yapper.app/Contents/MacOS/Yapper':
-          '/System/Volumes/Data/Applications/Yapper.app/Contents/MacOS/Yapper'
+        '/Volumes/Data/Applications/Yapper.app/Contents/MacOS/Yapper': APPS_EXE,
+        '/Volumes/Data/Applications/Yapper.app': APPS
       }
     })
-  }, L.KIND.PERMANENT, '/System/Volumes/Data/Applications/Yapper.app'],
+  }, L.KIND.PERMANENT, APPS],
+
+  // Both ends are real, valid bundles. Only comparing the two canonical
+  // bundles catches it; checking each layout separately does not.
+  ['a real decoy.app whose executable links into another valid bundle', {
+    exe: '/Applications/decoy.app/Contents/MacOS/Yapper',
+    io: fakeIO({
+      dirs: [APPS, '/Applications/decoy.app'],
+      links: { '/Applications/decoy.app/Contents/MacOS/Yapper': APPS_EXE }
+    })
+  }, L.KIND.UNKNOWN, null],
 
   ['a symlink that only looks like a bundle', {
     exe: '/tmp/decoy.app/Contents/MacOS/Yapper',
@@ -119,18 +171,26 @@ const runs = [
     exe: '/Applications/Yapper.app/Yapper', io: fakeIO({ dirs: [APPS] })
   }, L.KIND.UNKNOWN, null],
 
-  ['a bundle that is not there any more', {
+  ['a bundle that is not a directory any more', {
     exe: APPS_EXE, io: fakeIO({ dirs: [] })
   }, L.KIND.UNKNOWN, null],
 
   ['an executable whose real path cannot be read', {
-    exe: APPS_EXE, io: fakeIO({ dirs: [APPS], links: { [APPS_EXE]: null } })
+    exe: APPS_EXE, io: fakeIO({ dirs: [APPS], links: { [APPS_EXE]: { code: 'EACCES' } } })
+  }, L.KIND.UNKNOWN, null],
+
+  ['a bundle whose own real path cannot be read', {
+    exe: APPS_EXE, io: fakeIO({ dirs: [APPS], links: { [APPS]: { code: 'EIO' } } })
   }, L.KIND.UNKNOWN, null],
 
   ['a location that no longer exists', {
     exe: '/Volumes/gone/Yapper.app/Contents/MacOS/Yapper',
     io: fakeIO({ dirs: ['/Volumes/gone/Yapper.app'], write: { '/Volumes/gone': 'missing' } })
   }, L.KIND.UNKNOWN, '/Volumes/gone/Yapper.app'],
+
+  ['a filesystem that answered with an I/O error', {
+    exe: APPS_EXE, io: fakeIO({ dirs: [APPS], write: { '/Applications': 'error' } })
+  }, L.KIND.UNKNOWN, APPS],
 
   ['a relative path, which is not an install at all', {
     exe: 'Yapper.app/Contents/MacOS/Yapper', io: fakeIO({})
@@ -140,25 +200,31 @@ const runs = [
 for (const [name, o, kind, bundle] of runs) {
   const run = L.classifyRun({
     platform: 'darwin', isPackaged: true, exe: o.exe,
-    tempDirs: ['/private/var/folders', '/private/tmp', '/tmp'], io: o.io
+    tempDirs: TEMPS, installRoots: ROOTS, io: o.io
   });
   check(name, run.kind === kind && run.bundle === bundle,
     `kind=${run.kind} bundle=${run.bundle}\n      wanted kind=${kind} bundle=${bundle}`);
 }
 
+check('a read-only location is not called a disk image as though we knew',
+  /read-only disk/.test(L.WHY[L.KIND.READ_ONLY]) && !/^This copy is running from a disk image/.test(L.WHY[L.KIND.READ_ONLY]),
+  L.WHY[L.KIND.READ_ONLY]);
+check('and an unapproved location says what is actually wrong with it',
+  /Applications folder/.test(L.WHY[L.KIND.UNAPPROVED]), L.WHY[L.KIND.UNAPPROVED]);
+
 check('a dev run is its own case, before any path is looked at',
   L.classifyRun({ platform: 'darwin', isPackaged: false, exe: APPS_EXE, io: fakeIO() }).kind
   === L.KIND.DEVELOPMENT, 'a checkout would be treated as an install');
 check('Windows is none of this',
-  L.classifyRun({ platform: 'win32', isPackaged: true, exe: 'C:\\\\x\\\\Yapper.exe', io: fakeIO() }).kind
+  L.classifyRun({ platform: 'win32', isPackaged: true, exe: 'C:\\x\\Yapper.exe', io: fakeIO() }).kind
   === L.KIND.OTHER_OS, 'the macOS rules would be applied to Windows');
 
-// Only one of them may be registered, and only one may delete itself.
 for (const kind of Object.values(L.KIND)) {
-  const run = { kind, bundle: kind === L.KIND.PERMANENT ? APPS : APPS };
   const want = kind === L.KIND.PERMANENT;
-  check(`${kind}: register ${want ? 'allowed' : 'refused'}`, L.canRegister(run) === want);
-  check(`${kind}: uninstall ${want ? 'allowed' : 'refused'}`, L.canUninstall(run) === want);
+  check(`${kind}: register ${want ? 'allowed' : 'refused'}`,
+    L.canRegister({ kind, bundle: APPS }) === want);
+  check(`${kind}: uninstall ${want ? 'allowed' : 'refused'}`,
+    L.canUninstall({ kind, bundle: APPS }) === want);
 }
 check('uninstalling needs a bundle, not just a permanent verdict',
   !L.canUninstall({ kind: L.KIND.PERMANENT, bundle: null }), 'it would trash undefined');
@@ -185,8 +251,6 @@ const transient = () => ({ kind: L.KIND.READ_ONLY, bundle: '/Volumes/dmg/Yapper.
   check('still without touching the registration', setCalls(sys).length === 0);
 }
 {
-  // The old default wrote true. The user has since revoked it in System
-  // Settings. Startup must not undo that.
   const sys = fakeSystem({ status: 'not-registered', settings: { openAtLogin: true } });
   const r = L.initMac({ run: permanent, ...sys });
   check('a revocation made in System Settings is not reverted',
@@ -219,16 +283,16 @@ const transient = () => ({ kind: L.KIND.READ_ONLY, bundle: '/Volumes/dmg/Yapper.
 {
   const sys = fakeSystem({ status: 'not-registered' });
   L.initMac({ run: transient, ...sys });
-  check('a copy on a disk image changes nothing at startup', setCalls(sys).length === 0,
+  check('a copy on a read-only disk changes nothing at startup', setCalls(sys).length === 0,
     JSON.stringify(setCalls(sys)));
 }
 
-// ---------- 3. the switch ----------
+// ---------- 3. the switch, and what it looks like ----------
 
 {
   const sys = fakeSystem({ status: 'not-registered' });
   const r = L.setMac({ run: permanent, ...sys }, true);
-  check('turning it on from a permanent install works',
+  check('turning it on from an install works',
     r.state === 'enabled' && eq(setCalls(sys), [['set', true]]), JSON.stringify(r));
   check('and records that this was the user asking',
     sys.settings.openAtLoginUserSet === true && sys.settings.openAtLogin === true,
@@ -239,8 +303,7 @@ const transient = () => ({ kind: L.KIND.READ_ONLY, bundle: '/Volumes/dmg/Yapper.
   const r = L.setMac({ run: permanent, ...sys }, true);
   check('a refusal is reported as a refusal, not as success',
     r.state === 'disabled' && r.refused === true, JSON.stringify(r));
-  check('and nothing is stored as on',
-    sys.settings.openAtLogin === false, JSON.stringify(sys.settings));
+  check('and nothing is stored as on', sys.settings.openAtLogin === false, JSON.stringify(sys.settings));
 }
 {
   const sys = fakeSystem({ status: 'not-registered', after: 'requires-approval' });
@@ -249,13 +312,29 @@ const transient = () => ({ kind: L.KIND.READ_ONLY, bundle: '/Volumes/dmg/Yapper.
     r.state === 'requires-approval' && /System Settings/.test(r.message), JSON.stringify(r));
 }
 {
+  // The trap: a registration that exists and is waiting. It has to be possible
+  // to take it back from inside Yapper.
+  const sys = fakeSystem({ status: 'requires-approval' });
+  const shown = L.switchView(L.readState(sys.getLoginItem()));
+  check('waiting-for-approval shows as on, so the next click means "withdraw"',
+    shown.checked === true && shown.disabled === false, JSON.stringify(shown));
+  const r = L.setMac({ run: permanent, ...sys }, !shown.checked);
+  check('and that click really withdraws it',
+    r.state === 'disabled' && eq(setCalls(sys), [['set', false]]), JSON.stringify(r));
+  check('leaving nothing registered',
+    sys.getLoginItem().status === 'not-registered' && sys.settings.openAtLogin === false,
+    JSON.stringify(sys.settings));
+}
+{
   const sys = fakeSystem({ status: 'enabled' });
   const r = L.setMac({ run: permanent, ...sys }, false);
   check('turning it off works', r.state === 'disabled' && eq(setCalls(sys), [['set', false]]),
     JSON.stringify(r));
 }
-for (const [name, run] of [['a disk image', transient],
+for (const [name, run] of [
+  ['a read-only disk', transient],
   ['a translocated copy', () => ({ kind: L.KIND.TRANSLOCATED, bundle: '/x/Yapper.app', why: 'no' })],
+  ['a copy in Downloads', () => ({ kind: L.KIND.UNAPPROVED, bundle: '/d/Yapper.app', why: 'no' })],
   ['a dev run', () => ({ kind: L.KIND.DEVELOPMENT, why: 'no' })]]) {
   for (const wanted of [true, false]) {
     const sys = fakeSystem({ status: 'enabled' });
@@ -266,20 +345,34 @@ for (const [name, run] of [['a disk image', transient],
   }
 }
 
-// ---------- 4. what the checkbox may delete ----------
+const views = [
+  ['enabled', { checked: true, disabled: false }],
+  ['disabled', { checked: false, disabled: false }],
+  ['requires-approval', { checked: true, disabled: false }],
+  ['unavailable', { checked: false, disabled: true }],
+  ['error', { checked: false, disabled: false }]
+];
+for (const [state, want] of views) {
+  const v = L.switchView({ state });
+  check(`the switch for "${state}" is ${want.checked ? 'on' : 'off'}${want.disabled ? ', disabled' : ', usable'}`,
+    v.checked === want.checked && v.disabled === want.disabled, JSON.stringify(v));
+}
+check('an explanation comes through to the switch',
+  L.switchView({ state: 'unavailable', why: 'move it' }).hint === 'move it');
+check('and so does an error message',
+  L.switchView({ state: 'error', message: 'no answer' }).hint === 'no answer');
+
+// ---------- 4. what the uninstaller may delete ----------
 
 const MEET = '/Users/ana/Documents/Meetings';
 const DATA = '/Users/ana/Library/Application Support/yapper';
 
 {
-  const plan = L.dataPlan({
-    userData: DATA, engineHome: `${DATA}/Yapper/engine`, meetings: MEET, io: fakeIO()
-  });
+  const plan = L.dataPlan({ userData: DATA, engineHome: `${DATA}/Yapper/engine`, meetings: MEET, io: fakeIO() });
   check('the normal layout deletes the data directory once',
     eq(plan.targets.map(t => t.path), [DATA]), JSON.stringify(plan));
 }
 {
-  // YAPPER_HOME puts them side by side: <home>/user and <home>/Meetings.
   const home = '/tmp/scratch';
   const plan = L.dataPlan({
     userData: `${home}/user`, engineHome: `${home}/user/Yapper/engine`,
@@ -304,140 +397,246 @@ const refusals = [
 ];
 for (const [name, userData, meetings] of refusals) {
   const plan = L.dataPlan({ userData, engineHome: null, meetings, io: fakeIO() });
-  check(`refuses ${name}`, plan.targets.length === 0 && plan.skipped.length === 1,
+  check(`refuses ${name}`, plan.targets.length === 0 && plan.skipped.length === 1, JSON.stringify(plan));
+}
+{
+  const plan = L.dataPlan({
+    userData: DATA, engineHome: null, meetings: `${DATA}/Meetings`,
+    io: fakeIO({ links: { [MEET]: `${DATA}/Meetings` } })
+  });
+  check('refuses a meetings folder that resolves into the data directory',
+    plan.targets.length === 0 && plan.skipped.length === 1, JSON.stringify(plan));
+}
+for (const code of ['EACCES', 'EIO', 'ESTALE', 'EPERM']) {
+  const plan = L.dataPlan({
+    userData: DATA, engineHome: null, meetings: MEET, io: fakeIO({ links: { [DATA]: { code } } })
+  });
+  check(`a data directory whose real path answers ${code} is kept, not deleted`,
+    plan.targets.length === 0 && plan.skipped.length === 1 && plan.skipped[0].why.includes(code),
     JSON.stringify(plan));
 }
 {
-  // A symlinked Documents folder that lands inside the data directory: only
-  // the canonical paths show that they are the same place.
   const plan = L.dataPlan({
-    userData: DATA, engineHome: null, meetings: '/Users/ana/Documents/Meetings',
-    io: fakeIO({ links: { '/Users/ana/Documents/Meetings': `${DATA}/Meetings` } })
+    userData: DATA, engineHome: '/Users/ana/Library/Caches/eng', meetings: MEET,
+    io: fakeIO({ links: { '/Users/ana/Library/Caches/eng': { code: 'EIO' } } })
   });
-  check('refuses a meetings folder that is a symlink into the data directory',
-    plan.targets.length === 0, JSON.stringify(plan));
+  check('one unreadable target does not stop the other from being removed',
+    eq(plan.targets.map(t => t.path), [DATA]) && plan.skipped.length === 1, JSON.stringify(plan));
+}
+{
+  // Not there yet is not the same as unreadable: it stays a target, and the
+  // Trash reporting ENOENT is what makes it a non-event.
+  const plan = L.dataPlan({
+    userData: DATA, engineHome: null, meetings: MEET, io: fakeIO({ links: { [DATA]: null } })
+  });
+  check('a data directory that does not exist is still a target, marked missing',
+    plan.targets.length === 1 && plan.targets[0].missing === true, JSON.stringify(plan));
+}
+{
+  const plan = L.dataPlan({ userData: DATA, engineHome: null, meetings: '', io: fakeIO() });
+  check('an unresolved meetings path is an error, not an empty comparison',
+    !!plan.error && plan.targets.length === 0, JSON.stringify(plan));
 }
 
-// ---------- 5. uninstalling, step by step ----------
+// ---------- 5. the preflight, before anything is touched ----------
 
-async function uninstallChecks() {
+const pf = o => L.uninstallPreflight({
+  bundle: APPS, userData: DATA, engineHome: `${DATA}/Yapper/engine`,
+  meetings: MEET, alsoData: true, io: fakeIO(), ...o
+});
 
-function fakeUninstall({ kind = L.KIND.PERMANENT, proceed = true, alsoData = false,
-  afterWithdraw = 'not-registered', trashFails = {}, plan = null } = {}) {
-  const log = [];
-  const deps = {
-    run: () => ({ kind, bundle: APPS }),
-    confirm: async () => { log.push(['confirm']); return { proceed, alsoData }; },
-    setLoginItem: on => log.push(['set', on]),
-    getLoginItem: () => { log.push(['get']); return { status: afterWithdraw }; },
-    trash: async p => {
-      log.push(['trash', p]);
-      const f = trashFails[p];
-      return f ? { ok: false, code: f.code, message: f.message } : { ok: true };
-    },
-    dataPlan: () => { log.push(['plan']); return plan || { targets: [{ label: 'settings', path: DATA }], skipped: [] }; },
-    report: async r => { log.push(['report', r.step]); },
-    quit: () => log.push(['quit'])
-  };
-  return { deps, log };
-}
-const steps = log => log.map(e => e[0]);
-const trashed = log => log.filter(e => e[0] === 'trash').map(e => e[1]);
+check('a normal install passes the preflight', pf({}).ok === true, JSON.stringify(pf({})));
 
 {
-  const { deps, log } = fakeUninstall({ alsoData: true });
-  const r = await L.uninstall(deps);
-  check('the whole sequence runs in order',
-    eq(steps(log), ['confirm', 'set', 'get', 'trash', 'plan', 'trash', 'quit']),
-    JSON.stringify(steps(log)));
-  check('the bundle goes before the data', trashed(log)[0] === APPS && trashed(log)[1] === DATA,
-    JSON.stringify(trashed(log)));
-  check('and it finishes', r.done === true, JSON.stringify(r));
-}
-{
-  const { deps, log } = fakeUninstall({ alsoData: false });
-  await L.uninstall(deps);
-  check('without the checkbox nothing but the bundle is touched',
-    eq(trashed(log), [APPS]) && !steps(log).includes('plan'), JSON.stringify(log));
-}
-{
-  const { deps, log } = fakeUninstall({ proceed: false, alsoData: true });
-  const r = await L.uninstall(deps);
-  check('cancelling changes nothing at all',
-    eq(steps(log), ['confirm']) && r.step === 'cancelled', JSON.stringify(steps(log)));
-}
-for (const status of ['enabled', 'requires-approval', 'not-found']) {
-  const { deps, log } = fakeUninstall({ afterWithdraw: status, alsoData: true });
-  const r = await L.uninstall(deps);
-  check(`a withdrawal that leaves macOS reporting "${status}" stops everything`,
-    trashed(log).length === 0 && !steps(log).includes('quit') && r.step === 'login-item',
-    JSON.stringify(log));
-  check(`and says so ("${status}")`, steps(log).includes('report'), JSON.stringify(steps(log)));
-}
-{
-  const { deps, log } = fakeUninstall({
-    alsoData: true, trashFails: { [APPS]: { code: 'EPERM', message: 'not permitted' } }
+  // YAPPER_HOME inside the bundle: <home>/Meetings is inside Yapper.app, and
+  // trashing the bundle would take every meeting with it — without the data
+  // plan ever being asked.
+  const r = pf({
+    meetings: `${APPS}/home/Meetings`, userData: `${APPS}/home/user`,
+    engineHome: null, alsoData: false
   });
-  const r = await L.uninstall(deps);
-  check('a bundle the Trash refuses leaves the data alone and the app installed',
-    eq(trashed(log), [APPS]) && !steps(log).includes('quit') && r.step === 'bundle',
-    JSON.stringify(log));
+  check('a bundle that contains the meetings folder is refused outright',
+    r.ok === false && /not separate/.test(r.why), JSON.stringify(r));
 }
 {
-  const { deps, log } = fakeUninstall({
-    alsoData: true, trashFails: { [DATA]: { code: 'EPERM', message: 'not permitted' } }
-  });
-  const r = await L.uninstall(deps);
-  check('data that could not be removed is reported, with the path, before quitting',
-    steps(log).indexOf('report') < steps(log).indexOf('quit')
-    && r.residue.length === 1 && r.residue[0].path === DATA, JSON.stringify(log));
+  const r = pf({ bundle: '/Users/ana/Documents/Meetings/Yapper.app', alsoData: false,
+    io: fakeIO({ dirs: ['/Users/ana/Documents/Meetings/Yapper.app'] }) });
+  check('a bundle installed inside the meetings folder is refused',
+    r.ok === false && /not separate/.test(r.why), JSON.stringify(r));
 }
 {
-  const { deps, log } = fakeUninstall({
-    alsoData: true, trashFails: { [DATA]: { code: 'ENOENT' } }
-  });
-  const r = await L.uninstall(deps);
-  check('data that was already gone is not reported as a problem',
-    !steps(log).includes('report') && r.residue.length === 0 && steps(log).includes('quit'),
-    JSON.stringify(log));
+  const r = pf({ bundle: MEET, alsoData: false });
+  check('a bundle that is the meetings folder is refused', r.ok === false, JSON.stringify(r));
 }
 {
-  const { deps, log } = fakeUninstall({
-    alsoData: true,
-    plan: { targets: [], skipped: [{ label: 'settings', path: DATA, why: 'it is not separate from the meetings folder' }] }
-  });
-  const r = await L.uninstall(deps);
-  check('a target that could not be proved safe is kept and reported',
-    r.residue.length === 1 && r.residue[0].kept === true && steps(log).includes('report'),
+  const r = pf({ bundle: '/Applications/Alias.app', alsoData: false,
+    io: fakeIO({ links: { '/Applications/Alias.app': `${MEET}/Yapper.app` } }) });
+  check('and so is one that only reaches the meetings folder through a symlink',
+    r.ok === false && /not separate/.test(r.why), JSON.stringify(r));
+}
+{
+  const r = pf({ io: fakeIO({ links: { [MEET]: `${DATA}/Meetings` } }) });
+  const overlapping = r.targets.filter(t => L.overlaps(t.path, `${DATA}/Meetings`));
+  check('a meetings folder symlinked into the data directory is caught by the preflight',
+    r.ok === true && overlapping.length === 0
+    && r.skipped.some(k => k.label === 'settings' && /not separate/.test(k.why)),
     JSON.stringify(r));
 }
-for (const kind of [L.KIND.DEVELOPMENT, L.KIND.TRANSLOCATED, L.KIND.READ_ONLY,
-  L.KIND.TEMPORARY, L.KIND.UNKNOWN]) {
-  const { deps, log } = fakeUninstall({ kind, alsoData: true });
-  const r = await L.uninstall(deps);
-  check(`${kind} cannot uninstall, and is not even asked`,
-    log.length === 0 && r.step === 'unavailable', JSON.stringify(log));
+for (const code of ['EACCES', 'EIO']) {
+  const r = pf({ io: fakeIO({ links: { [MEET]: { code } } }) });
+  check(`meetings that cannot be canonicalised (${code}) stops the whole uninstall`,
+    r.ok === false && r.why.includes(code), JSON.stringify(r));
 }
 {
-  // The one that matters most: across every path above, the meetings folder is
-  // never handed to the Trash.
-  const seen = [];
-  for (const opts of [{ alsoData: true }, { alsoData: false }, { alsoData: true, afterWithdraw: 'enabled' },
-    { alsoData: true, trashFails: { [APPS]: { code: 'EPERM' } } }]) {
-    const { deps, log } = fakeUninstall(opts);
-    await L.uninstall(deps);
-    seen.push(...trashed(log));
-  }
-  check('the meetings folder is never a target, on any path',
-    seen.every(p => !L.contains(p, MEET) && p !== MEET), JSON.stringify(seen));
+  const r = pf({ io: fakeIO({ links: { [APPS]: { code: 'EIO' } } }) });
+  check('a bundle that cannot be canonicalised stops it too',
+    r.ok === false && r.why.includes('EIO'), JSON.stringify(r));
+}
+{
+  const r = pf({ io: fakeIO({ links: { [APPS]: null } }) });
+  check('and so does a bundle that is not there', r.ok === false, JSON.stringify(r));
+}
+{
+  const r = pf({ alsoData: false, io: fakeIO({ links: { [DATA]: { code: 'EACCES' } } }) });
+  check('without the checkbox, an unreadable data directory is irrelevant',
+    r.ok === true && r.targets.length === 0, JSON.stringify(r));
 }
 
+// ---------- 6. uninstalling, step by step ----------
+
+async function uninstallChecks() {
+  function fakeUninstall({ kind = L.KIND.PERMANENT, proceed = true, alsoData = false,
+    afterWithdraw = 'not-registered', trashFails = {}, preflight = null } = {}) {
+    const log = [];
+    const deps = {
+      run: () => ({ kind, bundle: APPS }),
+      preflight: also => {
+        log.push(['preflight', !!also]);
+        if (preflight) return preflight;
+        return { ok: true, bundle: APPS, targets: also ? [{ label: 'settings', path: DATA }] : [], skipped: [] };
+      },
+      confirm: async () => { log.push(['confirm']); return { proceed, alsoData }; },
+      setLoginItem: on => log.push(['set', on]),
+      getLoginItem: () => { log.push(['get']); return { status: afterWithdraw }; },
+      trash: async p => {
+        log.push(['trash', p]);
+        const f = trashFails[p];
+        return f ? { ok: false, code: f.code, message: f.message } : { ok: true };
+      },
+      report: async r => { log.push(['report', r.step]); },
+      quit: () => log.push(['quit'])
+    };
+    return { deps, log };
+  }
+  const steps = log => log.map(e => e[0]);
+  const trashed = log => log.filter(e => e[0] === 'trash').map(e => e[1]);
+
+  {
+    const { deps, log } = fakeUninstall({ alsoData: true });
+    const r = await L.uninstall(deps);
+    check('the whole sequence runs in order, preflight first',
+      eq(steps(log), ['preflight', 'confirm', 'preflight', 'set', 'get', 'trash', 'trash', 'quit']),
+      JSON.stringify(steps(log)));
+    check('nothing is touched before the preflight',
+      steps(log)[0] === 'preflight' && steps(log).indexOf('set') > steps(log).indexOf('confirm'),
+      JSON.stringify(steps(log)));
+    check('the bundle goes before the data', eq(trashed(log), [APPS, DATA]), JSON.stringify(trashed(log)));
+    check('and it finishes', r.done === true, JSON.stringify(r));
+  }
+  {
+    const { deps, log } = fakeUninstall({ alsoData: false });
+    await L.uninstall(deps);
+    check('without the checkbox only the bundle is touched', eq(trashed(log), [APPS]), JSON.stringify(log));
+  }
+  {
+    const { deps, log } = fakeUninstall({ proceed: false, alsoData: true });
+    const r = await L.uninstall(deps);
+    check('cancelling changes nothing at all',
+      eq(steps(log), ['preflight', 'confirm']) && r.step === 'cancelled', JSON.stringify(steps(log)));
+  }
+  {
+    const { deps, log } = fakeUninstall({
+      alsoData: true, preflight: { ok: false, why: 'not separate from the meetings folder' }
+    });
+    const r = await L.uninstall(deps);
+    check('a refused preflight asks nothing and touches nothing',
+      eq(steps(log), ['preflight', 'report']) && r.step === 'preflight', JSON.stringify(steps(log)));
+    check('so the login item, the bundle, the data and the meetings are all untouched',
+      !steps(log).includes('set') && !steps(log).includes('trash') && !steps(log).includes('quit'),
+      JSON.stringify(steps(log)));
+  }
+  for (const status of ['enabled', 'requires-approval', 'not-found']) {
+    const { deps, log } = fakeUninstall({ afterWithdraw: status, alsoData: true });
+    const r = await L.uninstall(deps);
+    check(`a withdrawal that leaves macOS reporting "${status}" stops everything`,
+      trashed(log).length === 0 && !steps(log).includes('quit') && r.step === 'login-item',
+      JSON.stringify(log));
+    check(`and says so ("${status}")`, steps(log).includes('report'), JSON.stringify(steps(log)));
+  }
+  {
+    const { deps, log } = fakeUninstall({
+      alsoData: true, trashFails: { [APPS]: { code: 'EPERM', message: 'not permitted' } }
+    });
+    const r = await L.uninstall(deps);
+    check('a bundle the Trash refuses leaves the data alone and the app installed',
+      eq(trashed(log), [APPS]) && !steps(log).includes('quit') && r.step === 'bundle',
+      JSON.stringify(log));
+    check('and reports it', steps(log).includes('report'), JSON.stringify(steps(log)));
+  }
+  {
+    const { deps, log } = fakeUninstall({
+      alsoData: true, trashFails: { [DATA]: { code: 'EPERM', message: 'not permitted' } }
+    });
+    const r = await L.uninstall(deps);
+    check('data that could not be removed is reported, with the path, before quitting',
+      steps(log).indexOf('report') < steps(log).indexOf('quit')
+      && r.residue.length === 1 && r.residue[0].path === DATA, JSON.stringify(log));
+  }
+  {
+    const { deps, log } = fakeUninstall({ alsoData: true, trashFails: { [DATA]: { code: 'ENOENT' } } });
+    const r = await L.uninstall(deps);
+    check('data that was already gone is not reported as a problem',
+      !steps(log).includes('report') && r.residue.length === 0 && steps(log).includes('quit'),
+      JSON.stringify(log));
+  }
+  {
+    const { deps, log } = fakeUninstall({
+      alsoData: true,
+      preflight: { ok: true, bundle: APPS, targets: [],
+        skipped: [{ label: 'settings', path: DATA, why: 'its real location could not be read (EACCES)' }] }
+    });
+    const r = await L.uninstall(deps);
+    check('a target that could not be proved safe is kept and reported',
+      r.residue.length === 1 && r.residue[0].kept === true && steps(log).includes('report'),
+      JSON.stringify(r));
+  }
+  for (const kind of [L.KIND.DEVELOPMENT, L.KIND.TRANSLOCATED, L.KIND.READ_ONLY,
+    L.KIND.TEMPORARY, L.KIND.UNAPPROVED, L.KIND.UNKNOWN]) {
+    const { deps, log } = fakeUninstall({ kind, alsoData: true });
+    const r = await L.uninstall(deps);
+    check(`${kind} cannot uninstall, and is not even asked`,
+      log.length === 0 && r.step === 'unavailable', JSON.stringify(log));
+  }
+  {
+    // Across every path: the meetings folder is never handed to the Trash.
+    const seen = [];
+    for (const opts of [{ alsoData: true }, { alsoData: false },
+      { alsoData: true, afterWithdraw: 'enabled' },
+      { alsoData: true, trashFails: { [APPS]: { code: 'EPERM' } } },
+      { alsoData: true, preflight: { ok: false, why: 'no' } }]) {
+      const { deps, log } = fakeUninstall(opts);
+      await L.uninstall(deps);
+      seen.push(...trashed(log));
+    }
+    check('the meetings folder is never a target, on any path',
+      seen.every(p => !L.overlaps(p, MEET)), JSON.stringify(seen));
+  }
 }
 
 uninstallChecks().then(() => {
   console.log(fails ? `\n${fails} failures` : '\nPASS');
   process.exit(fails ? 1 : 0);
 }, e => {
-  console.log('FAIL  the uninstall checks threw\n      ' + (e && e.stack || e));
+  console.log('FAIL  the uninstall checks threw\n      ' + ((e && e.stack) || e));
   process.exit(1);
 });

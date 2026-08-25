@@ -407,28 +407,38 @@ window.yapper.setAutoDetect(autoDetectEnabled);
 // "start with Windows" lives in the main process (it writes the login item),
 // and on macOS the main process is only reporting what the system said. It can
 // answer something other than what was asked: refused, waiting to be allowed in
-// System Settings, or unavailable because this copy is running from a disk
-// image and registering it would name a path that is gone tomorrow. So the
-// answer decides what the switch shows, never the click.
+// System Settings, or unavailable because this copy is not installed anywhere a
+// registration would still mean it tomorrow. So the answer decides what the
+// switch shows, never the click.
 const startupHint = $('startup-hint');
 let startupSeq = 0;
 
+// The main process decides what this looks like — loginitem.js switchView —
+// so the page never has to reason about macOS's answers. It matters most for
+// "registered, waiting to be allowed in System Settings": that comes back
+// checked, so switching it off withdraws the registration. Painted unchecked,
+// every click would ask for it again and there would be no click that took it
+// back.
 function showStartupState(r) {
-  const state = (r && r.state) || 'error';
-  startupToggle.checked = state === 'enabled';
-  // Unavailable is the one case where the switch itself is wrong to offer:
-  // there is nothing this copy may change.
-  startupToggle.disabled = state === 'unavailable';
-  const why = (r && (r.why || r.message)) || '';
-  startupHint.textContent = why;
-  startupHint.hidden = !why;
+  const v = (r && r.view) || { checked: startupToggle.checked, disabled: false, hint: '' };
+  startupToggle.checked = !!v.checked;
+  startupToggle.disabled = !!v.disabled;
+  startupHint.textContent = v.hint || '';
+  startupHint.hidden = !v.hint;
 }
 
 function askStartup(request) {
   const seq = ++startupSeq;
   startupToggle.disabled = true;
   return request()
-    .catch(e => ({ state: 'error', message: `Yapper could not read this setting. ${e.message || e}` }))
+    // An error leaves the switch usable: it is the click that failed, not the
+    // copy that cannot do it.
+    .catch(e => ({
+      view: {
+        state: 'error', checked: startupToggle.checked, disabled: false,
+        hint: `Yapper could not change this setting. ${e && e.message ? e.message : e}`
+      }
+    }))
     // Two quick clicks: only the newest answer may paint, or the switch ends
     // up showing the state from the click before last.
     .then(r => { if (seq === startupSeq) showStartupState(r); });

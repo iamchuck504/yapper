@@ -30,9 +30,20 @@ function check(name, ok, detail) {
 
 const ROOT = path.join(__dirname, '..');
 const read = f => fs.readFileSync(path.join(ROOT, f), 'utf8').replace(/\r\n/g, '\n');
+
+// Every check below matches against source with the comments taken out. A
+// pattern that a comment can satisfy is not a check — this file's whole job is
+// to notice when the code stopped doing something, and the code is what has to
+// say so. Crude on purpose: `//` inside a string would be stripped too, which
+// costs nothing here and cannot produce a false pass.
+const code = f => read(f)
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  .split('\n').map(l => l.replace(/(^|[^:'"`])\/\/.*$/, '$1')).join('\n');
 const main = read('main.js');
+const mainCode = code('main.js');
 const preload = read('preload.js');
 const renderer = read('renderer/app.js');
+const rendererCode = code('renderer/app.js');
 const html = read('renderer/index.html');
 
 // ---- the renderer has to know where it is running ----
@@ -59,62 +70,91 @@ check('no use of sys is left unguarded', sysUses - sysGuards <= 1,
   `${sysUses} usos, ${sysGuards} protegidos`);
 
 // ---- 2. login item ----
-// The rules themselves are in loginitem.js and are checked by behaviour in
+// The rules are in loginitem.js and are checked by behaviour in
 // build/test-login-item.js, which is the only thing that can check them: a
-// pattern over this file matches just as well when the predicate is inverted.
+// pattern over this file matches just as well when a predicate is inverted.
 // What is left here is the wiring — that main.js goes through those rules
 // rather than around them, and that Windows still does what it always did.
-const login = main.slice(main.indexOf('const bundleIO'),
-  main.indexOf("ipcMain.handle('get-bubble-corner'"));
+const login = mainCode.slice(mainCode.indexOf('const bundleIO'),
+  mainCode.indexOf("ipcMain.handle('get-bubble-corner'"));
 
-check('macOS registers nothing from startup',
+check('nothing on macOS ever asks for a registration outright',
+  !/openAtLogin:\s*true/.test(mainCode),
+  'a literal openAtLogin: true is a registration nobody asked for');
+check('startup does not register',
   !/'darwin'[\s\S]{0,400}setLoginItemSettings/.test(
-    main.slice(main.indexOf('function applyOpenAtLogin'), main.indexOf('function initOpenAtLogin'))),
+    mainCode.slice(mainCode.indexOf('function applyOpenAtLogin'),
+      mainCode.indexOf('function initOpenAtLogin'))),
   'a launch would register whichever bundle it happens to be');
-check('and startup goes through initMac, which only reads',
+check('and goes through initMac, which only reads',
   /darwin[\s\S]{0,80}loginitem\.initMac/.test(login), 'the macOS path is doing its own thing');
+check('the switch goes through setMac',
+  /set-open-at-login[\s\S]{0,200}loginitem\.setMac/.test(mainCode),
+  'the handler would answer with what was asked rather than what happened');
+check('and there is no second route to setLoginItemSettings on macOS',
+  (mainCode.match(/setLoginItemSettings/g) || []).length === 3,
+  'one for the deps, one for the uninstaller, one for Windows — more is a bypass');
+
 check('Windows still registers its path and arguments',
   /'win32'[\s\S]*process\.execPath[\s\S]*args:/.test(login), 'the Windows behaviour was lost');
 check('and Windows still keeps the answer in its settings file',
   /platform !== 'darwin'[\s\S]{0,160}readSettings\(\)\.openAtLogin/.test(login),
   'Windows was moved onto macOS semantics it has no API for');
 
-// The classification needs the real filesystem, so the adapter is the part
-// that can only be checked here. EROFS is a disk image; EACCES is /Applications
-// on a Mac where this account is not an admin, and that is still an install.
-check('a read-only filesystem is told apart from a directory we may not write to',
-  /EROFS[\s\S]{0,80}'read-only'/.test(login) && /'denied'/.test(login),
-  'an install on an external disk would be refused, or a dmg accepted');
-check('the switch asks loginitem for the answer, and does not invent one',
-  /set-open-at-login[\s\S]{0,200}loginitem\.setMac/.test(main),
-  'the handler would answer with what was asked rather than what happened');
-check('and the renderer paints the answer rather than the click',
-  /showStartupState\(r\)/.test(renderer) && /startupToggle\.checked = state === 'enabled'/.test(renderer),
-  'the switch would show on while nothing starts at login');
+// The filesystem adapter is the half that cannot be tested without a
+// filesystem, so its mapping is checked here.
+check('the adapter tells a read-only disk from a directory we may not write to',
+  /EROFS[\s\S]{0,60}'read-only'/.test(login)
+  && /EACCES[\s\S]{0,80}'denied'/.test(login),
+  'an install would be refused, or a disk image accepted');
+check('and an unexpected error is not folded into "denied"',
+  /return 'error'/.test(login), 'an I/O failure would read as a permission and pass as an install');
+check('realpath answers with a code rather than the path it was given',
+  /realpath\([\s\S]{0,160}code: e\.code/.test(login),
+  'a failed canonicalisation would silently become a lexical comparison');
+check('and identity is available for the same-directory proof',
+  /identity\([\s\S]{0,120}ino: st\.ino/.test(login), 'two different bundles could pass as one');
+check('install roots are a list, not an inference',
+  /function installRoots\(\)[\s\S]{0,200}'\/Applications'/.test(mainCode)
+  && /installRoots: installRoots\(\)/.test(mainCode),
+  'anything writable would count as an installation again');
+
+check('the renderer paints what the main process decided',
+  /const v = \(r && r\.view\)/.test(rendererCode)
+  && /startupToggle\.checked = !!v\.checked/.test(rendererCode),
+  'the page would reason about macOS answers on its own');
+check('and the main process attaches that view to both replies',
+  (mainCode.match(/openAtLoginReply\(/g) || []).length >= 4,
+  'one reply would arrive without the contract the renderer paints');
 check('a slow answer cannot overwrite a newer one',
-  /seq === startupSeq/.test(renderer), 'two quick clicks would leave the switch stale');
+  /seq === startupSeq/.test(rendererCode), 'two quick clicks would leave the switch stale');
+check('and a rejected call is handled without stranding the switch',
+  /\.catch\(/.test(rendererCode) && /disabled: false/.test(rendererCode),
+  'an unhandled rejection, and a switch nobody can click again');
 check('the explanation is attached to the switch, not just placed beside it',
   /id="opt-startup"[^>]*aria-describedby="startup-hint"/.test(html)
   && /id="startup-hint"[^>]*aria-live/.test(html),
   'a refusal would be invisible to a screen reader');
-check('and a rejected call is handled',
-  /\.catch\(e => \(\{ state: 'error'/.test(renderer), 'an unhandled rejection, and a stuck switch');
 
 // ---- 2b. uninstalling ----
 check('uninstalling goes through the checked sequence',
-  /loginitem\.uninstall\(uninstallDeps\(\)\)/.test(main),
+  /loginitem\.uninstall\(uninstallDeps\(\)\)/.test(mainCode),
   'the order the login item depends on would be main.js\u2019s to get right again');
-check('and is only offered where loginitem allows it',
-  /function canUninstallSelf\(\)[\s\S]{0,120}loginitem\.canUninstall\(macRun\(\)\)/.test(main),
-  'it would be offered from a dmg, where the bundle is not the one the user keeps');
+check('and works from a plan built before anything is touched',
+  /preflight:\s*alsoData => loginitem\.uninstallPreflight\(/.test(mainCode),
+  'the login item would be withdrawn before knowing whether the rest is safe');
+check('the preflight is given the bundle and the meetings folder together',
+  /uninstallPreflight\(\{[\s\S]{0,240}bundle: macRun\(\)\.bundle[\s\S]{0,240}meetings: MEETINGS_DIR/.test(mainCode),
+  'the bundle would never be compared against the meetings folder');
+check('and it is only offered where loginitem allows it',
+  /function canUninstallSelf\(\)[\s\S]{0,120}loginitem\.canUninstall\(macRun\(\)\)/.test(mainCode),
+  'it would be offered from a disk image, where the bundle is not the one the user keeps');
 check('the menu entry is gated on that',
-  /canUninstallSelf\(\)\s*\?\s*\[\{ label: 'Uninstall Yapper/.test(main),
+  /canUninstallSelf\(\)\s*\?\s*\[\{ label: 'Uninstall Yapper/.test(mainCode),
   'the entry would appear where it cannot work');
 check('the Trash adapter reports "it was not there" as its own outcome',
   /existsSync\(p\)\)? return \{ ok: false, code: 'ENOENT' \}/.test(login),
   'a missing file and a refused one would be the same silence');
-check('and the meetings folder is what the plan is measured against',
-  /meetings: MEETINGS_DIR/.test(main), 'nothing would prove the target is not the meetings folder');
 
 // ---- 3. no Windows-only advice on a Mac ----
 const ps1 = main.slice(main.indexOf('function humanTranscribeError'),
