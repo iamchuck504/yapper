@@ -25,22 +25,31 @@ const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
  * itself. `ids` gives device/inode identity, defaulting to one per path so
  * different paths are different directories.
  */
-function fakeIO({ dirs = [], links = {}, write = {}, ids = {} } = {}) {
+function fakeIO({ dirs = [], links = {}, write = {}, ids = {}, mounts = ['/'] } = {}) {
   const has = Object.prototype.hasOwnProperty;
+  const resolve = p => {
+    if (!has.call(links, p)) return { path: p };
+    const v = links[p];
+    if (v === null) return { code: 'ENOENT' };
+    if (typeof v === 'object') return v;                // {code} or {path}
+    return { path: v };
+  };
   return {
     isDirectory: p => dirs.includes(p),
-    realpath(p) {
-      if (!has.call(links, p)) return { path: p };
-      const v = links[p];
-      if (v === null) return { code: 'ENOENT' };
-      if (typeof v === 'object') return v;              // {code} or {path}
-      return { path: v };
-    },
+    realpath: resolve,
     identity(p) {
       if (has.call(ids, p)) return ids[p];
+      // A path realpath says is not there has no identity either. Inventing
+      // one was how a missing directory turned into "could not be determined"
+      // and then into a leftover the user was told about.
+      const r = resolve(p);
+      if (r.code) return { code: r.code };
       return { dev: 1, ino: `ino:${p}` };
     },
-    writeStatus: p => write[p] || 'writable'
+    writeStatus: p => write[p] || 'writable',
+    // The mount table, which is what a volume question is answered from. null
+    // models a machine where it could not be read.
+    mountPoints: () => mounts
   };
 }
 
@@ -71,10 +80,10 @@ const setCalls = sys => sys.calls.filter(c => c[0] === 'set');
 
 const ROOTS = ['/Applications', '/Users/ana/Applications'];
 const TEMPS = ['/private/var/folders', '/private/tmp', '/tmp'];
-// The startup disk, as a device. fakeIO gives every path device 1 unless `ids`
-// says otherwise, so a case only leaves the startup disk when it says so.
-const ANCHORS = ['/System/Volumes/Data'];
-const OTHER_DISK = { dev: 42, ino: 1 };
+// The startup disk, as mount points. fakeIO mounts only '/' unless a case says
+// otherwise, so a copy only leaves the startup disk when the case mounts it
+// somewhere else.
+const APPROVED_MOUNTS = ['/', '/System/Volumes/Data'];
 const APPS = '/Applications/Yapper.app';
 const APPS_EXE = `${APPS}/Contents/MacOS/Yapper`;
 
@@ -121,8 +130,7 @@ const runs = [
     exe: '/Volumes/Samsung T7/Applications/Yapper.app/Contents/MacOS/Yapper',
     io: fakeIO({
       dirs: ['/Volumes/Samsung T7/Applications/Yapper.app'],
-      ids: { '/Volumes/Samsung T7/Applications/Yapper.app': OTHER_DISK,
-        '/Volumes/Samsung T7/Applications': OTHER_DISK }
+      mounts: ['/', '/Volumes/Samsung T7']
     })
   }, L.KIND.UNAPPROVED, '/Volumes/Samsung T7/Applications/Yapper.app'],
 
@@ -138,8 +146,7 @@ const runs = [
         '/Users/ana/Applications/Yapper.app/Contents/MacOS/Yapper':
           '/Volumes/External/Applications/Yapper.app/Contents/MacOS/Yapper'
       },
-      ids: { '/Volumes/External/Applications/Yapper.app': OTHER_DISK,
-        '/Volumes/External/Applications': OTHER_DISK }
+      mounts: ['/', '/Volumes/External']
     })
   }, L.KIND.UNAPPROVED, '/Volumes/External/Applications/Yapper.app'],
 
@@ -147,7 +154,7 @@ const runs = [
   // path to a real install; a different device.
   ['a read-write image mounted over an approved root', {
     exe: '/Applications/Yapper.app/Contents/MacOS/Yapper',
-    io: fakeIO({ dirs: [APPS], ids: { [APPS]: OTHER_DISK, '/Applications': OTHER_DISK } })
+    io: fakeIO({ dirs: [APPS], mounts: ['/', '/Applications'] })
   }, L.KIND.UNAPPROVED, APPS],
 
   // hdiutil attach -mountpoint /Applications/Yapper.app: the folder above it is
@@ -155,13 +162,19 @@ const runs = [
   // image. Only the bundle's own volume tells them apart.
   ['a read-write image mounted at the bundle itself, under a genuine root', {
     exe: '/Applications/Yapper.app/Contents/MacOS/Yapper',
-    io: fakeIO({ dirs: [APPS], ids: { [APPS]: OTHER_DISK } })
+    io: fakeIO({ dirs: [APPS], mounts: ['/', APPS] })
   }, L.KIND.UNAPPROVED, APPS],
 
   ['a bundle whose volume cannot be identified at all', {
-    exe: APPS_EXE,
-    io: fakeIO({ dirs: [APPS], ids: { [APPS]: { code: 'EIO' } } })
+    exe: APPS_EXE, io: fakeIO({ dirs: [APPS], mounts: null })
   }, L.KIND.UNKNOWN, APPS],
+
+  // The case a device comparison gets wrong: on APFS a volume group shares one
+  // device, so /System/Volumes/Data looks like its parent and is a mount.
+  ['a home on a network volume does not approve its own volume', {
+    exe: '/Users/ana/Applications/Yapper.app/Contents/MacOS/Yapper',
+    io: fakeIO({ dirs: ['/Users/ana/Applications/Yapper.app'], mounts: ['/', '/Users/ana'] })
+  }, L.KIND.UNAPPROVED, '/Users/ana/Applications/Yapper.app'],
 
   ['an alias of a bundle that really is installed locally', {
     exe: '/Users/ana/Desktop/Yapper.app/Contents/MacOS/Yapper',
@@ -256,7 +269,7 @@ const runs = [
 for (const [name, o, kind, bundle] of runs) {
   const run = L.classifyRun({
     platform: 'darwin', isPackaged: true, exe: o.exe,
-    tempDirs: TEMPS, installRoots: ROOTS, approvedVolumeAnchors: ANCHORS, io: o.io
+    tempDirs: TEMPS, installRoots: ROOTS, approvedVolumeMounts: APPROVED_MOUNTS, io: o.io
   });
   check(name, run.kind === kind && run.bundle === bundle,
     `kind=${run.kind} bundle=${run.bundle}\n      wanted kind=${kind} bundle=${bundle}`);
@@ -578,8 +591,22 @@ for (const code of ['EACCES', 'EIO']) {
 }
 {
   const r = pf({ userData: `${APPS}/private/user`, alsoData: true });
-  check('with the box ticked it is refused too, rather than trashed twice or called "kept"',
-    r.ok === false, JSON.stringify(r));
+  check('with the box ticked it goes ahead, covered by the bundle\u2019s own move',
+    r.ok === true && r.covered.includes(`${APPS}/private/user`), JSON.stringify(r));
+  check('and is not sent to the Trash a second time',
+    (r.targets || []).every(t => !L.overlaps(`${APPS}/private/user`, t.path)), JSON.stringify(r.targets));
+  check('nor reported as kept, since it does not survive',
+    (r.skipped || []).every(k => k.path !== `${APPS}/private/user`), JSON.stringify(r.skipped));
+}
+{
+  const r = pf({ userData: `${APPS}/private/user`, alsoData: false });
+  check('unticked it is refused, but as something the user can answer',
+    r.ok === false && r.needsConsent === true, JSON.stringify(r));
+}
+{
+  const r = pf({ userData: '/Applications', alsoData: true });
+  check('a data directory that contains the bundle is refused however the box is set',
+    r.ok === false && !r.needsConsent, JSON.stringify(r));
 }
 {
   const r = pf({ engineHome: `${DATA}/Yapper/engine`, alsoData: true });
@@ -590,21 +617,48 @@ for (const code of ['EACCES', 'EIO']) {
 // ---------- volume roots ----------
 // path.dirname(p) === p finds only "/". A mounted volume's root has an
 // ordinary parent and is still a whole disk.
-const mounted = extra => fakeIO({
-  ids: { '/Volumes/Work': { dev: 9, ino: 2 }, '/Volumes': { dev: 1, ino: 3 } }, ...extra
-});
+const mounted = extra => fakeIO({ mounts: ['/', '/Volumes/Work'], ...extra });
 {
   const plan = L.dataPlan({ userData: '/Volumes/Work', engineHome: null, meetings: MEET, io: mounted() });
   check('the root of a mounted volume is refused, not trashed',
     plan.targets.length === 0 && /root of a volume/.test(plan.skipped[0].why), JSON.stringify(plan));
 }
 {
+  // APFS shares one device across a volume group, so this mount looks exactly
+  // like its parent by device. It is still the root of the data volume.
+  const plan = L.dataPlan({
+    userData: '/System/Volumes/Data', engineHome: null, meetings: MEET,
+    io: fakeIO({ mounts: ['/', '/System/Volumes/Data'],
+      ids: { '/System/Volumes/Data': { dev: 1, ino: 5 }, '/System/Volumes': { dev: 1, ino: 6 } } })
+  });
+  check('a mount that shares its parent\u2019s device is still a volume root',
+    plan.targets.length === 0 && /root of a volume/.test(plan.skipped[0].why), JSON.stringify(plan));
+}
+{
+  const plan = L.dataPlan({
+    userData: '/tmp/y/user', engineHome: null, meetings: '/tmp/y/Meetings',
+    io: fakeIO({ links: { '/tmp/y/user': null } })
+  });
+  check('a data directory that is simply not there is a target, never a leftover',
+    plan.targets.length === 1 && plan.targets[0].missing === true && plan.skipped.length === 0,
+    JSON.stringify(plan));
+}
+{
+  // And still not a leftover on a machine where the mount table cannot be
+  // read: a path that does not exist has no volume to be the root of, so the
+  // question is not asked at all.
+  const plan = L.dataPlan({
+    userData: '/tmp/y/user', engineHome: null, meetings: '/tmp/y/Meetings',
+    io: fakeIO({ links: { '/tmp/y/user': null }, mounts: null })
+  });
+  check('nor when the mount table itself is unreadable',
+    plan.targets.length === 1 && plan.targets[0].missing === true && plan.skipped.length === 0,
+    JSON.stringify(plan));
+}
+{
   const plan = L.dataPlan({
     userData: '/tmp/yhome/user', engineHome: null, meetings: MEET,
-    io: fakeIO({
-      links: { '/tmp/yhome/user': '/Volumes/Work' },
-      ids: { '/Volumes/Work': { dev: 9, ino: 2 }, '/Volumes': { dev: 1, ino: 3 } }
-    })
+    io: fakeIO({ links: { '/tmp/yhome/user': '/Volumes/Work' }, mounts: ['/', '/Volumes/Work'] })
   });
   check('and so is a path that only canonicalises to one', plan.targets.length === 0, JSON.stringify(plan));
 }
@@ -619,8 +673,7 @@ const mounted = extra => fakeIO({
 {
   const plan = L.dataPlan({
     userData: '/Volumes/Work/YapperData', engineHome: null, meetings: MEET,
-    io: fakeIO({ ids: { '/Volumes/Work/YapperData': { dev: 9, ino: 5 },
-      '/Volumes/Work': { dev: 9, ino: 2 } } })
+    io: fakeIO({ mounts: ['/', '/Volumes/Work'] })
   });
   check('an ordinary folder on that volume is still fine',
     plan.targets.length === 1, JSON.stringify(plan));
@@ -628,7 +681,7 @@ const mounted = extra => fakeIO({
 {
   const plan = L.dataPlan({
     userData: '/Volumes/Work/Data', engineHome: null, meetings: MEET,
-    io: fakeIO({ ids: { '/Volumes/Work/Data': { code: 'EIO' } } })
+    io: fakeIO({ mounts: null })
   });
   check('and if it cannot be told whether it is a volume root, it is left alone',
     plan.targets.length === 0 && /could not be determined/.test(plan.skipped[0].why),
@@ -680,6 +733,50 @@ async function uninstallChecks() {
     const { deps, log } = fakeUninstall({ alsoData: false });
     await L.uninstall(deps);
     check('without the checkbox only the bundle is touched', eq(trashed(log), [APPS]), JSON.stringify(log));
+  }
+  {
+    // The dialog can sit open for as long as the user likes. A symlink that
+    // moves in the meantime has to be caught by the plan that is executed, not
+    // by the one that decided whether to ask.
+    let call = 0;
+    const { deps, log } = fakeUninstall({ alsoData: false });
+    const inner = deps.preflight;
+    deps.preflight = also => {
+      inner(also);
+      call++;
+      return call === 1 ? { ok: true, bundle: APPS, targets: [], skipped: [] }
+        : { ok: false, why: 'the settings moved inside the app while you were deciding' };
+    };
+    const r = await L.uninstall(deps);
+    check('the preflight runs again after the dialog, even with the box unticked',
+      log.filter(e => e[0] === 'preflight').length === 2, JSON.stringify(steps(log)));
+    check('and the second one is what decides',
+      r.step === 'preflight' && !steps(log).includes('set') && !steps(log).includes('trash'),
+      JSON.stringify(steps(log)));
+  }
+  {
+    // needsConsent is a question, not a dead end: the dialog still appears, and
+    // ticking the box answers it.
+    let call = 0;
+    const { deps, log } = fakeUninstall({ alsoData: true });
+    deps.preflight = also => {
+      log.push(['preflight', !!also]);
+      call++;
+      if (!also) return { ok: false, needsConsent: true, why: 'the settings are inside the app' };
+      return { ok: true, bundle: APPS, targets: [], skipped: [], covered: [`${APPS}/private/user`] };
+    };
+    const r = await L.uninstall(deps);
+    check('a refusal the user can answer still reaches the dialog',
+      steps(log).includes('confirm'), JSON.stringify(steps(log)));
+    check('and ticking the box carries it through, with no second Trash for the covered data',
+      r.done === true && eq(trashed(log), [APPS]), JSON.stringify(log));
+  }
+  {
+    const { deps, log } = fakeUninstall({ alsoData: true });
+    deps.preflight = also => { log.push(['preflight', !!also]); return { ok: false, why: 'no' }; };
+    const r = await L.uninstall(deps);
+    check('a refusal the user cannot answer never reaches the dialog',
+      !steps(log).includes('confirm') && r.step === 'preflight', JSON.stringify(steps(log)));
   }
   {
     const { deps, log } = fakeUninstall({ proceed: false, alsoData: true });

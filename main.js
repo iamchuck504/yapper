@@ -829,6 +829,7 @@ const LEGACY_LLM_KEYS = ['llmKey', 'llmModel', 'llmBaseUrl'];
 
 // The three questions loginitem.js asks of the filesystem. They live here so
 // the decisions that depend on them can be tested without one.
+let mountPointCache;
 const bundleIO = {
   isDirectory(p) { try { return fs.statSync(p).isDirectory(); } catch { return false; } },
   // Structured, because the difference between "it is not there" and "I was
@@ -841,6 +842,26 @@ const bundleIO = {
   identity(p) {
     try { const st = fs.statSync(p); return { dev: st.dev, ino: st.ino }; }
     catch (e) { return { code: e.code || 'EIO' }; }
+  },
+  // The mount table, read once. A device number cannot stand in for it: APFS
+  // shares one device across a volume group, so /System/Volumes/Data and its
+  // parent report the same one while Data is its own mount — and that is the
+  // directory it would be worst to get wrong. Nothing here guesses when the
+  // table cannot be read; the callers treat a missing list as unanswerable.
+  mountPoints() {
+    if (mountPointCache !== undefined) return mountPointCache;
+    try {
+      const out = require('child_process').execFileSync('/sbin/mount', [], { encoding: 'utf8' });
+      const found = [];
+      for (const line of out.split('\n')) {
+        const m = /^.* on (.*) \([^)]*\)$/.exec(line);
+        if (m) found.push(m[1]);
+      }
+      mountPointCache = found.length ? found : null;
+    } catch {
+      mountPointCache = null;
+    }
+    return mountPointCache;
   },
   // EROFS is a read-only filesystem. EACCES and EPERM are a directory this
   // account may not write to, which is what /Applications answers on a Mac
@@ -875,13 +896,11 @@ function macRun() {
       exe: app.getPath('exe'),
       tempDirs: [os.tmpdir(), '/private/var/folders', '/private/tmp', '/tmp'],
       installRoots: installRoots(),
-      // What "the startup disk" means, as devices rather than as path names.
-      // On this Mac /, /System/Volumes/Data, /Applications and the home
-      // directory all report one device — APFS firmlinks keep the data volume
-      // in one piece — and a mounted image reports another. The home directory
-      // is here too so that an account on a different volume is measured
-      // against its own.
-      approvedVolumeAnchors: ['/System/Volumes/Data', '/', app.getPath('home')],
+      // The startup disk's own mounts, and only those. The home directory is
+      // deliberately not here: it is a location, not an authority, and letting
+      // it approve its own volume is how a network or external home would have
+      // approved itself — which is the opposite of what the docs promise.
+      approvedVolumeMounts: ['/', '/System/Volumes/Data'],
       io: bundleIO
     });
   }

@@ -97,10 +97,38 @@ const rejects = msg => () => Promise.reject(new Error(msg));
       h.last().disabled === true && !!h.last().hint, JSON.stringify(h.last()));
   }
   {
+    // Off is a claim, and the wrong one whenever the app really is registered:
+    // it would also make the next click a request to register, leaving no click
+    // that withdraws.
     const h = harness([rejects('no ipc'), rejects('still no ipc')]);
     await h.ctl.load();
     check('a first read that fails leaves the control usable',
-      h.last().disabled === false && /could not change/i.test(h.last().hint), JSON.stringify(h.last()));
+      h.last().disabled === false, JSON.stringify(h.last()));
+    check('and neither on nor off, rather than inventing off',
+      h.last().indeterminate === true && h.last().checked === false, JSON.stringify(h.last()));
+    check('and says the reading failed, not the writing',
+      /could not read/i.test(h.last().hint), h.last().hint);
+    await h.ctl.toggle(true);
+    check('a click while nothing is known writes nothing', h.sent.length === 0, JSON.stringify(h.sent));
+  }
+  {
+    // ...and once a read does succeed, the click after it is a real answer.
+    const h = harness([rejects('no ipc'), rejects('still no ipc'), 'enabled', 'disabled']);
+    await h.ctl.load();
+    await h.ctl.toggle(true);
+    check('that click reads instead, and shows what the system says',
+      h.sent.length === 0 && h.last().checked === true && h.last().indeterminate === false,
+      JSON.stringify(h.last()));
+    await h.ctl.toggle(false);
+    check('and the next one writes the right thing',
+      h.sent.join(',') === 'false' && h.last().checked === false, JSON.stringify(h.sent));
+  }
+  {
+    const h = harness(['enabled', rejects('write went bad'), 'enabled']);
+    await h.ctl.load();
+    await h.ctl.toggle(false);
+    check('a failed write says so, and is not reported as a failed read',
+      /could not change/i.test(h.last().hint), h.last().hint);
   }
 
   // ---------- races ----------

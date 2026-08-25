@@ -176,11 +176,13 @@ location Yapper cannot promise will still mean this copy tomorrow is not one
 worth recording. Being able to write to a folder is not the same as being
 installed in it, so that is not what Yapper goes by.
 
-The folder's *name* is not what Yapper goes by either. It checks which disk the
-app is actually on, so an `Applications` folder that is really a link to an
-external drive, or a disk image mounted at that path, is refused the same way a
-copy in Downloads is — they look identical from the outside and none of them
-survives being unplugged.
+The folder's *name* is not what Yapper goes by either. It checks which mounted
+volume the app is really on, so an `Applications` folder that is a link to an
+external drive, a disk image mounted at that path, or a home directory that
+lives on a network share are all refused the same way a copy in Downloads is —
+they look identical from the outside and none of them survives being unplugged.
+Your home folder being somewhere else does not make that somewhere else count
+as the startup disk.
 
 Deliberate limit: an Applications folder kept on an **external disk** is refused
 rather than registered and hoped for. If you want Yapper to open at login, keep
@@ -232,10 +234,16 @@ there and removes nothing, the login item included. "Cannot show" includes not
 being able to read where a folder really is: an unreadable path might be inside
 the app, so it is treated as though it were.
 
-That check does not depend on the checkbox. The app moves to the Trash either
-way, so if your settings or the engine turn out to live inside it — which
-`YAPPER_HOME` or `LOCALAPPDATA` can arrange — the uninstall is refused rather
-than quietly taking them along with data you asked it to keep.
+That check does not depend on the checkbox, because the app moves to the Trash
+either way. If your settings or the engine turn out to live *inside* it — which
+`YAPPER_HOME` or `LOCALAPPDATA` can arrange — then leaving the box unticked is
+refused, since moving the app would delete data you had just declined to
+delete; ticking it goes ahead, and those files are removed by the app's own
+move rather than a second time. A settings folder that *contains* the app is
+refused whatever the box says: that is your folder, not Yapper's to delete.
+
+The whole check runs again after you answer the dialog, not only before it, so
+nothing that changes while the dialog is open goes unnoticed.
 
 Then, in order: it stops itself opening at login, checks with macOS that it
 really has, moves itself to the Trash, and — only if you tick the box — moves

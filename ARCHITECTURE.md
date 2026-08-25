@@ -106,7 +106,7 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 3930 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `main.js` | 3950 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
 | `engine.js` | 1149 | whisper.cpp lifecycle, the tier table, calibration, Metal-to-CPU fallback, WAV read/write, full-file transcription |
 | `digest.js` | 357 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
@@ -120,7 +120,7 @@ that ship are the files that run.
 | `meetings.js` | 89 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
-| `loginitem.js` | 676 | Where this copy is running from, and every rule about opening at login and removing itself |
+| `loginitem.js` | 747 | Where this copy is running from, and every rule about opening at login and removing itself |
 | `security.js` | 99 | Canonical meeting and import paths; blocks traversal and folder/file symlink escapes |
 | `storage.js` | 77 | Atomic bounded meeting-file access plus replacement for settings, reminders, caches and indexes |
 | `preload.js` | 129 | The only bridge between renderer and main |
@@ -138,8 +138,8 @@ the Trash refuse the bundle, and check what happens next.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 3858 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
-| `renderer/startup-switch.js` | 94 | The Start at login switch: what it shows when a call is refused, lost or answered late |
+| `renderer/app.js` | 3861 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
+| `renderer/startup-switch.js` | 116 | The Start at login switch: what it shows when a call is refused, lost or answered late |
 | `renderer/style.css` | 1782 | Everything visual, light and dark |
 | `renderer/index.html` | 595 | Main window markup |
 | `renderer/bubble.html` | 198 | The always-on-top overlay: a capsule at rest, the live transcript on hover |

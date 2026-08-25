@@ -112,62 +112,74 @@ function sameDirectory(a, b, io) {
 }
 
 /**
- * The device a path lives on, or nothing. Every volume question below is built
- * on this, and every one of them treats "no answer" as "do not touch it".
+ * The mount point a path belongs to: the longest one that is a prefix of it.
+ *
+ * The device number cannot answer this and the earlier version of this file
+ * was wrong to think it could. On APFS a volume group shares a device across
+ * its members — measured here: `/System/Volumes/Data` and its parent
+ * `/System/Volumes` both report 16777230, and Data is a separate mount. A
+ * device comparison therefore says "not a mount root" about the root of the
+ * data volume, which is the one directory on the disk it would be worst to
+ * hand to the Trash.
+ *
+ * So the mount table is read instead. `io.mountPoints()` answers with the list
+ * or with nothing, and nothing means every question below is unanswerable
+ * rather than false.
+ *
+ * @returns {string|null}
  */
-function deviceOf(p, io) {
-  const id = io.identity(p);
-  return id && !id.code && id.dev !== undefined ? id.dev : null;
+function mountPointOf(p, mounts) {
+  if (!Array.isArray(mounts) || !p) return null;
+  let best = null;
+  for (const m of mounts) {
+    if (!contains(m, p)) continue;
+    if (!best || m.length > best.length) best = m;
+  }
+  return best;
 }
 
 /**
  * The root of a mounted filesystem — where deleting would take the whole
- * volume, not a folder on it.
- *
- * `path.dirname(p) === p` finds only `/`. `/Volumes/Work` has `/Volumes` for a
- * parent and is still the root of its own filesystem, and handing that to the
- * Trash is handing over the disk. What actually marks a mount root is the
- * device changing across the boundary — measured on this machine: a mounted
- * image reported its own device, while its parent `/Volumes` reported the
- * startup disk's.
+ * volume rather than a folder on it.
  *
  * @returns {boolean|null} null when it could not be determined, which callers
- *   must treat as "yes, probably" rather than as "no"
+ *   must treat as "assume it is" rather than as "no"
  */
 function isVolumeRoot(p, io) {
   if (path.dirname(p) === p) return true;
-  const here = deviceOf(p, io);
-  const up = deviceOf(path.dirname(p), io);
-  if (here === null || up === null) return null;
-  return here !== up;
+  const mounts = io.mountPoints();
+  if (!Array.isArray(mounts)) return null;
+  return mounts.some(m => m === p);
 }
 
 /**
- * Whether a path sits on one of the volumes an installation may live on.
+ * Whether a path is on the startup disk.
  *
- * Path names cannot answer this. `~/Applications` symlinked to
- * `/Volumes/External/Applications` canonicalises to the external disk and
- * still ends in a directory called Applications; a read-write image mounted
- * over an approved root looks identical from the outside. The device does
- * answer it: on this Mac `/`, `/System/Volumes/Data`, `/Applications` and the
- * home directory all report the same device — APFS firmlinks keep the data
- * volume in one piece — and a mounted image reports a different one.
+ * Not by path name: `~/Applications` symlinked to an external disk
+ * canonicalises to the external disk and still ends in a directory called
+ * Applications, and an image mounted over an approved root is identical from
+ * the outside. Not by device either, for the reason above.
+ *
+ * By mount point: the volume a path belongs to has to be one of the startup
+ * disk's own — `/` and `/System/Volumes/Data`. A home directory is not an
+ * authority here. An earlier version made it one, which meant a home on an
+ * external or network volume approved that volume, and `~/Applications` on it
+ * passed — the exact thing the docs promised was refused.
  *
  * @returns {boolean|null} null when nothing could be resolved
  */
-function onApprovedVolume(p, anchors, io) {
-  const dev = deviceOf(p, io);
-  if (dev === null) return null;
-  let known = false;
-  for (const anchor of anchors) {
-    const a = canonical(anchor, io);
-    if (a.code) continue;
-    const ad = deviceOf(a.path, io);
-    if (ad === null) continue;
-    known = true;
-    if (ad === dev) return true;
+function onApprovedVolume(p, approvedMounts, io) {
+  const mounts = io.mountPoints();
+  if (!Array.isArray(mounts) || !approvedMounts || !approvedMounts.length) return null;
+  const mine = mountPointOf(p, mounts);
+  if (!mine) return null;
+  const approved = [];
+  for (const a of approvedMounts) {
+    const c = canonical(a, io);
+    if (!c.code && !c.missing) approved.push(c.path);
   }
-  return known ? false : null;
+  if (!approved.length) return null;
+  return approved.includes(mine);
 }
 
 // ---------- which bundle is running ----------
@@ -243,20 +255,24 @@ function bundleFromExecutable(exe, io) {
  * The version after it checked the roots by name only, which was no better in
  * the case it claimed to cover: `~/Applications` symlinked to an external disk
  * canonicalises to the external disk, and a read-write image mounted over an
- * approved root is indistinguishable by path. So the volume is proved by
- * device — the bundle's, and the root's — against the volumes an installation
- * may live on. Anything that cannot be resolved is UNKNOWN, and UNKNOWN
- * changes nothing.
+ * approved root is indistinguishable by path. The version after *that* proved
+ * the volume by device, which APFS does not support: a volume group shares one
+ * device across its members, and a home directory was allowed to approve its
+ * own volume, so a network home let `~/Applications` through.
+ *
+ * The volume is the mount point now — the bundle's and the root's — and only
+ * the startup disk's own mounts count. Anything that cannot be resolved is
+ * UNKNOWN, and UNKNOWN changes nothing.
  *
  * The cost is deliberate and documented: an Applications folder on an external
  * disk is refused rather than registered and hoped for.
  *
  * @param {{platform:string, isPackaged:boolean, exe:string, tempDirs?:string[],
- *          installRoots?:string[], approvedVolumeAnchors?:string[], io:object}} o
+ *          installRoots?:string[], approvedVolumeMounts?:string[], io:object}} o
  * @returns {{kind:string, bundle:string|null, why?:string}}
  */
 function classifyRun({ platform, isPackaged, exe, tempDirs = [], installRoots = [],
-  approvedVolumeAnchors = [], io }) {
+  approvedVolumeMounts = [], io }) {
   if (platform !== 'darwin') return { kind: KIND.OTHER_OS, bundle: null };
   if (!isPackaged) return { kind: KIND.DEVELOPMENT, bundle: null, why: WHY[KIND.DEVELOPMENT] };
 
@@ -290,7 +306,7 @@ function classifyRun({ platform, isPackaged, exe, tempDirs = [], installRoots = 
   // The volume first: a root that turns out to be somewhere else entirely is
   // the bypass this is here to close, and an unresolvable one must not be
   // read as a refusal.
-  const bundleVolume = onApprovedVolume(bundle, approvedVolumeAnchors, io);
+  const bundleVolume = onApprovedVolume(bundle, approvedVolumeMounts, io);
   if (bundleVolume === null) return { kind: KIND.UNKNOWN, bundle, why: WHY[KIND.UNKNOWN] };
   if (bundleVolume === false) return { kind: KIND.UNAPPROVED, bundle, why: WHY[KIND.UNAPPROVED] };
 
@@ -300,7 +316,7 @@ function classifyRun({ platform, isPackaged, exe, tempDirs = [], installRoots = 
     // Directly under the root. A bundle further down is inside somebody's
     // folder of things, which is not the same as being installed.
     if (path.dirname(bundle) !== r.path) continue;
-    const rootVolume = onApprovedVolume(r.path, approvedVolumeAnchors, io);
+    const rootVolume = onApprovedVolume(r.path, approvedVolumeMounts, io);
     if (rootVolume === null) return { kind: KIND.UNKNOWN, bundle, why: WHY[KIND.UNKNOWN] };
     if (rootVolume === true) return { kind: KIND.PERMANENT, bundle };
   }
@@ -361,8 +377,20 @@ function switchView(result) {
     // Only a copy that genuinely cannot change anything is left unusable. An
     // error is recoverable, so the click stays available.
     disabled: state === 'unavailable',
+    indeterminate: false,
     hint: (result && (result.why || result.message)) || ''
   };
+}
+
+/**
+ * What the switch looks like before anything has been read, or after every
+ * attempt to read has failed. Off is not the answer: the system may well be
+ * registered, and painting off both misreports it and turns the next click
+ * into a request to register — leaving no click that withdraws. Neither on nor
+ * off, then, and nothing is written from this state until a read succeeds.
+ */
+function unknownView(hint) {
+  return { state: 'unknown', checked: false, indeterminate: true, disabled: false, hint: hint || '' };
 }
 
 // ---------- startup ----------
@@ -473,6 +501,13 @@ function dataPlan({ userData, engineHome, meetings, io }) {
       return skipped.push({ label, path: raw, why: `its real location could not be read (${c.code})` });
     }
     const p = c.path;
+    if (c.missing) {
+      // Nothing is there. It stays a target so the Trash answers ENOENT and
+      // the caller treats it as the non-event it is — asking whether a path
+      // that does not exist is a mount root gets ENOENT back and would file it
+      // as a leftover the user should worry about.
+      return targets.push({ label, path: p, missing: true });
+    }
     const root = isVolumeRoot(p, io);
     if (root !== false) {
       // true, or unknown: a whole disk, or a question nobody answered.
@@ -512,11 +547,14 @@ function dataPlan({ userData, engineHome, meetings, io }) {
  * pointed inside it, which `engineHome()` honours on macOS too — and it would
  * have deleted data the user had explicitly declined to delete.
  *
- * A data location that overlaps the bundle stops the whole uninstall, ticked
- * or not. Folding it into the bundle's move would delete it when the box was
- * unticked; leaving it out and calling it "kept" would be a lie, because the
- * bundle takes it either way. Refusing is the only answer that is true in both
- * cases, and the message says which path is the problem.
+ * What happens when a data location turns out to be inside the bundle depends
+ * on the checkbox, because the checkbox is the consent. Unticked, it is
+ * refused — the bundle would take the data with it, and the user has just said
+ * not to remove it — but refused with `needsConsent`, so the caller can still
+ * show the dialog and let them tick it. Ticked, the uninstall goes ahead and
+ * that location is `covered`: the bundle's move removes it, so it is not sent
+ * to the Trash a second time, and it is not reported as kept either, because
+ * it does not survive.
  *
  * @returns {{ok:true, bundle:string, targets:Array, skipped:Array}|{ok:false, why:string}}
  */
@@ -547,6 +585,7 @@ function uninstallPreflight({ bundle, userData, engineHome, meetings, alsoData, 
   }
 
   // Always, because the bundle moves whether or not the box is ticked.
+  const inside = [];
   for (const [label, raw] of [['settings', userData], ['engine', engineHome]]) {
     if (!raw) continue;
     const c = canonical(raw, io);
@@ -558,21 +597,50 @@ function uninstallPreflight({ bundle, userData, engineHome, meetings, alsoData, 
           + ' has been removed.'
       };
     }
-    if (overlaps(b.path, c.path)) {
+    // A data directory that *contains* the bundle is refused either way: the
+    // box asks to delete Yapper's own files, not the folder it happens to sit
+    // in, and nothing the user can tick makes that the right thing to remove.
+    if (contains(c.path, b.path) && c.path !== b.path) {
       return {
         ok: false,
-        why: `Yapper's ${label} are inside the app itself (${c.path}). Moving the app to the`
-          + ' Trash would take them with it, whether or not you asked for that, so nothing has'
-          + ' been removed.'
+        why: `Yapper is inside what it would have to delete: ${c.path} contains ${b.path}.`
+          + ' Removing that is not something Yapper will do, so nothing has been removed.'
       };
     }
+    if (overlaps(b.path, c.path)) inside.push({ label, path: c.path });
+  }
+
+  if (inside.length && !alsoData) {
+    // The bundle takes them with it. Without the box ticked that is deleting
+    // data the user just declined to delete, so it is refused — but it is
+    // refused as something the user can answer, not as a dead end: ticking the
+    // box makes it a consented removal, and `needsConsent` is what lets the
+    // dialog be shown rather than skipped.
+    return {
+      ok: false,
+      needsConsent: true,
+      why: `Yapper's ${inside.map(i => i.label).join(' and ')} are inside the app itself`
+        + ` (${inside.map(i => i.path).join(', ')}). Moving the app to the Trash would take`
+        + ' them with it. Tick "Also move settings and the downloaded engine to the Trash"'
+        + ' if that is what you want; otherwise move them out of the app first.'
+    };
   }
 
   if (!alsoData) return { ok: true, bundle: b.path, targets: [], skipped: [] };
 
   const plan = dataPlan({ userData, engineHome, meetings: m.path, io });
   if (plan.error) return { ok: false, why: `Yapper has removed nothing: ${plan.error}.` };
-  return { ok: true, bundle: b.path, targets: plan.targets, skipped: plan.skipped };
+  // Anything inside the bundle is already covered by moving the bundle. It is
+  // dropped from the targets rather than sent to the Trash a second time, and
+  // it is not reported as kept either, because it does not survive.
+  const covered = inside.map(i => i.path);
+  return {
+    ok: true,
+    bundle: b.path,
+    targets: plan.targets.filter(t => !covered.some(c => overlaps(c, t.path))),
+    skipped: plan.skipped.filter(k => !covered.includes(k.path)),
+    covered
+  };
 }
 
 // ---------- uninstalling ----------
@@ -597,19 +665,22 @@ async function uninstall(deps) {
   if (!canUninstall(run)) return { done: false, step: 'unavailable' };
 
   // Before the question, so a copy that cannot be removed safely is never
-  // asked about. This pass covers the bundle, which moves either way.
-  const first = deps.preflight(false);
-  if (!first.ok) {
-    await deps.report({ step: 'preflight', message: 'Yapper cannot remove itself safely.', detail: first.why });
+  // asked about. A filter only: `needsConsent` is a refusal the user can
+  // answer by ticking the box, so it must not stop the dialog appearing.
+  const early = deps.preflight(false);
+  if (!early.ok && !early.needsConsent) {
+    await deps.report({ step: 'preflight', message: 'Yapper cannot remove itself safely.', detail: early.why });
     return { done: false, step: 'preflight' };
   }
 
   const choice = await deps.confirm();
   if (!choice || !choice.proceed) return { done: false, step: 'cancelled' };
 
-  // Again with the answer, so the data half is proved before the login item —
-  // the step that cannot be undone — is touched.
-  const plan = choice.alsoData ? deps.preflight(true) : first;
+  // Again, always, with the answer. The early pass is a filter and never an
+  // authorisation: a dialog sits open for as long as the user likes, and a
+  // symlink that moves meanwhile has to be caught by the plan that is actually
+  // executed. Everything below uses this plan's paths, not the earlier one's.
+  const plan = deps.preflight(!!choice.alsoData);
   if (!plan.ok) {
     await deps.report({ step: 'preflight', message: 'Yapper cannot remove itself safely.', detail: plan.why });
     return { done: false, step: 'preflight' };
@@ -671,6 +742,6 @@ module.exports = {
   canonical, contains, overlaps, sameDirectory,
   bundleOfExecutable, bundleFromExecutable,
   classifyRun, canRegister, canUninstall,
-  readState, switchView, initMac, setMac,
+  readState, switchView, unknownView, initMac, setMac,
   dataPlan, uninstallPreflight, uninstall
 };

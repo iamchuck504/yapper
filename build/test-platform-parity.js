@@ -124,8 +124,14 @@ check('install roots are a list, not an inference',
   && /installRoots: installRoots\(\)/.test(mainCode),
   'anything writable would count as an installation again');
 check('and the volume they have to be on is passed in too',
-  /approvedVolumeAnchors: \[/.test(mainCode),
+  /approvedVolumeMounts: \[/.test(mainCode),
   'a root symlinked onto an external disk would pass by its name');
+check('the home directory is not one of them',
+  !/approvedVolumeMounts:[^\]]*getPath\('home'\)/.test(mainCode),
+  'a home on an external or network volume would approve its own volume');
+check('and the volume question is answered from the mount table',
+  /mountPoints\(\)/.test(login) && /\/sbin\/mount/.test(login),
+  'a device comparison cannot see an APFS volume group: Data shares its parent\u2019s device');
 
 check('the renderer paints what the main process decided',
   /render: view =>/.test(rendererCode) && /startupToggle\.checked = !!view\.checked/.test(rendererCode),

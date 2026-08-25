@@ -423,6 +423,9 @@ const startupSwitch = createStartupSwitch({
   set: on => window.yapper.setOpenAtLogin(on),
   render: view => {
     startupToggle.checked = !!view.checked;
+    // Neither on nor off, for a setting that has not been read yet: showing it
+    // off would be a claim, and the wrong one half the time.
+    startupToggle.indeterminate = !!view.indeterminate;
     startupToggle.disabled = !!view.disabled;
     startupHint.textContent = view.hint || '';
     startupHint.hidden = !view.hint;

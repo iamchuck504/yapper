@@ -384,9 +384,10 @@ The rules around it:
   splash.
 - **Start at login** — on by default on Windows. On macOS it is off until it is
   switched on, it only works from an Applications folder on the startup disk
-  (`/Applications` or `~/Applications`, checked by which disk the app is really
-  on rather than by the folder's name — so a link to an external drive or a disk
-  image mounted there is refused too), and the switch reports what macOS did: it can
+  (`/Applications` or `~/Applications`, checked by which mounted volume the app
+  is really on rather than by the folder's name — so a link to an external
+  drive, a disk image mounted there, or a home on a network share are all
+  refused), and the switch reports what macOS did: it can
   register and then wait to be allowed in System Settings, in which case the
   switch stays on and switching it off withdraws it.
 - **Updates** — checked at launch and every four hours. **Windows** downloads in
