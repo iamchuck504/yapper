@@ -167,18 +167,25 @@ on what you send, and the app says so when you pick one.
 Off until you turn it on, in **Settings → Start at login**. Nothing registers
 Yapper to open at login on your behalf.
 
-**It only works from an Applications folder** — `/Applications`, or the
-`Applications` folder in your own home. Anywhere else the switch says so and
-stays off: a copy in Downloads, on a mounted disk image, in a temporary folder,
-or in the read-only copy macOS makes of an app opened outside Applications. The
-reason is that macOS records *this copy*, and a location Yapper cannot promise
-will still mean this copy tomorrow is not one worth recording. Being able to
-write to a folder is not the same as being installed in it, so that is not what
-Yapper goes by.
+**It only works from an Applications folder on the startup disk** —
+`/Applications`, or the `Applications` folder in your own home. Anywhere else
+the switch says so and stays off: a copy in Downloads, on a mounted disk image,
+in a temporary folder, or in the read-only copy macOS makes of an app opened
+outside Applications. The reason is that macOS records *this copy*, and a
+location Yapper cannot promise will still mean this copy tomorrow is not one
+worth recording. Being able to write to a folder is not the same as being
+installed in it, so that is not what Yapper goes by.
 
-Deliberate limit: an Applications folder kept on an **external disk** is not one
-of those roots either. The switch is refused there rather than registered and
-hoped for. If you want Yapper to open at login, keep it on the startup disk.
+The folder's *name* is not what Yapper goes by either. It checks which disk the
+app is actually on, so an `Applications` folder that is really a link to an
+external drive, or a disk image mounted at that path, is refused the same way a
+copy in Downloads is — they look identical from the outside and none of them
+survives being unplugged.
+
+Deliberate limit: an Applications folder kept on an **external disk** is refused
+rather than registered and hoped for. If you want Yapper to open at login, keep
+it on the startup disk. If Yapper cannot work out which disk it is on at all, it
+refuses too and changes nothing.
 
 The switch reports macOS rather than its own memory of what you asked for.
 macOS 13 and later keeps that registration itself, which means three things
@@ -218,9 +225,17 @@ Either way:
 ## Uninstalling
 
 **Yapper → Uninstall Yapper…**, from the menu bar. Before it touches anything
-it works out everything it would remove and checks that the app, its settings
-and your meetings really are separate places. If it cannot show that, it stops
-there and removes nothing — including the login item.
+it works out every location involved — the app, its settings, the downloaded
+engine and your meetings — and checks that each one is genuinely outside the
+app it is about to move. If it cannot *show* that for any of them, it stops
+there and removes nothing, the login item included. "Cannot show" includes not
+being able to read where a folder really is: an unreadable path might be inside
+the app, so it is treated as though it were.
+
+That check does not depend on the checkbox. The app moves to the Trash either
+way, so if your settings or the engine turn out to live inside it — which
+`YAPPER_HOME` or `LOCALAPPDATA` can arrange — the uninstall is refused rather
+than quietly taking them along with data you asked it to keep.
 
 Then, in order: it stops itself opening at login, checks with macOS that it
 really has, moves itself to the Trash, and — only if you tick the box — moves
@@ -237,8 +252,9 @@ settings or the engine, or could not prove one of them safe to remove, it tells
 you which path is still there.
 
 The entry only appears in a copy that is really installed, in an Applications
-folder. From a disk image or a temporary folder the bundle you are running is
-not the one you keep, so there is nothing there worth removing.
+folder on the startup disk. From a disk image or a temporary folder the bundle
+you are running is not the one you keep, so there is nothing there worth
+removing.
 
 Prefer that to dragging the app to the Trash yourself. macOS keeps the "open at
 login" registration in its own database rather than inside the app, so deleting

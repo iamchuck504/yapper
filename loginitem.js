@@ -54,7 +54,7 @@ const WHY = Object.freeze({
   // is as much as can honestly be said about it.
   [KIND.READ_ONLY]: `This copy is on a read-only disk — most likely a mounted disk image. ${MOVE_FIRST}`,
   [KIND.TEMPORARY]: `This copy is running from a temporary folder. ${MOVE_FIRST}`,
-  [KIND.UNAPPROVED]: `Yapper is not in an Applications folder, so it cannot register a location that will still mean this copy tomorrow. ${MOVE_FIRST}`,
+  [KIND.UNAPPROVED]: `Yapper is not in an Applications folder on the startup disk, so it cannot register a location that will still mean this copy tomorrow. ${MOVE_FIRST}`,
   [KIND.UNKNOWN]: `Yapper cannot make out where this copy is installed, and will not guess. ${MOVE_FIRST}`
 });
 
@@ -109,6 +109,65 @@ function sameDirectory(a, b, io) {
   const ib = io.identity(b);
   if (!ia || !ib || ia.code || ib.code) return false;
   return ia.dev === ib.dev && ia.ino === ib.ino;
+}
+
+/**
+ * The device a path lives on, or nothing. Every volume question below is built
+ * on this, and every one of them treats "no answer" as "do not touch it".
+ */
+function deviceOf(p, io) {
+  const id = io.identity(p);
+  return id && !id.code && id.dev !== undefined ? id.dev : null;
+}
+
+/**
+ * The root of a mounted filesystem — where deleting would take the whole
+ * volume, not a folder on it.
+ *
+ * `path.dirname(p) === p` finds only `/`. `/Volumes/Work` has `/Volumes` for a
+ * parent and is still the root of its own filesystem, and handing that to the
+ * Trash is handing over the disk. What actually marks a mount root is the
+ * device changing across the boundary — measured on this machine: a mounted
+ * image reported its own device, while its parent `/Volumes` reported the
+ * startup disk's.
+ *
+ * @returns {boolean|null} null when it could not be determined, which callers
+ *   must treat as "yes, probably" rather than as "no"
+ */
+function isVolumeRoot(p, io) {
+  if (path.dirname(p) === p) return true;
+  const here = deviceOf(p, io);
+  const up = deviceOf(path.dirname(p), io);
+  if (here === null || up === null) return null;
+  return here !== up;
+}
+
+/**
+ * Whether a path sits on one of the volumes an installation may live on.
+ *
+ * Path names cannot answer this. `~/Applications` symlinked to
+ * `/Volumes/External/Applications` canonicalises to the external disk and
+ * still ends in a directory called Applications; a read-write image mounted
+ * over an approved root looks identical from the outside. The device does
+ * answer it: on this Mac `/`, `/System/Volumes/Data`, `/Applications` and the
+ * home directory all report the same device — APFS firmlinks keep the data
+ * volume in one piece — and a mounted image reports a different one.
+ *
+ * @returns {boolean|null} null when nothing could be resolved
+ */
+function onApprovedVolume(p, anchors, io) {
+  const dev = deviceOf(p, io);
+  if (dev === null) return null;
+  let known = false;
+  for (const anchor of anchors) {
+    const a = canonical(anchor, io);
+    if (a.code) continue;
+    const ad = deviceOf(a.path, io);
+    if (ad === null) continue;
+    known = true;
+    if (ad === dev) return true;
+  }
+  return known ? false : null;
 }
 
 // ---------- which bundle is running ----------
@@ -173,24 +232,31 @@ function bundleFromExecutable(exe, io) {
 /**
  * Which kind of copy this is.
  *
- * The policy is a list of install roots, not an absence of red flags. An
- * earlier version called anything that was not translocated, not on a
+ * The policy is a list of install roots on the startup disk, not an absence of
+ * red flags, and both halves are checked.
+ *
+ * An earlier version called anything that was not translocated, not on a
  * read-only filesystem and not under a temp directory "permanent", which let
  * through ~/Downloads, a read-write disk image and any writable scratch volume
  * — all writable, none of them installations. Writability is not permanence.
- * So a copy has to sit directly under an approved root before it may register
- * itself or remove itself; everything else is told to move to Applications.
  *
- * The cost is deliberate and documented: an Applications folder kept on an
- * external disk is not an approved root, so open at login is refused there
- * rather than registered and hoped for. What counts as installed is a decision
- * about the product, not something to read off the shape of a path.
+ * The version after it checked the roots by name only, which was no better in
+ * the case it claimed to cover: `~/Applications` symlinked to an external disk
+ * canonicalises to the external disk, and a read-write image mounted over an
+ * approved root is indistinguishable by path. So the volume is proved by
+ * device — the bundle's, and the root's — against the volumes an installation
+ * may live on. Anything that cannot be resolved is UNKNOWN, and UNKNOWN
+ * changes nothing.
+ *
+ * The cost is deliberate and documented: an Applications folder on an external
+ * disk is refused rather than registered and hoped for.
  *
  * @param {{platform:string, isPackaged:boolean, exe:string, tempDirs?:string[],
- *          installRoots?:string[], io:object}} o
+ *          installRoots?:string[], approvedVolumeAnchors?:string[], io:object}} o
  * @returns {{kind:string, bundle:string|null, why?:string}}
  */
-function classifyRun({ platform, isPackaged, exe, tempDirs = [], installRoots = [], io }) {
+function classifyRun({ platform, isPackaged, exe, tempDirs = [], installRoots = [],
+  approvedVolumeAnchors = [], io }) {
   if (platform !== 'darwin') return { kind: KIND.OTHER_OS, bundle: null };
   if (!isPackaged) return { kind: KIND.DEVELOPMENT, bundle: null, why: WHY[KIND.DEVELOPMENT] };
 
@@ -221,12 +287,22 @@ function classifyRun({ platform, isPackaged, exe, tempDirs = [], installRoots = 
     }
   }
 
+  // The volume first: a root that turns out to be somewhere else entirely is
+  // the bypass this is here to close, and an unresolvable one must not be
+  // read as a refusal.
+  const bundleVolume = onApprovedVolume(bundle, approvedVolumeAnchors, io);
+  if (bundleVolume === null) return { kind: KIND.UNKNOWN, bundle, why: WHY[KIND.UNKNOWN] };
+  if (bundleVolume === false) return { kind: KIND.UNAPPROVED, bundle, why: WHY[KIND.UNAPPROVED] };
+
   for (const root of installRoots) {
     const r = canonical(root, io);
     if (r.code || r.missing) continue;
     // Directly under the root. A bundle further down is inside somebody's
     // folder of things, which is not the same as being installed.
-    if (path.dirname(bundle) === r.path) return { kind: KIND.PERMANENT, bundle };
+    if (path.dirname(bundle) !== r.path) continue;
+    const rootVolume = onApprovedVolume(r.path, approvedVolumeAnchors, io);
+    if (rootVolume === null) return { kind: KIND.UNKNOWN, bundle, why: WHY[KIND.UNKNOWN] };
+    if (rootVolume === true) return { kind: KIND.PERMANENT, bundle };
   }
   return { kind: KIND.UNAPPROVED, bundle, why: WHY[KIND.UNAPPROVED] };
 }
@@ -397,8 +473,13 @@ function dataPlan({ userData, engineHome, meetings, io }) {
       return skipped.push({ label, path: raw, why: `its real location could not be read (${c.code})` });
     }
     const p = c.path;
-    if (path.dirname(p) === p) {
-      return skipped.push({ label, path: raw, why: 'it is the root of a volume' });
+    const root = isVolumeRoot(p, io);
+    if (root !== false) {
+      // true, or unknown: a whole disk, or a question nobody answered.
+      return skipped.push({
+        label, path: raw,
+        why: root === true ? 'it is the root of a volume' : 'whether it is the root of a volume could not be determined'
+      });
     }
     if (overlaps(p, meetings)) {
       return skipped.push({ label, path: raw, why: 'it is not separate from the meetings folder' });
@@ -423,11 +504,19 @@ function dataPlan({ userData, engineHome, meetings, io }) {
  * before anything is touched at all — the login item included, since
  * withdrawing it is the one step that cannot be taken back.
  *
- * The bundle is checked against the meetings folder too, not only the data
- * directories. That is not a hypothetical: `YAPPER_HOME` pointed inside
- * `Yapper.app` puts `<home>/Meetings` *inside the bundle*, and moving the
- * bundle to the Trash would take every meeting with it without deleting a
- * single thing the data plan knows about.
+ * The data locations are resolved and compared against the bundle *whether or
+ * not* the checkbox was ticked, which is the part an earlier version got
+ * wrong: it returned early when `alsoData` was false, so it never noticed that
+ * moving the bundle would take the settings with it. That is reachable —
+ * `YAPPER_HOME` with `user` symlinked inside `Yapper.app`, or `LOCALAPPDATA`
+ * pointed inside it, which `engineHome()` honours on macOS too — and it would
+ * have deleted data the user had explicitly declined to delete.
+ *
+ * A data location that overlaps the bundle stops the whole uninstall, ticked
+ * or not. Folding it into the bundle's move would delete it when the box was
+ * unticked; leaving it out and calling it "kept" would be a lie, because the
+ * bundle takes it either way. Refusing is the only answer that is true in both
+ * cases, and the message says which path is the problem.
  *
  * @returns {{ok:true, bundle:string, targets:Array, skipped:Array}|{ok:false, why:string}}
  */
@@ -456,6 +545,29 @@ function uninstallPreflight({ bundle, userData, engineHome, meetings, alsoData, 
         + ' meetings with it, so nothing has been removed.'
     };
   }
+
+  // Always, because the bundle moves whether or not the box is ticked.
+  for (const [label, raw] of [['settings', userData], ['engine', engineHome]]) {
+    if (!raw) continue;
+    const c = canonical(raw, io);
+    if (c.code) {
+      return {
+        ok: false,
+        why: `Yapper could not work out where its ${label} really are (${raw}: ${c.code}), so it`
+          + ' cannot show they are outside the app it is about to move to the Trash. Nothing'
+          + ' has been removed.'
+      };
+    }
+    if (overlaps(b.path, c.path)) {
+      return {
+        ok: false,
+        why: `Yapper's ${label} are inside the app itself (${c.path}). Moving the app to the`
+          + ' Trash would take them with it, whether or not you asked for that, so nothing has'
+          + ' been removed.'
+      };
+    }
+  }
+
   if (!alsoData) return { ok: true, bundle: b.path, targets: [], skipped: [] };
 
   const plan = dataPlan({ userData, engineHome, meetings: m.path, io });

@@ -34,7 +34,7 @@ function runtimeGraph(entries) {
 
 const runtimeFiles = runtimeGraph(['main.js', 'preload.js']);
 const rendererFiles = [
-  'renderer/index.html', 'renderer/app.js', 'renderer/style.css',
+  'renderer/index.html', 'renderer/app.js', 'renderer/startup-switch.js', 'renderer/style.css',
   'renderer/bubble.html', 'renderer/splash.html'
 ];
 

@@ -78,7 +78,10 @@ check('no use of sys is left unguarded', sysUses - sysGuards <= 1,
 const login = mainCode.slice(mainCode.indexOf('const bundleIO'),
   mainCode.indexOf("ipcMain.handle('get-bubble-corner'"));
 
-check('nothing on macOS ever asks for a registration outright',
+// Weak on purpose, and labelled so: a literal is all this can see. A variable
+// that happens to be true would walk straight past it, which is why what may
+// register is decided in loginitem.js and checked by behaviour there.
+check('no literal registration is written into main.js',
   !/openAtLogin:\s*true/.test(mainCode),
   'a literal openAtLogin: true is a registration nobody asked for');
 check('startup does not register',
@@ -91,9 +94,11 @@ check('and goes through initMac, which only reads',
 check('the switch goes through setMac',
   /set-open-at-login[\s\S]{0,200}loginitem\.setMac/.test(mainCode),
   'the handler would answer with what was asked rather than what happened');
-check('and there is no second route to setLoginItemSettings on macOS',
+// A count is not reachability — three calls could all be wrong. What it does
+// catch is a fourth appearing, which is the shape a bypass takes.
+check('and no fourth call to setLoginItemSettings has appeared',
   (mainCode.match(/setLoginItemSettings/g) || []).length === 3,
-  'one for the deps, one for the uninstaller, one for Windows — more is a bypass');
+  'one for the deps, one for the uninstaller, one for Windows — more wants looking at');
 
 check('Windows still registers its path and arguments',
   /'win32'[\s\S]*process\.execPath[\s\S]*args:/.test(login), 'the Windows behaviour was lost');
@@ -118,19 +123,25 @@ check('install roots are a list, not an inference',
   /function installRoots\(\)[\s\S]{0,200}'\/Applications'/.test(mainCode)
   && /installRoots: installRoots\(\)/.test(mainCode),
   'anything writable would count as an installation again');
+check('and the volume they have to be on is passed in too',
+  /approvedVolumeAnchors: \[/.test(mainCode),
+  'a root symlinked onto an external disk would pass by its name');
 
 check('the renderer paints what the main process decided',
-  /const v = \(r && r\.view\)/.test(rendererCode)
-  && /startupToggle\.checked = !!v\.checked/.test(rendererCode),
+  /render: view =>/.test(rendererCode) && /startupToggle\.checked = !!view\.checked/.test(rendererCode),
   'the page would reason about macOS answers on its own');
 check('and the main process attaches that view to both replies',
   (mainCode.match(/openAtLoginReply\(/g) || []).length >= 4,
   'one reply would arrive without the contract the renderer paints');
-check('a slow answer cannot overwrite a newer one',
-  /seq === startupSeq/.test(rendererCode), 'two quick clicks would leave the switch stale');
-check('and a rejected call is handled without stranding the switch',
-  /\.catch\(/.test(rendererCode) && /disabled: false/.test(rendererCode),
-  'an unhandled rejection, and a switch nobody can click again');
+// The recovery itself — a rejected write, a stale answer, a first read that
+// fails — is behaviour, and is checked by running the controller in
+// build/test-startup-switch.js. This only checks the page uses it.
+check('the switch is driven by the controller, not by an inline handler',
+  /createStartupSwitch\(\{/.test(rendererCode)
+  && /startupSwitch\.toggle\(startupToggle\.checked\)/.test(rendererCode),
+  'the recovery behaviour would live somewhere nothing can run');
+check('and the controller ships with the app',
+  /<script src="startup-switch\.js">/.test(html), 'the page would fail to define it');
 check('the explanation is attached to the switch, not just placed beside it',
   /id="opt-startup"[^>]*aria-describedby="startup-hint"/.test(html)
   && /id="startup-hint"[^>]*aria-live/.test(html),

@@ -411,44 +411,26 @@ window.yapper.setAutoDetect(autoDetectEnabled);
 // registration would still mean it tomorrow. So the answer decides what the
 // switch shows, never the click.
 const startupHint = $('startup-hint');
-let startupSeq = 0;
 
-// The main process decides what this looks like — loginitem.js switchView —
-// so the page never has to reason about macOS's answers. It matters most for
-// "registered, waiting to be allowed in System Settings": that comes back
-// checked, so switching it off withdraws the registration. Painted unchecked,
-// every click would ask for it again and there would be no click that took it
-// back.
-function showStartupState(r) {
-  const v = (r && r.view) || { checked: startupToggle.checked, disabled: false, hint: '' };
-  startupToggle.checked = !!v.checked;
-  startupToggle.disabled = !!v.disabled;
-  startupHint.textContent = v.hint || '';
-  startupHint.hidden = !v.hint;
-}
-
-function askStartup(request) {
-  const seq = ++startupSeq;
-  startupToggle.disabled = true;
-  return request()
-    // An error leaves the switch usable: it is the click that failed, not the
-    // copy that cannot do it.
-    .catch(e => ({
-      view: {
-        state: 'error', checked: startupToggle.checked, disabled: false,
-        hint: `Yapper could not change this setting. ${e && e.message ? e.message : e}`
-      }
-    }))
-    // Two quick clicks: only the newest answer may paint, or the switch ends
-    // up showing the state from the click before last.
-    .then(r => { if (seq === startupSeq) showStartupState(r); });
-}
-
-askStartup(() => window.yapper.getOpenAtLogin());
-startupToggle.addEventListener('change', () => {
-  const wanted = startupToggle.checked;
-  askStartup(() => window.yapper.setOpenAtLogin(wanted));
+// The controller is in startup-switch.js so the awkward half — what the switch
+// does when the answer never arrives — can be run without a browser. The
+// checkbox is a request, never the record: after a failed write it holds the
+// value that failed, so the controller keeps the last confirmed view and falls
+// back to it, which is what makes the next click a retry rather than the
+// opposite request.
+const startupSwitch = createStartupSwitch({
+  get: () => window.yapper.getOpenAtLogin(),
+  set: on => window.yapper.setOpenAtLogin(on),
+  render: view => {
+    startupToggle.checked = !!view.checked;
+    startupToggle.disabled = !!view.disabled;
+    startupHint.textContent = view.hint || '';
+    startupHint.hidden = !view.hint;
+  }
 });
+
+startupSwitch.load();
+startupToggle.addEventListener('change', () => startupSwitch.toggle(startupToggle.checked));
 
 bubbleToggle.addEventListener('change', () => {
   bubbleEnabled = bubbleToggle.checked;

@@ -71,6 +71,10 @@ const setCalls = sys => sys.calls.filter(c => c[0] === 'set');
 
 const ROOTS = ['/Applications', '/Users/ana/Applications'];
 const TEMPS = ['/private/var/folders', '/private/tmp', '/tmp'];
+// The startup disk, as a device. fakeIO gives every path device 1 unless `ids`
+// says otherwise, so a case only leaves the startup disk when it says so.
+const ANCHORS = ['/System/Volumes/Data'];
+const OTHER_DISK = { dev: 42, ino: 1 };
 const APPS = '/Applications/Yapper.app';
 const APPS_EXE = `${APPS}/Contents/MacOS/Yapper`;
 
@@ -115,8 +119,60 @@ const runs = [
 
   ['an Applications folder on an external disk — refused, deliberately', {
     exe: '/Volumes/Samsung T7/Applications/Yapper.app/Contents/MacOS/Yapper',
-    io: fakeIO({ dirs: ['/Volumes/Samsung T7/Applications/Yapper.app'] })
+    io: fakeIO({
+      dirs: ['/Volumes/Samsung T7/Applications/Yapper.app'],
+      ids: { '/Volumes/Samsung T7/Applications/Yapper.app': OTHER_DISK,
+        '/Volumes/Samsung T7/Applications': OTHER_DISK }
+    })
   }, L.KIND.UNAPPROVED, '/Volumes/Samsung T7/Applications/Yapper.app'],
+
+  // The bypass a name-only policy cannot see: the root is called
+  // ~/Applications and is somewhere else entirely.
+  ['~/Applications symlinked onto an external disk', {
+    exe: '/Users/ana/Applications/Yapper.app/Contents/MacOS/Yapper',
+    io: fakeIO({
+      dirs: ['/Volumes/External/Applications/Yapper.app'],
+      links: {
+        '/Users/ana/Applications': '/Volumes/External/Applications',
+        '/Users/ana/Applications/Yapper.app': '/Volumes/External/Applications/Yapper.app',
+        '/Users/ana/Applications/Yapper.app/Contents/MacOS/Yapper':
+          '/Volumes/External/Applications/Yapper.app/Contents/MacOS/Yapper'
+      },
+      ids: { '/Volumes/External/Applications/Yapper.app': OTHER_DISK,
+        '/Volumes/External/Applications': OTHER_DISK }
+    })
+  }, L.KIND.UNAPPROVED, '/Volumes/External/Applications/Yapper.app'],
+
+  // A read-write image mounted straight over an approved root. Identical by
+  // path to a real install; a different device.
+  ['a read-write image mounted over an approved root', {
+    exe: '/Applications/Yapper.app/Contents/MacOS/Yapper',
+    io: fakeIO({ dirs: [APPS], ids: { [APPS]: OTHER_DISK, '/Applications': OTHER_DISK } })
+  }, L.KIND.UNAPPROVED, APPS],
+
+  // hdiutil attach -mountpoint /Applications/Yapper.app: the folder above it is
+  // the real /Applications, on the startup disk, and the bundle is a disk
+  // image. Only the bundle's own volume tells them apart.
+  ['a read-write image mounted at the bundle itself, under a genuine root', {
+    exe: '/Applications/Yapper.app/Contents/MacOS/Yapper',
+    io: fakeIO({ dirs: [APPS], ids: { [APPS]: OTHER_DISK } })
+  }, L.KIND.UNAPPROVED, APPS],
+
+  ['a bundle whose volume cannot be identified at all', {
+    exe: APPS_EXE,
+    io: fakeIO({ dirs: [APPS], ids: { [APPS]: { code: 'EIO' } } })
+  }, L.KIND.UNKNOWN, APPS],
+
+  ['an alias of a bundle that really is installed locally', {
+    exe: '/Users/ana/Desktop/Yapper.app/Contents/MacOS/Yapper',
+    io: fakeIO({
+      dirs: [APPS],
+      links: {
+        '/Users/ana/Desktop/Yapper.app': APPS,
+        '/Users/ana/Desktop/Yapper.app/Contents/MacOS/Yapper': APPS_EXE
+      }
+    })
+  }, L.KIND.PERMANENT, APPS],
 
   ['a bundle buried inside a folder under an approved root', {
     exe: '/Applications/Utilities extra/Yapper.app/Contents/MacOS/Yapper',
@@ -200,7 +256,7 @@ const runs = [
 for (const [name, o, kind, bundle] of runs) {
   const run = L.classifyRun({
     platform: 'darwin', isPackaged: true, exe: o.exe,
-    tempDirs: TEMPS, installRoots: ROOTS, io: o.io
+    tempDirs: TEMPS, installRoots: ROOTS, approvedVolumeAnchors: ANCHORS, io: o.io
   });
   check(name, run.kind === kind && run.bundle === bundle,
     `kind=${run.kind} bundle=${run.bundle}\n      wanted kind=${kind} bundle=${bundle}`);
@@ -496,10 +552,87 @@ for (const code of ['EACCES', 'EIO']) {
   const r = pf({ io: fakeIO({ links: { [APPS]: null } }) });
   check('and so does a bundle that is not there', r.ok === false, JSON.stringify(r));
 }
+// The bundle moves whether or not the box is ticked, so the data has to be
+// shown to be outside it either way. An earlier version returned before even
+// looking, which is how "do not delete my settings" could still delete them.
 {
   const r = pf({ alsoData: false, io: fakeIO({ links: { [DATA]: { code: 'EACCES' } } }) });
-  check('without the checkbox, an unreadable data directory is irrelevant',
-    r.ok === true && r.targets.length === 0, JSON.stringify(r));
+  check('without the checkbox, a data directory whose location cannot be read still stops it',
+    r.ok === false && /EACCES/.test(r.why), JSON.stringify(r));
+}
+{
+  const r = pf({ userData: `${APPS}/private/user`, alsoData: false });
+  check('settings inside the bundle stop the uninstall even with the box unticked',
+    r.ok === false && /inside the app itself/.test(r.why), JSON.stringify(r));
+}
+{
+  const r = pf({ engineHome: `${APPS}/private/engine`, alsoData: false });
+  check('an engine inside the bundle does too — LOCALAPPDATA reaches here on macOS',
+    r.ok === false && /inside the app itself/.test(r.why), JSON.stringify(r));
+}
+{
+  const r = pf({ userData: '/tmp/yhome/user', engineHome: null, meetings: '/tmp/yhome/Meetings',
+    alsoData: false, io: fakeIO({ links: { '/tmp/yhome/user': `${APPS}/private/user` } }) });
+  check('and so does a symlink that only reaches inside the bundle',
+    r.ok === false && /inside the app itself/.test(r.why), JSON.stringify(r));
+}
+{
+  const r = pf({ userData: `${APPS}/private/user`, alsoData: true });
+  check('with the box ticked it is refused too, rather than trashed twice or called "kept"',
+    r.ok === false, JSON.stringify(r));
+}
+{
+  const r = pf({ engineHome: `${DATA}/Yapper/engine`, alsoData: true });
+  check('a normal layout still passes with the box ticked',
+    r.ok === true && r.targets.length === 1, JSON.stringify(r));
+}
+
+// ---------- volume roots ----------
+// path.dirname(p) === p finds only "/". A mounted volume's root has an
+// ordinary parent and is still a whole disk.
+const mounted = extra => fakeIO({
+  ids: { '/Volumes/Work': { dev: 9, ino: 2 }, '/Volumes': { dev: 1, ino: 3 } }, ...extra
+});
+{
+  const plan = L.dataPlan({ userData: '/Volumes/Work', engineHome: null, meetings: MEET, io: mounted() });
+  check('the root of a mounted volume is refused, not trashed',
+    plan.targets.length === 0 && /root of a volume/.test(plan.skipped[0].why), JSON.stringify(plan));
+}
+{
+  const plan = L.dataPlan({
+    userData: '/tmp/yhome/user', engineHome: null, meetings: MEET,
+    io: fakeIO({
+      links: { '/tmp/yhome/user': '/Volumes/Work' },
+      ids: { '/Volumes/Work': { dev: 9, ino: 2 }, '/Volumes': { dev: 1, ino: 3 } }
+    })
+  });
+  check('and so is a path that only canonicalises to one', plan.targets.length === 0, JSON.stringify(plan));
+}
+{
+  const plan = L.dataPlan({
+    userData: DATA, engineHome: '/Volumes/Work', meetings: MEET, io: mounted()
+  });
+  check('an engine that is a volume root is left, and the settings still go',
+    plan.targets.length === 1 && plan.targets[0].path === DATA && plan.skipped.length === 1,
+    JSON.stringify(plan));
+}
+{
+  const plan = L.dataPlan({
+    userData: '/Volumes/Work/YapperData', engineHome: null, meetings: MEET,
+    io: fakeIO({ ids: { '/Volumes/Work/YapperData': { dev: 9, ino: 5 },
+      '/Volumes/Work': { dev: 9, ino: 2 } } })
+  });
+  check('an ordinary folder on that volume is still fine',
+    plan.targets.length === 1, JSON.stringify(plan));
+}
+{
+  const plan = L.dataPlan({
+    userData: '/Volumes/Work/Data', engineHome: null, meetings: MEET,
+    io: fakeIO({ ids: { '/Volumes/Work/Data': { code: 'EIO' } } })
+  });
+  check('and if it cannot be told whether it is a volume root, it is left alone',
+    plan.targets.length === 0 && /could not be determined/.test(plan.skipped[0].why),
+    JSON.stringify(plan));
 }
 
 // ---------- 6. uninstalling, step by step ----------

@@ -875,6 +875,13 @@ function macRun() {
       exe: app.getPath('exe'),
       tempDirs: [os.tmpdir(), '/private/var/folders', '/private/tmp', '/tmp'],
       installRoots: installRoots(),
+      // What "the startup disk" means, as devices rather than as path names.
+      // On this Mac /, /System/Volumes/Data, /Applications and the home
+      // directory all report one device — APFS firmlinks keep the data volume
+      // in one piece — and a mounted image reports another. The home directory
+      // is here too so that an account on a different volume is measured
+      // against its own.
+      approvedVolumeAnchors: ['/System/Volumes/Data', '/', app.getPath('home')],
       io: bundleIO
     });
   }
@@ -951,11 +958,12 @@ ipcMain.handle('get-open-at-login', async () => openAtLoginReply(openAtLoginStat
 // nothing here can reach — by then there is no app left to withdraw it.
 //
 // Windows ships a real uninstaller, so this is macOS only, and only from a copy
-// installed under an approved root: from a disk image, a temporary folder or
-// Downloads the bundle is not the one the user keeps, and in a dev run it is
-// the checkout's Electron. What may be removed is decided in loginitem.js, and
-// nothing is removed until its preflight has proved the app, its settings and
-// the meetings folder are separate places.
+// installed under an approved root on the startup disk: from a disk image, a
+// temporary folder or Downloads the bundle is not the one the user keeps, and
+// in a dev run it is the checkout's Electron. What may be removed is decided in
+// loginitem.js, and nothing is removed until its preflight has shown that the
+// settings, the engine and the meetings folder are all outside the bundle —
+// whether or not the checkbox was ticked, because the bundle moves either way.
 function canUninstallSelf() {
   return loginitem.canUninstall(macRun());
 }
@@ -978,7 +986,7 @@ function uninstallDeps() {
           + 'really has, and then moves itself to the Trash. If any of that '
           + 'cannot be done it stops and tells you, rather than half-removing '
           + 'itself.\n\nYour meetings are not touched: they stay in '
-          + `${MEETINGS_DIR} as ordinary folders.`,
+          + `${MEETINGS_DIR} as ordinary folders, outside the app.`,
         checkboxLabel: 'Also move settings and the downloaded engine (~600 MB) to the Trash',
         checkboxChecked: false
       });
