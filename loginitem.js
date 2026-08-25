@@ -111,31 +111,45 @@ function sameDirectory(a, b, io) {
   return ia.dev === ib.dev && ia.ino === ib.ino;
 }
 
-/**
- * The mount point a path belongs to: the longest one that is a prefix of it.
- *
- * The device number cannot answer this and the earlier version of this file
- * was wrong to think it could. On APFS a volume group shares a device across
- * its members — measured here: `/System/Volumes/Data` and its parent
- * `/System/Volumes` both report 16777230, and Data is a separate mount. A
- * device comparison therefore says "not a mount root" about the root of the
- * data volume, which is the one directory on the disk it would be worst to
- * hand to the Trash.
- *
- * So the mount table is read instead. `io.mountPoints()` answers with the list
- * or with nothing, and nothing means every question below is unanswerable
- * rather than false.
- *
- * @returns {string|null}
- */
-function mountPointOf(p, mounts) {
-  if (!Array.isArray(mounts) || !p) return null;
-  let best = null;
-  for (const m of mounts) {
-    if (!contains(m, p)) continue;
-    if (!best || m.length > best.length) best = m;
+/** Read the one mount point in `df --libxo json -P path` without parsing names. */
+function parseDfMountPoint(output) {
+  if (typeof output !== 'string') return { code: 'EIO' };
+  try {
+    const parsed = JSON.parse(output);
+    const filesystems = parsed && parsed['storage-system-information']
+      && parsed['storage-system-information'].filesystem;
+    if (!Array.isArray(filesystems) || filesystems.length !== 1) return { code: 'EIO' };
+    const mounted = filesystems[0] && filesystems[0]['mounted-on'];
+    if (typeof mounted !== 'string' || !path.isAbsolute(mounted) || mounted.includes('\0')) {
+      return { code: 'EIO' };
+    }
+    return { path: path.normalize(mounted) };
+  } catch {
+    return { code: 'EIO' };
   }
-  return best;
+}
+
+/** One fresh volume snapshot per decision, memoized only inside that decision. */
+function volumeSnapshot(io) {
+  const seen = new Map();
+  return {
+    ...io,
+    mountPoint(p) {
+      if (!seen.has(p)) {
+        seen.set(p, typeof io.mountPoint === 'function' ? io.mountPoint(p) : { code: 'ENOSYS' });
+      }
+      return seen.get(p);
+    }
+  };
+}
+
+/** The canonical mount point the exact path currently belongs to, or null. */
+function mountPointOf(p, io) {
+  if (!io || typeof io.mountPoint !== 'function') return null;
+  const answer = io.mountPoint(p);
+  if (!answer || answer.code || typeof answer.path !== 'string') return null;
+  const c = canonical(answer.path, io);
+  return c.code || c.missing ? null : c.path;
 }
 
 /**
@@ -147,9 +161,9 @@ function mountPointOf(p, mounts) {
  */
 function isVolumeRoot(p, io) {
   if (path.dirname(p) === p) return true;
-  const mounts = io.mountPoints();
-  if (!Array.isArray(mounts)) return null;
-  return mounts.some(m => m === p);
+  const mount = mountPointOf(p, io);
+  if (!mount) return null;
+  return mount === p;
 }
 
 /**
@@ -169,9 +183,8 @@ function isVolumeRoot(p, io) {
  * @returns {boolean|null} null when nothing could be resolved
  */
 function onApprovedVolume(p, approvedMounts, io) {
-  const mounts = io.mountPoints();
-  if (!Array.isArray(mounts) || !approvedMounts || !approvedMounts.length) return null;
-  const mine = mountPointOf(p, mounts);
+  if (!approvedMounts || !approvedMounts.length) return null;
+  const mine = mountPointOf(p, io);
   if (!mine) return null;
   const approved = [];
   for (const a of approvedMounts) {
@@ -180,6 +193,10 @@ function onApprovedVolume(p, approvedMounts, io) {
   }
   if (!approved.length) return null;
   return approved.includes(mine);
+}
+
+function sameIdentity(a, b) {
+  return !!a && !!b && !a.code && !b.code && a.dev === b.dev && a.ino === b.ino;
 }
 
 // ---------- which bundle is running ----------
@@ -275,6 +292,7 @@ function classifyRun({ platform, isPackaged, exe, tempDirs = [], installRoots = 
   approvedVolumeMounts = [], io }) {
   if (platform !== 'darwin') return { kind: KIND.OTHER_OS, bundle: null };
   if (!isPackaged) return { kind: KIND.DEVELOPMENT, bundle: null, why: WHY[KIND.DEVELOPMENT] };
+  io = volumeSnapshot(io);
 
   const found = bundleFromExecutable(exe, io);
   if (found.code) return { kind: KIND.UNKNOWN, bundle: null, why: WHY[KIND.UNKNOWN] };
@@ -309,6 +327,11 @@ function classifyRun({ platform, isPackaged, exe, tempDirs = [], installRoots = 
   const bundleVolume = onApprovedVolume(bundle, approvedVolumeMounts, io);
   if (bundleVolume === null) return { kind: KIND.UNKNOWN, bundle, why: WHY[KIND.UNKNOWN] };
   if (bundleVolume === false) return { kind: KIND.UNAPPROVED, bundle, why: WHY[KIND.UNAPPROVED] };
+  const bundleIdentity = io.identity(bundle);
+  const bundleMount = mountPointOf(bundle, io);
+  if (!bundleIdentity || bundleIdentity.code || !bundleMount) {
+    return { kind: KIND.UNKNOWN, bundle, why: WHY[KIND.UNKNOWN] };
+  }
 
   for (const root of installRoots) {
     const r = canonical(root, io);
@@ -318,14 +341,19 @@ function classifyRun({ platform, isPackaged, exe, tempDirs = [], installRoots = 
     if (path.dirname(bundle) !== r.path) continue;
     const rootVolume = onApprovedVolume(r.path, approvedVolumeMounts, io);
     if (rootVolume === null) return { kind: KIND.UNKNOWN, bundle, why: WHY[KIND.UNKNOWN] };
-    if (rootVolume === true) return { kind: KIND.PERMANENT, bundle };
+    if (rootVolume === true) {
+      return { kind: KIND.PERMANENT, bundle, bundleIdentity, bundleMount };
+    }
   }
   return { kind: KIND.UNAPPROVED, bundle, why: WHY[KIND.UNAPPROVED] };
 }
 
 /** Only an approved install may be registered, and only it may remove itself. */
 function canRegister(run) { return !!run && run.kind === KIND.PERMANENT; }
-function canUninstall(run) { return !!run && run.kind === KIND.PERMANENT && !!run.bundle; }
+function canUninstall(run) {
+  return !!run && run.kind === KIND.PERMANENT && !!run.bundle
+    && !!run.bundleIdentity && !!run.bundleMount;
+}
 
 // ---------- what macOS says ----------
 
@@ -377,7 +405,7 @@ function switchView(result) {
     // Only a copy that genuinely cannot change anything is left unusable. An
     // error is recoverable, so the click stays available.
     disabled: state === 'unavailable',
-    indeterminate: false,
+    indeterminate: state === 'unknown',
     hint: (result && (result.why || result.message)) || ''
   };
 }
@@ -455,7 +483,11 @@ function initMac(deps) {
 function setMac(deps, enabled) {
   const run = deps.run();
   if (!canRegister(run)) {
-    return { state: 'unavailable', kind: run.kind, why: run.why || WHY[KIND.UNKNOWN] };
+    return {
+      state: run && run.kind === KIND.UNKNOWN ? 'unknown' : 'unavailable',
+      kind: run && run.kind,
+      why: (run && run.why) || WHY[KIND.UNKNOWN]
+    };
   }
   deps.setLoginItem(!!enabled);
   const now = readState(deps.getLoginItem());
@@ -486,6 +518,7 @@ function setMac(deps, enabled) {
  * comparing against something that is not.
  */
 function dataPlan({ userData, engineHome, meetings, io }) {
+  io = volumeSnapshot(io);
   const targets = [];
   const skipped = [];
   if (typeof meetings !== 'string' || !meetings) {
@@ -501,12 +534,14 @@ function dataPlan({ userData, engineHome, meetings, io }) {
       return skipped.push({ label, path: raw, why: `its real location could not be read (${c.code})` });
     }
     const p = c.path;
+    // Missing is not work left to do. It is omitted rather than made a target
+    // (which could remove something that appears later) or reported as kept
+    // (which would claim an absent directory survived).
     if (c.missing) {
-      // Nothing is there. It stays a target so the Trash answers ENOENT and
-      // the caller treats it as the non-event it is — asking whether a path
-      // that does not exist is a mount root gets ENOENT back and would file it
-      // as a leftover the user should worry about.
-      return targets.push({ label, path: p, missing: true });
+      return;
+    }
+    if (overlaps(p, meetings)) {
+      return skipped.push({ label, path: raw, why: 'it is not separate from the meetings folder' });
     }
     const root = isVolumeRoot(p, io);
     if (root !== false) {
@@ -516,14 +551,19 @@ function dataPlan({ userData, engineHome, meetings, io }) {
         why: root === true ? 'it is the root of a volume' : 'whether it is the root of a volume could not be determined'
       });
     }
-    if (overlaps(p, meetings)) {
-      return skipped.push({ label, path: raw, why: 'it is not separate from the meetings folder' });
+    const identity = io.identity(p);
+    const mount = mountPointOf(p, io);
+    if (!identity || identity.code || !mount) {
+      return skipped.push({ label, path: raw, why: 'its identity or mounted volume could not be proved' });
     }
     if (targets.some(t => contains(t.path, p))) return;          // already covered
     for (let i = targets.length - 1; i >= 0; i--) {
       if (contains(p, targets[i].path)) targets.splice(i, 1);    // this one covers it
     }
-    targets.push({ label, path: p, missing: !!c.missing });
+    targets.push({
+      label, path: p,
+      proof: { path: p, source: raw, identity, mount, missingOk: true }
+    });
   };
 
   consider('settings', userData);
@@ -558,14 +598,36 @@ function dataPlan({ userData, engineHome, meetings, io }) {
  *
  * @returns {{ok:true, bundle:string, targets:Array, skipped:Array}|{ok:false, why:string}}
  */
-function uninstallPreflight({ bundle, userData, engineHome, meetings, alsoData, io }) {
+function uninstallPreflight({ bundle, bundleIdentity, bundleMount, userData, engineHome,
+  meetings, alsoData, io }) {
+  io = volumeSnapshot(io);
   const m = canonical(meetings, io);
   if (m.code) {
     return {
       ok: false,
-      why: `Yapper could not work out where your meetings really are (${meetings}: ${m.code}),`
+      why: `Yapper could not work out where your meetings really are (${meetings}:`
+        + ` ${m.code}),`
         + ' so it has removed nothing.'
     };
+  }
+  let meetingsProof;
+  if (m.missing) {
+    // A fresh install has no Meetings directory yet. Its reconstructed
+    // canonical name is still a safety boundary, and every Trash proof below
+    // requires it to remain absent. If it appears, the removal stops.
+    meetingsProof = { path: m.path, source: meetings, missing: true };
+  } else {
+    const meetingsIdentity = io.identity(m.path);
+    const meetingsMount = mountPointOf(m.path, io);
+    if (!meetingsIdentity || meetingsIdentity.code || !meetingsMount) {
+      return {
+        ok: false,
+        why: `Yapper could not prove the identity and mounted volume of your meetings (${m.path}),`
+          + ' so it has removed nothing.'
+      };
+    }
+    meetingsProof = { path: m.path, source: meetings, identity: meetingsIdentity,
+      mount: meetingsMount, allowVolumeRoot: true };
   }
   const b = canonical(bundle, io);
   if (b.code || b.missing) {
@@ -575,6 +637,22 @@ function uninstallPreflight({ bundle, userData, engineHome, meetings, alsoData, 
         + ' so it has removed nothing.'
     };
   }
+  const currentIdentity = io.identity(b.path);
+  const currentMount = mountPointOf(b.path, io);
+  const bundleIsRoot = isVolumeRoot(b.path, io);
+  if (!sameIdentity(currentIdentity, bundleIdentity) || !currentMount
+    || currentMount !== bundleMount || bundleIsRoot !== false) {
+    return {
+      ok: false,
+      why: `The app at ${b.path} is no longer the same installed bundle Yapper started from,`
+        + ' or its mounted volume changed. Nothing has been removed; reopen the installed copy'
+        + ' and try again.'
+    };
+  }
+  const bundleProof = {
+    path: b.path, source: bundle, identity: currentIdentity, mount: currentMount,
+    protected: meetingsProof, dataGuards: []
+  };
   if (overlaps(b.path, m.path)) {
     return {
       ok: false,
@@ -607,7 +685,38 @@ function uninstallPreflight({ bundle, userData, engineHome, meetings, alsoData, 
           + ' Removing that is not something Yapper will do, so nothing has been removed.'
       };
     }
-    if (overlaps(b.path, c.path)) inside.push({ label, path: c.path });
+    if (overlaps(b.path, c.path)) {
+      if (c.missing) {
+        // There is nothing to consent to deleting. It may proceed only while
+        // that name remains absent; appearing inside the bundle would make the
+        // final Trash call destructive in a way this plan never proved.
+        bundleProof.dataGuards.push({ label, path: c.path, source: raw, mustStayMissing: true });
+        continue;
+      }
+      // A directory merely written beneath the bundle can be the root of a
+      // different mounted filesystem. Moving the bundle does not prove that
+      // volume's contents were removed, and it must never erase dataPlan's
+      // volume-root refusal by calling the path "covered".
+      const dataMount = mountPointOf(c.path, io);
+      const dataIsRoot = isVolumeRoot(c.path, io);
+      const dataIdentity = io.identity(c.path);
+      if (!dataIdentity || dataIdentity.code || !dataMount
+        || dataMount !== currentMount || dataIsRoot !== false) {
+        return {
+          ok: false,
+          why: `Yapper could not prove the identity and mounted volume of its ${label}`
+            + ` at ${c.path}. Moving the app cannot prove those data were removed safely,`
+            + ' so nothing has been removed.'
+        };
+      }
+      inside.push({ label, path: c.path, source: raw, identity: dataIdentity, mount: dataMount });
+      continue;
+    }
+    // Even when data are not requested for removal, their source must remain
+    // outside the bundle until the bundle reaches the Trash. This closes the
+    // symlink race where an external settings path is repointed into the app
+    // after the final preflight.
+    bundleProof.dataGuards.push({ label, path: c.path, source: raw, mustStayOutside: true });
   }
 
   if (inside.length && !alsoData) {
@@ -626,7 +735,9 @@ function uninstallPreflight({ bundle, userData, engineHome, meetings, alsoData, 
     };
   }
 
-  if (!alsoData) return { ok: true, bundle: b.path, targets: [], skipped: [] };
+  if (!alsoData) {
+    return { ok: true, bundle: b.path, bundleProof, targets: [], skipped: [], covered: [] };
+  }
 
   const plan = dataPlan({ userData, engineHome, meetings: m.path, io });
   if (plan.error) return { ok: false, why: `Yapper has removed nothing: ${plan.error}.` };
@@ -634,13 +745,125 @@ function uninstallPreflight({ bundle, userData, engineHome, meetings, alsoData, 
   // dropped from the targets rather than sent to the Trash a second time, and
   // it is not reported as kept either, because it does not survive.
   const covered = inside.map(i => i.path);
+  // The proof for moving the bundle also carries every path it is supposed to
+  // cover. A nested mount or replacement appearing after this plan must not be
+  // silently described as data removed by the bundle.
+  bundleProof.covered = inside.map(i => ({
+    path: i.path, source: i.source, identity: i.identity, mount: i.mount
+  }));
   return {
     ok: true,
     bundle: b.path,
-    targets: plan.targets.filter(t => !covered.some(c => overlaps(c, t.path))),
+    bundleProof,
+    targets: plan.targets
+      .filter(t => !covered.some(c => overlaps(c, t.path)))
+      .map(t => ({ ...t, proof: { ...t.proof, protected: meetingsProof } })),
     skipped: plan.skipped.filter(k => !covered.includes(k.path)),
     covered
   };
+}
+
+/** Re-check a path proof immediately before handing that path to the Trash. */
+function verifyPathProof(proof, io) {
+  if (!proof || typeof proof.path !== 'string' || !proof.identity || !proof.mount) {
+    return { ok: false, code: 'EINVAL', message: 'The removal plan had no filesystem proof.' };
+  }
+  io = volumeSnapshot(io);
+  const checkOne = (p, protectedPath) => {
+    if (!p || typeof p.path !== 'string') return { code: 'EINVAL' };
+    const source = canonical(p.source || p.path, io);
+    if (p.missing) {
+      return source.missing && source.path === p.path
+        ? { path: p.path, missing: true } : { code: 'ESTALE' };
+    }
+    if (!p.identity || !p.mount) return { code: 'EINVAL' };
+    if (source.missing && p.missingOk && source.path === p.path) {
+      return { path: p.path, missing: true };
+    }
+    if (source.code || source.missing || source.path !== p.path) return { code: 'ESTALE' };
+    const c = canonical(p.path, io);
+    if (c.missing && p.missingOk && !protectedPath) return { path: p.path, missing: true };
+    if (c.code || c.missing || c.path !== p.path) return { code: 'ESTALE' };
+    const identity = io.identity(c.path);
+    const mount = mountPointOf(c.path, io);
+    if (!sameIdentity(identity, p.identity) || mount !== p.mount
+      || (!p.allowVolumeRoot && isVolumeRoot(c.path, io) !== false)) {
+      return { code: 'ESTALE' };
+    }
+    return { path: c.path };
+  };
+
+  const target = checkOne(proof, false);
+  if (target.missing) return { ok: true, missing: true };
+  if (target.code) {
+    return { ok: false, code: target.code, message: 'The file or its mounted volume changed after it was checked.' };
+  }
+  if (proof.protected) {
+    const guarded = checkOne(proof.protected, true);
+    if (guarded.code || overlaps(target.path, guarded.path)) {
+      return {
+        ok: false,
+        code: guarded.code || 'ESTALE',
+        message: 'The meetings folder changed or is no longer separate from the removal target.'
+      };
+    }
+  }
+  for (const guard of proof.dataGuards || []) {
+    const now = canonical(guard.source || guard.path, io);
+    const stayedMissing = now.missing && now.path === guard.path;
+    if (now.code || (guard.mustStayMissing && !stayedMissing)
+      || (guard.mustStayOutside && !now.missing && overlaps(target.path, now.path))
+      || (guard.mustStayOutside && now.missing && overlaps(target.path, now.path))) {
+      return {
+        ok: false, code: 'ESTALE',
+        message: 'A data location moved into the app after the removal plan was checked.'
+      };
+    }
+  }
+  for (const covered of proof.covered || []) {
+    if (covered.missing) {
+      const now = canonical(covered.source || covered.path, io);
+      if (!now.missing || now.path !== covered.path) {
+        return {
+          ok: false, code: 'ESTALE',
+          message: 'A data location appeared inside the app after the removal plan was checked.'
+        };
+      }
+      continue;
+    }
+    const now = checkOne(covered, false);
+    if (now.code || now.missing || !contains(target.path, now.path)
+      || covered.mount !== proof.mount) {
+      return {
+        ok: false, code: now.code || 'ESTALE',
+        message: 'Data covered by the app changed or moved onto another volume after it was checked.'
+      };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * A cached classification is evidence about startup, not a permanent licence.
+ * Revalidate the bundle proof before exposing a control that can mutate the
+ * login item or remove the app. A replacement bundle or a mount placed over
+ * the path while Yapper is open therefore fails closed.
+ */
+function revalidateRun(run, io) {
+  if (!run || run.kind !== KIND.PERMANENT) return run;
+  const checked = verifyPathProof({
+    path: run.bundle,
+    identity: run.bundleIdentity,
+    mount: run.bundleMount
+  }, io);
+  if (checked.ok) return run;
+  return { kind: KIND.UNKNOWN, bundle: run.bundle || null, why: WHY[KIND.UNKNOWN] };
+}
+
+/** Retry only a baseline that was never proved; never bless an invalidated install. */
+function refreshUnknownRun(run, classify) {
+  if (!run || run.kind !== KIND.UNKNOWN || typeof classify !== 'function') return run;
+  try { return classify() || run; } catch { return run; }
 }
 
 // ---------- uninstalling ----------
@@ -701,7 +924,7 @@ async function uninstall(deps) {
 
   // The step that can be refused — a copy installed for every user is owned by
   // root — and if it is, nothing has been thrown away yet.
-  const moved = await deps.trash(plan.bundle);
+  const moved = await deps.trash(plan.bundle, plan.bundleProof);
   if (!moved.ok) {
     await deps.report({
       step: 'bundle',
@@ -716,7 +939,7 @@ async function uninstall(deps) {
   const residue = [];
   for (const skip of plan.skipped) residue.push({ ...skip, kept: true });
   for (const target of plan.targets) {
-    const r = await deps.trash(target.path);
+    const r = await deps.trash(target.path, target.proof);
     // Not there is the outcome that was wanted. Anything else is a leftover
     // the user should be told about rather than a silence.
     if (!r.ok && r.code !== 'ENOENT') {
@@ -729,7 +952,7 @@ async function uninstall(deps) {
   if (residue.length) {
     await deps.report({
       step: 'data',
-      message: 'Yapper was removed, but some of its files are still there.',
+      message: 'Yapper was removed, but some files were not removed by Yapper.',
       detail: residue.map(r => `${r.path} — ${r.why}`).join('\n')
     });
   }
@@ -739,9 +962,9 @@ async function uninstall(deps) {
 
 module.exports = {
   KIND, MIGRATION, WHY, MOVE_FIRST,
-  canonical, contains, overlaps, sameDirectory,
+  canonical, contains, overlaps, sameDirectory, parseDfMountPoint,
   bundleOfExecutable, bundleFromExecutable,
   classifyRun, canRegister, canUninstall,
   readState, switchView, unknownView, initMac, setMac,
-  dataPlan, uninstallPreflight, uninstall
+  dataPlan, uninstallPreflight, verifyPathProof, revalidateRun, refreshUnknownRun, uninstall
 };

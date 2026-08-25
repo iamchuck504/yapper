@@ -75,6 +75,15 @@ const rejects = msg => () => Promise.reject(new Error(msg));
       h.last().checked === true, JSON.stringify(h.last()));
   }
   {
+    const h = harness(['disabled', rejects('lost'), {
+      state: 'requires-approval', message: 'Allow Yapper in System Settings.'
+    }]);
+    await h.ctl.load();
+    await h.ctl.toggle(true);
+    check('a recovery preserves macOS\'s requires-approval explanation',
+      h.last().checked === true && /System Settings/.test(h.last().hint), JSON.stringify(h.last()));
+  }
+  {
     const h = harness(['enabled', rejects('gone'), rejects('gone too')]);
     await h.ctl.load();
     await h.ctl.toggle(false);
@@ -97,6 +106,16 @@ const rejects = msg => () => Promise.reject(new Error(msg));
       h.last().disabled === true && !!h.last().hint, JSON.stringify(h.last()));
   }
   {
+    const h = harness(['enabled', 'unknown', 'disabled']);
+    await h.ctl.load();
+    await h.ctl.toggle(false);
+    check('losing the filesystem proof clears an older confirmed state',
+      h.last().indeterminate === true && h.ctl.confirmed() === null, JSON.stringify(h.last()));
+    await h.ctl.toggle(true);
+    check('the next click retries a read rather than writing from the stale state',
+      h.sent.join(',') === 'false' && h.last().checked === false, JSON.stringify(h.sent));
+  }
+  {
     // Off is a claim, and the wrong one whenever the app really is registered:
     // it would also make the next click a request to register, leaving no click
     // that withdraws.
@@ -110,6 +129,21 @@ const rejects = msg => () => Promise.reject(new Error(msg));
       /could not read/i.test(h.last().hint), h.last().hint);
     await h.ctl.toggle(true);
     check('a click while nothing is known writes nothing', h.sent.length === 0, JSON.stringify(h.sent));
+  }
+  {
+    let release;
+    const pending = new Promise(r => { release = r; });
+    const painted = [];
+    const ctl = createStartupSwitch({
+      get: () => pending,
+      set: () => Promise.reject(new Error('must not write')),
+      render: v => painted.push(v)
+    });
+    const loading = ctl.load();
+    check('unknown is painted synchronously while the first read is pending',
+      painted.length === 1 && painted[0].indeterminate === true, JSON.stringify(painted));
+    release({ state: 'disabled', view: L.switchView({ state: 'disabled' }) });
+    await loading;
   }
   {
     // ...and once a read does succeed, the click after it is a real answer.

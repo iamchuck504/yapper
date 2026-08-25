@@ -129,9 +129,17 @@ check('and the volume they have to be on is passed in too',
 check('the home directory is not one of them',
   !/approvedVolumeMounts:[^\]]*getPath\('home'\)/.test(mainCode),
   'a home on an external or network volume would approve its own volume');
-check('and the volume question is answered from the mount table',
-  /mountPoints\(\)/.test(login) && /\/sbin\/mount/.test(login),
-  'a device comparison cannot see an APFS volume group: Data shares its parent\u2019s device');
+check('and the volume question asks about the exact path, without a process-wide cache',
+  /mountPoint\(p\)/.test(login)
+  && /execFileSync\('\/bin\/df',[\s\S]{0,120}'--libxo', 'json',[\s\S]{0,60}'-P', p/.test(login)
+  && /timeout:\s*2000/.test(login) && /killSignal:\s*'SIGKILL'/.test(login)
+  && !/mountPointCache/.test(login),
+  'a stale or partially parsed mount table would approve an external path as root');
+check('a cached startup classification is revalidated before controls use it',
+  /function currentMacRun\(\)[\s\S]{0,280}loginitem\.refreshUnknownRun\(macRun\(\), classifyMacRun\)/.test(mainCode)
+  && /function currentMacRun\(\)[\s\S]{0,360}loginitem\.revalidateRun\(macRun\(\), bundleIO\)/.test(mainCode)
+  && /run: currentMacRun/.test(login),
+  'a temporary failure would stick forever, or a replacement would retain permission to mutate');
 
 check('the renderer paints what the main process decided',
   /render: view =>/.test(rendererCode) && /startupToggle\.checked = !!view\.checked/.test(rendererCode),
@@ -155,23 +163,32 @@ check('the explanation is attached to the switch, not just placed beside it',
 
 // ---- 2b. uninstalling ----
 check('uninstalling goes through the checked sequence',
-  /loginitem\.uninstall\(uninstallDeps\(\)\)/.test(mainCode),
+  /const deps = uninstallDeps\(\)[\s\S]{0,100}loginitem\.uninstall\(deps\)/.test(mainCode),
   'the order the login item depends on would be main.js\u2019s to get right again');
 check('and works from a plan built before anything is touched',
-  /preflight:\s*alsoData => loginitem\.uninstallPreflight\(/.test(mainCode),
+  /preflight:\s*alsoData => \{[\s\S]{0,160}loginitem\.uninstallPreflight\(/.test(mainCode),
   'the login item would be withdrawn before knowing whether the rest is safe');
 check('the preflight is given the bundle and the meetings folder together',
-  /uninstallPreflight\(\{[\s\S]{0,240}bundle: macRun\(\)\.bundle[\s\S]{0,240}meetings: MEETINGS_DIR/.test(mainCode),
+  /uninstallPreflight\(\{[\s\S]{0,160}bundle: run\.bundle[\s\S]{0,320}meetings: MEETINGS_DIR/.test(mainCode),
   'the bundle would never be compared against the meetings folder');
 check('and it is only offered where loginitem allows it',
-  /function canUninstallSelf\(\)[\s\S]{0,120}loginitem\.canUninstall\(macRun\(\)\)/.test(mainCode),
+  /function canUninstallSelf\(\)[\s\S]{0,120}loginitem\.canUninstall\(currentMacRun\(\)\)/.test(mainCode),
   'it would be offered from a disk image, where the bundle is not the one the user keeps');
 check('the menu entry is gated on that',
   /canUninstallSelf\(\)\s*\?\s*\[\{ label: 'Uninstall Yapper/.test(mainCode),
   'the entry would appear where it cannot work');
 check('the Trash adapter reports "it was not there" as its own outcome',
-  /existsSync\(p\)\)? return \{ ok: false, code: 'ENOENT' \}/.test(login),
+  /catch \(e\)[\s\S]{0,260}if \(!fs\.existsSync\(proof\.path\)\) return \{ ok: false, code: 'ENOENT' \}/.test(login),
   'a missing file and a refused one would be the same silence');
+check('and revalidates the final proof immediately before Trash',
+  /trash: async \(p, proof\)[\s\S]{0,300}verifyPathProof\(proof, bundleIO\)/.test(login),
+  'a bundle or mount replaced after preflight would be removed unchecked');
+check('the Trash receives the proved path, not a parallel argument',
+  /shell\.trashItem\(proof\.path\)/.test(login) && /p !== proof\.path/.test(login),
+  'a caller could prove one path and hand another one to the Trash');
+check('an absent target returns without a second filesystem lookup',
+  /if \(safe\.missing\) return \{ ok: false, code: 'ENOENT' \}/.test(login),
+  'a path that appeared between proof and existsSync would be trashed without a proof');
 
 // ---- 3. no Windows-only advice on a Mac ----
 const ps1 = main.slice(main.indexOf('function humanTranscribeError'),

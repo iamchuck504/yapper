@@ -47,7 +47,9 @@
     function paint(view, mine) {
       // A recovery that arrives after a newer click must not paint over it.
       if (seq !== mine) return false;
-      if (view.state !== 'unknown') confirmed = view;
+      // Unknown revokes an older confirmation: the filesystem proof may have
+      // become stale while the settings page was open. The next click reads.
+      confirmed = view.state === 'unknown' ? null : view;
       deps.render(view);
       return true;
     }
@@ -59,7 +61,9 @@
         .then(reply => {
           const view = viewOf(reply);
           if (!view) throw new Error('no view');
-          paint({ ...view, hint: hint || view.hint }, mine);
+          // The system's explanation is authoritative. A transport error is
+          // useful only when macOS has no more specific answer of its own.
+          paint({ ...view, hint: view.hint || hint || '' }, mine);
           return true;
         });
     }
@@ -81,6 +85,9 @@
       /** First paint. A failure here leaves the control indeterminate, not off. */
       load() {
         const mine = ++seq;
+        // Paint the truth synchronously. The request may be slow or never
+        // answer, and the checkbox in the HTML starts out looking off.
+        paint({ ...UNKNOWN }, mine);
         return read(mine).catch(e => recover(e, mine, 'read'));
       },
       /**
@@ -95,7 +102,11 @@
       toggle(wanted) {
         const mine = ++seq;
         if (!confirmed) {
-          return read(mine, 'Yapper had not read this setting yet. This is what it is now — click again to change it.')
+          const hint = 'Yapper had not read this setting yet. This is what it is now — click again to change it.';
+          // A browser toggles a checkbox before dispatching `change`; restore
+          // the unknown view immediately while this click performs its read.
+          paint({ ...UNKNOWN, hint: 'Yapper is reading this setting…' }, mine);
+          return read(mine, hint)
             .catch(e => recover(e, mine, 'read'));
         }
         return Promise.resolve()

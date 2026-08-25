@@ -4,7 +4,7 @@
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 
 // YAPPER_HOME: everything the app writes — settings, index, reminders, meetings
 // and the engine — under one directory of your choosing. It exists so the
@@ -827,9 +827,8 @@ const LEGACY_LLM_KEYS = ['llmKey', 'llmModel', 'llmBaseUrl'];
 // pretends to: loginitem.js holds everything that can be decided about it, and
 // nothing there registers anything the user did not ask for.
 
-// The three questions loginitem.js asks of the filesystem. They live here so
+// The filesystem questions loginitem.js asks. They live here so
 // the decisions that depend on them can be tested without one.
-let mountPointCache;
 const bundleIO = {
   isDirectory(p) { try { return fs.statSync(p).isDirectory(); } catch { return false; } },
   // Structured, because the difference between "it is not there" and "I was
@@ -843,25 +842,20 @@ const bundleIO = {
     try { const st = fs.statSync(p); return { dev: st.dev, ino: st.ino }; }
     catch (e) { return { code: e.code || 'EIO' }; }
   },
-  // The mount table, read once. A device number cannot stand in for it: APFS
-  // shares one device across a volume group, so /System/Volumes/Data and its
-  // parent report the same one while Data is its own mount — and that is the
-  // directory it would be worst to get wrong. Nothing here guesses when the
-  // table cannot be read; the callers treat a missing list as unanswerable.
-  mountPoints() {
-    if (mountPointCache !== undefined) return mountPointCache;
+  // Ask about this exact path every time a new decision starts. Structured
+  // libxo output keeps control characters in a mount name inside JSON instead
+  // of letting them create a second, convincing-looking output line. `-n`
+  // avoids refreshing network statistics, and the timeout bounds a filesystem
+  // that does not answer; callers fail closed on every such failure.
+  mountPoint(p) {
     try {
-      const out = require('child_process').execFileSync('/sbin/mount', [], { encoding: 'utf8' });
-      const found = [];
-      for (const line of out.split('\n')) {
-        const m = /^.* on (.*) \([^)]*\)$/.exec(line);
-        if (m) found.push(m[1]);
-      }
-      mountPointCache = found.length ? found : null;
-    } catch {
-      mountPointCache = null;
+      const out = execFileSync('/bin/df', ['-n', '--libxo', 'json', '-P', p], {
+        encoding: 'utf8', maxBuffer: 64 * 1024, timeout: 2000, killSignal: 'SIGKILL'
+      });
+      return loginitem.parseDfMountPoint(out);
+    } catch (e) {
+      return { code: e.code || 'EIO' };
     }
-    return mountPointCache;
   },
   // EROFS is a read-only filesystem. EACCES and EPERM are a directory this
   // account may not write to, which is what /Applications answers on a Mac
@@ -885,12 +879,12 @@ function installRoots() {
   return ['/Applications', path.join(app.getPath('home'), 'Applications')];
 }
 
-// Where this copy is running from, worked out once: the path of a running
-// process does not change under it.
+// What was running at startup is worked out once so later checks can prove the
+// bundle is still the same directory on the same mounted volume. A path lookup
+// can change under a running process even though the process itself does not.
 let macRunCache = null;
-function macRun() {
-  if (!macRunCache) {
-    macRunCache = loginitem.classifyRun({
+function classifyMacRun() {
+  return loginitem.classifyRun({
       platform: process.platform,
       isPackaged: app.isPackaged,
       exe: app.getPath('exe'),
@@ -902,14 +896,26 @@ function macRun() {
       // approved itself — which is the opposite of what the docs promise.
       approvedVolumeMounts: ['/', '/System/Volumes/Data'],
       io: bundleIO
-    });
-  }
+  });
+}
+
+function macRun() {
+  if (!macRunCache) macRunCache = classifyMacRun();
   return macRunCache;
+}
+
+function currentMacRun() {
+  // UNKNOWN means no proof was ever established, not a stable classification.
+  // Retry it so a temporary df/filesystem failure does not disable the switch
+  // and uninstaller for the lifetime of the process. A proved PERMANENT run is
+  // only revalidated below; a replacement can never be freshly blessed here.
+  macRunCache = loginitem.refreshUnknownRun(macRun(), classifyMacRun);
+  return loginitem.revalidateRun(macRun(), bundleIO);
 }
 
 function loginItemDeps() {
   return {
-    run: macRun,
+    run: currentMacRun,
     getLoginItem: () => app.getLoginItemSettings(),
     setLoginItem: on => app.setLoginItemSettings({ openAtLogin: on }),
     readSettings,
@@ -956,8 +962,14 @@ function openAtLoginState() {
   if (process.platform !== 'darwin') {
     return { state: readSettings().openAtLogin !== false ? 'enabled' : 'disabled' };
   }
-  const run = macRun();
-  if (!loginitem.canRegister(run)) return { state: 'unavailable', kind: run.kind, why: run.why };
+  const run = currentMacRun();
+  if (!loginitem.canRegister(run)) {
+    return {
+      state: run.kind === loginitem.KIND.UNKNOWN ? 'unknown' : 'unavailable',
+      kind: run.kind,
+      why: run.why
+    };
+  }
   return { ...loginitem.readState(app.getLoginItemSettings()), kind: run.kind };
 }
 
@@ -981,17 +993,18 @@ ipcMain.handle('get-open-at-login', async () => openAtLoginReply(openAtLoginStat
 // temporary folder or Downloads the bundle is not the one the user keeps, and
 // in a dev run it is the checkout's Electron. What may be removed is decided in
 // loginitem.js, and nothing is removed until its preflight has shown that the
-// settings, the engine and the meetings folder are all outside the bundle —
-// whether or not the checkbox was ticked, because the bundle moves either way.
+// settings, the engine and the meetings folder have a proved safe relationship
+// to the bundle. Consented data inside it are covered by its move; everything
+// else must remain outside or absent until the Trash call.
 function canUninstallSelf() {
-  return loginitem.canUninstall(macRun());
+  return loginitem.canUninstall(currentMacRun());
 }
 
 function uninstallDeps() {
   const parent = win && !win.isDestroyed() ? win : null;
   const ask = opts => (parent ? dialog.showMessageBox(parent, opts) : dialog.showMessageBox(opts));
   return {
-    run: macRun,
+    run: currentMacRun,
     getLoginItem: () => app.getLoginItemSettings(),
     setLoginItem: on => app.setLoginItemSettings({ openAtLogin: on }),
     confirm: async () => {
@@ -1013,24 +1026,40 @@ function uninstallDeps() {
     },
     // The Trash rather than rm: 600 MB of engine and every setting is a lot to
     // take on one click, and this way the click is reversible until it is
-    // emptied. Existence is checked here so "it was not there" is a code the
-    // caller can recognise, whatever shape Electron's error takes.
-    trash: async p => {
-      if (!fs.existsSync(p)) return { ok: false, code: 'ENOENT' };
-      try { await shell.trashItem(p); return { ok: true }; } catch (e) {
+    // emptied. Absence is normalized to ENOENT so the caller can recognise it,
+    // whatever shape Electron's error takes.
+    trash: async (p, proof) => {
+      if (!proof || p !== proof.path) {
+        return { ok: false, code: 'EINVAL', message: 'The removal path did not match its proof.' };
+      }
+      const safe = loginitem.verifyPathProof(proof, bundleIO);
+      if (!safe.ok) return safe;
+      // If it was absent at the proof, stop there. Looking again would let a
+      // path created between the two calls be trashed without ever proving it.
+      if (safe.missing) return { ok: false, code: 'ENOENT' };
+      try { await shell.trashItem(proof.path); return { ok: true }; } catch (e) {
+        // Check absence only after a failed Trash. A successful proof already
+        // established existence; checking before Trash only widens the window
+        // in which that proved directory can be replaced.
+        if (!fs.existsSync(proof.path)) return { ok: false, code: 'ENOENT' };
         return { ok: false, code: e.code, message: e.message };
       }
     },
     // Everything that would be touched, worked out and proved separate before
     // the login item — the step that cannot be undone — is touched at all.
-    preflight: alsoData => loginitem.uninstallPreflight({
-      bundle: macRun().bundle,
-      userData: app.getPath('userData'),
-      engineHome: engineHome(),
-      meetings: MEETINGS_DIR,
-      alsoData,
-      io: bundleIO
-    }),
+    preflight: alsoData => {
+      const run = macRun();
+      return loginitem.uninstallPreflight({
+        bundle: run.bundle,
+        bundleIdentity: run.bundleIdentity,
+        bundleMount: run.bundleMount,
+        userData: app.getPath('userData'),
+        engineHome: engineHome(),
+        meetings: MEETINGS_DIR,
+        alsoData,
+        io: bundleIO
+      });
+    },
     report: async r => {
       await ask({ type: 'warning', buttons: ['OK'], message: r.message, detail: r.detail });
     },
@@ -1039,7 +1068,17 @@ function uninstallDeps() {
 }
 
 async function uninstallSelf() {
-  await loginitem.uninstall(uninstallDeps());
+  const deps = uninstallDeps();
+  const result = await loginitem.uninstall(deps);
+  if (result.step === 'unavailable') {
+    await deps.report({
+      step: 'unavailable',
+      message: 'Yapper cannot remove this copy.',
+      detail: 'This is no longer the same approved installed bundle Yapper started from, or its'
+        + ' mounted volume cannot be proved. Nothing has been changed.'
+    });
+  }
+  return result;
 }
 
 ipcMain.handle('get-bubble-corner', async () => bubbleCorner());

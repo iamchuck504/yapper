@@ -184,10 +184,16 @@ they look identical from the outside and none of them survives being unplugged.
 Your home folder being somewhere else does not make that somewhere else count
 as the startup disk.
 
+That volume answer is asked for the app's exact current path, not inferred from
+a device number or a cached list of disks. The same path is checked again before
+anything is handed to the Trash, so mounting a disk over a folder or replacing
+the app after it started makes the removal stop rather than change its target.
+
 Deliberate limit: an Applications folder kept on an **external disk** is refused
 rather than registered and hoped for. If you want Yapper to open at login, keep
 it on the startup disk. If Yapper cannot work out which disk it is on at all, it
-refuses too and changes nothing.
+changes nothing and shows an indeterminate switch; clicking it retries the read
+instead of guessing on or off.
 
 The switch reports macOS rather than its own memory of what you asked for.
 macOS 13 and later keeps that registration itself, which means three things
@@ -228,14 +234,15 @@ Either way:
 
 **Yapper → Uninstall Yapper…**, from the menu bar. Before it touches anything
 it works out every location involved — the app, its settings, the downloaded
-engine and your meetings — and checks that each one is genuinely outside the
-app it is about to move. If it cannot *show* that for any of them, it stops
+engine and your meetings — and proves how each one relates to the app it is
+about to move. If it cannot *show* that the requested removal is safe, it stops
 there and removes nothing, the login item included. "Cannot show" includes not
 being able to read where a folder really is: an unreadable path might be inside
 the app, so it is treated as though it were.
 
-That check does not depend on the checkbox, because the app moves to the Trash
-either way. If your settings or the engine turn out to live *inside* it — which
+Those locations are checked whether or not the checkbox is ticked, because the
+app moves to the Trash either way. If your settings or the engine turn out to
+live *inside* it — which
 `YAPPER_HOME` or `LOCALAPPDATA` can arrange — then leaving the box unticked is
 refused, since moving the app would delete data you had just declined to
 delete; ticking it goes ahead, and those files are removed by the app's own
@@ -243,7 +250,18 @@ move rather than a second time. A settings folder that *contains* the app is
 refused whatever the box says: that is your folder, not Yapper's to delete.
 
 The whole check runs again after you answer the dialog, not only before it, so
-nothing that changes while the dialog is open goes unnoticed.
+changes while the dialog is open are caught before anything is removed. Each
+existing target carries the directory identity and mounted volume that passed
+that last check; both are read again immediately before Yapper calls the
+system's path-based Trash API. That narrows the final filesystem race but does
+not claim an atomic move-by-identity that the API cannot provide. The meetings
+folder is proved again at the same moment, so changing its symlink or replacing
+it stops the removal. On a fresh install where that folder does not exist yet,
+its canonical name must remain absent through the same check. A data location
+that is already absent is not left in the executable plan. Data mounted
+separately inside the app is refused rather than called covered by the app's
+own move, and every covered data location must still be the same one when the
+bundle reaches the Trash.
 
 Then, in order: it stops itself opening at login, checks with macOS that it
 really has, moves itself to the Trash, and — only if you tick the box — moves
@@ -257,7 +275,8 @@ half-removing the app. If it cannot withdraw the login item, nothing is moved.
 If the Trash refuses the app — a copy installed for every user is owned by
 `root` — your settings and meetings are left alone. If it could not remove the
 settings or the engine, or could not prove one of them safe to remove, it tells
-you which path is still there.
+you which path Yapper left alone or the Trash refused; it does not claim an
+unreadable path still exists when it cannot prove that.
 
 The entry only appears in a copy that is really installed, in an Applications
 folder on the startup disk. From a disk image or a temporary folder the bundle

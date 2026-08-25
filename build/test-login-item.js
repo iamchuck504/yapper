@@ -47,10 +47,46 @@ function fakeIO({ dirs = [], links = {}, write = {}, ids = {}, mounts = ['/'] } 
       return { dev: 1, ino: `ino:${p}` };
     },
     writeStatus: p => write[p] || 'writable',
-    // The mount table, which is what a volume question is answered from. null
-    // models a machine where it could not be read.
-    mountPoints: () => mounts
+    // The exact mounted volume for a path. A function can change its answer
+    // between decisions, which is how late mounts and stale snapshots are run.
+    mountPoint(p) {
+      const current = typeof mounts === 'function' ? mounts() : mounts;
+      if (current && !Array.isArray(current) && (current.path || current.code)) return current;
+      if (!Array.isArray(current)) return { code: 'EIO' };
+      let best = null;
+      for (const m of current) {
+        if (p === m || p.startsWith(m.endsWith('/') ? m : m + '/')) {
+          if (!best || m.length > best.length) best = m;
+        }
+      }
+      return best ? { path: best } : { code: 'ENOENT' };
+    }
   };
+}
+
+// The production adapter asks libxo for JSON about one exact path. Mount names
+// stay JSON strings, so spaces, " on ", and newlines cannot become columns or
+// a second fake filesystem record.
+{
+  const out = JSON.stringify({
+    'storage-system-information': {
+      filesystem: [{ name: '/dev/disk99', 'mounted-on': '/Volumes/Work on Mac\nsecond line' }]
+    }
+  });
+  const parsed = L.parseDfMountPoint(out);
+  check('df JSON preserves a mount point containing spaces, " on ", and a newline',
+    parsed.path === '/Volumes/Work on Mac\nsecond line', JSON.stringify(parsed));
+  const two = JSON.stringify({
+    'storage-system-information': {
+      filesystem: [{ 'mounted-on': '/Volumes/Hostile' }, { 'mounted-on': '/' }]
+    }
+  });
+  check('more than one filesystem in a one-path answer fails closed',
+    !!L.parseDfMountPoint(two).code);
+  check('the old newline-shaped text injection is not parsed at all',
+    !!L.parseDfMountPoint('/dev/disk9 100 50 50 50% /Volumes/x\n/dev/disk1 1 2 3 0% /').code);
+  check('an incomplete df answer fails closed',
+    !!L.parseDfMountPoint('Filesystem only\n').code);
 }
 
 /** An Electron whose every answer is scripted and every call recorded. */
@@ -290,13 +326,52 @@ check('Windows is none of this',
 
 for (const kind of Object.values(L.KIND)) {
   const want = kind === L.KIND.PERMANENT;
+  const run = { kind, bundle: APPS, bundleIdentity: { dev: 1, ino: `ino:${APPS}` }, bundleMount: '/' };
   check(`${kind}: register ${want ? 'allowed' : 'refused'}`,
-    L.canRegister({ kind, bundle: APPS }) === want);
+    L.canRegister(run) === want);
   check(`${kind}: uninstall ${want ? 'allowed' : 'refused'}`,
-    L.canUninstall({ kind, bundle: APPS }) === want);
+    L.canUninstall(run) === want);
 }
 check('uninstalling needs a bundle, not just a permanent verdict',
   !L.canUninstall({ kind: L.KIND.PERMANENT, bundle: null }), 'it would trash undefined');
+check('and needs the identity and volume proved at startup',
+  !L.canUninstall({ kind: L.KIND.PERMANENT, bundle: APPS }), 'there would be nothing to revalidate');
+
+{
+  const io = fakeIO({ dirs: [APPS] });
+  const run = L.classifyRun({
+    platform: 'darwin', isPackaged: true, exe: APPS_EXE,
+    tempDirs: TEMPS, installRoots: ROOTS, approvedVolumeMounts: APPROVED_MOUNTS, io
+  });
+  check('a cached permanent verdict remains usable while its proof still matches',
+    L.revalidateRun(run, io).kind === L.KIND.PERMANENT);
+  const changed = fakeIO({
+    dirs: [APPS], ids: { [APPS]: { dev: 1, ino: 'replacement' } }
+  });
+  check('a replacement at the installed path invalidates the cached verdict',
+    L.revalidateRun(run, changed).kind === L.KIND.UNKNOWN);
+  const covered = fakeIO({ dirs: [APPS], mounts: ['/', APPS] });
+  check('a new mount over the installed path invalidates it too',
+    L.revalidateRun(run, covered).kind === L.KIND.UNKNOWN);
+}
+{
+  let mounts = null;
+  const io = fakeIO({ dirs: [APPS], mounts: () => mounts });
+  const classify = () => L.classifyRun({
+    platform: 'darwin', isPackaged: true, exe: APPS_EXE,
+    tempDirs: TEMPS, installRoots: ROOTS, approvedVolumeMounts: APPROVED_MOUNTS, io
+  });
+  const first = classify();
+  mounts = ['/'];
+  const recovered = L.refreshUnknownRun(first, classify);
+  check('a classification that was UNKNOWN only because the filesystem failed can recover',
+    first.kind === L.KIND.UNKNOWN && recovered.kind === L.KIND.PERMANENT,
+    `${first.kind} -> ${recovered.kind}`);
+  let called = false;
+  L.refreshUnknownRun(recovered, () => { called = true; return first; });
+  check('a proved install is revalidated, never freshly reclassified after replacement',
+    called === false);
+}
 
 // ---------- 2. startup reads, it does not register ----------
 
@@ -413,18 +488,26 @@ for (const [name, run] of [
       `${JSON.stringify(r)} · ${JSON.stringify(setCalls(sys))}`);
   }
 }
+{
+  const sys = fakeSystem({ status: 'enabled' });
+  const r = L.setMac({ run: () => ({ kind: L.KIND.UNKNOWN, why: 'try again' }), ...sys }, false);
+  check('an unproved installed path asks the UI to retry instead of disabling it forever',
+    r.state === 'unknown' && setCalls(sys).length === 0, JSON.stringify(r));
+}
 
 const views = [
   ['enabled', { checked: true, disabled: false }],
   ['disabled', { checked: false, disabled: false }],
   ['requires-approval', { checked: true, disabled: false }],
   ['unavailable', { checked: false, disabled: true }],
+  ['unknown', { checked: false, disabled: false, indeterminate: true }],
   ['error', { checked: false, disabled: false }]
 ];
 for (const [state, want] of views) {
   const v = L.switchView({ state });
   check(`the switch for "${state}" is ${want.checked ? 'on' : 'off'}${want.disabled ? ', disabled' : ', usable'}`,
-    v.checked === want.checked && v.disabled === want.disabled, JSON.stringify(v));
+    v.checked === want.checked && v.disabled === want.disabled
+      && v.indeterminate === !!want.indeterminate, JSON.stringify(v));
 }
 check('an explanation comes through to the switch',
   L.switchView({ state: 'unavailable', why: 'move it' }).hint === 'move it');
@@ -493,13 +576,23 @@ for (const code of ['EACCES', 'EIO', 'ESTALE', 'EPERM']) {
     eq(plan.targets.map(t => t.path), [DATA]) && plan.skipped.length === 1, JSON.stringify(plan));
 }
 {
-  // Not there yet is not the same as unreadable: it stays a target, and the
-  // Trash reporting ENOENT is what makes it a non-event.
+  // Not there is already the requested outcome. Keeping its name out of the
+  // executable plan also means something that appears later is not removed
+  // without ever having been checked.
   const plan = L.dataPlan({
     userData: DATA, engineHome: null, meetings: MEET, io: fakeIO({ links: { [DATA]: null } })
   });
-  check('a data directory that does not exist is still a target, marked missing',
-    plan.targets.length === 1 && plan.targets[0].missing === true, JSON.stringify(plan));
+  check('a data directory that does not exist is already done, not a future target',
+    plan.targets.length === 0 && plan.skipped.length === 0, JSON.stringify(plan));
+}
+{
+  const missingInsideMeetings = `${MEET}/future-settings`;
+  const plan = L.dataPlan({
+    userData: missingInsideMeetings, engineHome: null, meetings: MEET,
+    io: fakeIO({ links: { [missingInsideMeetings]: null } })
+  });
+  check('a missing name inside Meetings is neither executable nor falsely reported as kept',
+    plan.targets.length === 0 && plan.skipped.length === 0, JSON.stringify(plan));
 }
 {
   const plan = L.dataPlan({ userData: DATA, engineHome: null, meetings: '', io: fakeIO() });
@@ -509,12 +602,32 @@ for (const code of ['EACCES', 'EIO', 'ESTALE', 'EPERM']) {
 
 // ---------- 5. the preflight, before anything is touched ----------
 
-const pf = o => L.uninstallPreflight({
-  bundle: APPS, userData: DATA, engineHome: `${DATA}/Yapper/engine`,
-  meetings: MEET, alsoData: true, io: fakeIO(), ...o
-});
+const pf = (o = {}) => {
+  const io = o.io || fakeIO();
+  const bundle = o.bundle || APPS;
+  const real = io.realpath(bundle);
+  const bundlePath = real && real.path ? real.path : bundle;
+  const mounted = io.mountPoint(bundlePath);
+  return L.uninstallPreflight({
+    bundle, bundleIdentity: io.identity(bundlePath),
+    bundleMount: mounted && mounted.path,
+    userData: DATA, engineHome: `${DATA}/Yapper/engine`,
+    meetings: MEET, alsoData: true, ...o, io
+  });
+};
 
 check('a normal install passes the preflight', pf({}).ok === true, JSON.stringify(pf({})));
+
+{
+  const r = pf({ bundleIdentity: { dev: 1, ino: 'the-bundle-that-started' } });
+  check('a bundle replaced after startup is refused by the final preflight',
+    r.ok === false && /no longer the same/.test(r.why), JSON.stringify(r));
+}
+{
+  const r = pf({ bundleMount: '/System/Volumes/Data', io: fakeIO({ mounts: ['/', APPS] }) });
+  check('a volume mounted over the bundle after startup is refused too',
+    r.ok === false && /mounted volume changed/.test(r.why), JSON.stringify(r));
+}
 
 {
   // YAPPER_HOME inside the bundle: <home>/Meetings is inside Yapper.app, and
@@ -557,6 +670,18 @@ for (const code of ['EACCES', 'EIO']) {
     r.ok === false && r.why.includes(code), JSON.stringify(r));
 }
 {
+  const links = { [MEET]: null };
+  const io = fakeIO({ links });
+  const r = pf({ io });
+  check('a fresh install can uninstall before its Meetings folder has been created',
+    r.ok === true && r.bundleProof.protected.missing === true, JSON.stringify(r));
+  check('the absent Meetings name is still a lasting safety boundary while absent',
+    L.verifyPathProof(r.bundleProof, io).ok === true);
+  delete links[MEET];
+  check('if Meetings appears after the plan, the bundle is not handed to the Trash',
+    L.verifyPathProof(r.bundleProof, io).ok === false);
+}
+{
   const r = pf({ io: fakeIO({ links: { [APPS]: { code: 'EIO' } } }) });
   check('a bundle that cannot be canonicalised stops it too',
     r.ok === false && r.why.includes('EIO'), JSON.stringify(r));
@@ -590,6 +715,24 @@ for (const code of ['EACCES', 'EIO']) {
     r.ok === false && /inside the app itself/.test(r.why), JSON.stringify(r));
 }
 {
+  const raw = '/tmp/yapper-settings-link';
+  const links = { [raw]: DATA };
+  const io = fakeIO({ links });
+  const r = pf({ userData: raw, engineHome: null, alsoData: false, io });
+  links[raw] = `${APPS}/private/user`;
+  check('unticked data repointed into the app after final preflight stops the bundle Trash',
+    r.ok === true && L.verifyPathProof(r.bundleProof, io).ok === false, JSON.stringify(r));
+}
+{
+  const raw = '/tmp/yapper-engine-link';
+  const links = { [raw]: '/Users/ana/Library/Caches/YapperEngine' };
+  const io = fakeIO({ links });
+  const r = pf({ userData: DATA, engineHome: raw, alsoData: true, io });
+  links[raw] = `${APPS}/private/engine`;
+  check('ticked external data cannot race into the bundle before its own proof runs',
+    r.ok === true && L.verifyPathProof(r.bundleProof, io).ok === false, JSON.stringify(r));
+}
+{
   const r = pf({ userData: `${APPS}/private/user`, alsoData: true });
   check('with the box ticked it goes ahead, covered by the bundle\u2019s own move',
     r.ok === true && r.covered.includes(`${APPS}/private/user`), JSON.stringify(r));
@@ -597,6 +740,52 @@ for (const code of ['EACCES', 'EIO']) {
     (r.targets || []).every(t => !L.overlaps(`${APPS}/private/user`, t.path)), JSON.stringify(r.targets));
   check('nor reported as kept, since it does not survive',
     (r.skipped || []).every(k => k.path !== `${APPS}/private/user`), JSON.stringify(r.skipped));
+}
+{
+  const inner = `${APPS}/private/user`;
+  const ids = {
+    [APPS]: { dev: 1, ino: 'bundle' }, [MEET]: { dev: 1, ino: 'meetings' },
+    [inner]: { dev: 1, ino: 'settings' }
+  };
+  let mounts = ['/'];
+  const io = fakeIO({ ids, mounts: () => mounts });
+  const r = pf({ userData: inner, engineHome: null, alsoData: true, io });
+  check('covered data is part of the bundle proof, not only a label in the plan',
+    r.ok === true && r.bundleProof.covered.length === 1, JSON.stringify(r));
+  mounts = ['/', inner];
+  check('a volume mounted at covered data after the plan stops the bundle Trash',
+    L.verifyPathProof(r.bundleProof, io).ok === false);
+}
+{
+  const inner = `${APPS}/private/user`;
+  const raw = '/tmp/yapper-settings-link';
+  const links = { [raw]: inner };
+  const io = fakeIO({ links });
+  const r = pf({ userData: raw, engineHome: null, alsoData: true, io });
+  links[raw] = '/Volumes/Else/settings';
+  check('a covered data symlink repointed after the plan stops the bundle Trash',
+    L.verifyPathProof(r.bundleProof, io).ok === false);
+}
+{
+  const inner = `${APPS}/private/future-user`;
+  const links = { [inner]: null };
+  const io = fakeIO({ links });
+  const r = pf({ userData: inner, engineHome: null, alsoData: false, io });
+  check('missing data inside the app needs no consent to delete nothing',
+    r.ok === true && !r.needsConsent && r.bundleProof.dataGuards[0].mustStayMissing,
+    JSON.stringify(r));
+  delete links[inner];
+  check('if that data location appears after the plan, the bundle Trash is refused',
+    L.verifyPathProof(r.bundleProof, io).ok === false);
+}
+{
+  const innerMount = `${APPS}/private/user`;
+  const r = pf({
+    userData: innerMount, engineHome: null, alsoData: true,
+    io: fakeIO({ mounts: ['/', innerMount] })
+  });
+  check('a mounted volume inside the bundle is never called covered',
+    r.ok === false && /identity and mounted volume/.test(r.why), JSON.stringify(r));
 }
 {
   const r = pf({ userData: `${APPS}/private/user`, alsoData: false });
@@ -639,20 +828,20 @@ const mounted = extra => fakeIO({ mounts: ['/', '/Volumes/Work'], ...extra });
     userData: '/tmp/y/user', engineHome: null, meetings: '/tmp/y/Meetings',
     io: fakeIO({ links: { '/tmp/y/user': null } })
   });
-  check('a data directory that is simply not there is a target, never a leftover',
-    plan.targets.length === 1 && plan.targets[0].missing === true && plan.skipped.length === 0,
+  check('a data directory that is simply not there is already done',
+    plan.targets.length === 0 && plan.skipped.length === 0,
     JSON.stringify(plan));
 }
 {
-  // And still not a leftover on a machine where the mount table cannot be
-  // read: a path that does not exist has no volume to be the root of, so the
-  // question is not asked at all.
+  // And still not a leftover on a machine where the exact volume query fails:
+  // a path that does not exist has no volume to be the root of, so the question
+  // is not asked at all.
   const plan = L.dataPlan({
     userData: '/tmp/y/user', engineHome: null, meetings: '/tmp/y/Meetings',
     io: fakeIO({ links: { '/tmp/y/user': null }, mounts: null })
   });
-  check('nor when the mount table itself is unreadable',
-    plan.targets.length === 1 && plan.targets[0].missing === true && plan.skipped.length === 0,
+  check('nor when the mounted-volume query itself is unavailable',
+    plan.targets.length === 0 && plan.skipped.length === 0,
     JSON.stringify(plan));
 }
 {
@@ -687,6 +876,61 @@ const mounted = extra => fakeIO({ mounts: ['/', '/Volumes/Work'], ...extra });
     plan.targets.length === 0 && /could not be determined/.test(plan.skipped[0].why),
     JSON.stringify(plan));
 }
+{
+  const ids = { [DATA]: { dev: 1, ino: 10 } };
+  const links = {};
+  let mounts = ['/'];
+  const io = fakeIO({ ids, links, mounts: () => mounts });
+  const plan = L.dataPlan({ userData: DATA, engineHome: null, meetings: MEET, io });
+  check('a normal target carries the identity and mounted volume it proved',
+    !!plan.targets[0].proof && plan.targets[0].proof.mount === '/', JSON.stringify(plan));
+  ids[DATA] = { dev: 1, ino: 11 };
+  check('a target replaced after the plan is refused immediately before Trash',
+    L.verifyPathProof(plan.targets[0].proof, io).ok === false);
+  ids[DATA] = { dev: 1, ino: 10 };
+  mounts = ['/', DATA];
+  check('and so is a volume mounted over that target after the plan',
+    L.verifyPathProof(plan.targets[0].proof, io).ok === false);
+  mounts = ['/'];
+  links[DATA] = null;
+  check('a data target removed by somebody else is already done, not stale residue',
+    L.verifyPathProof(plan.targets[0].proof, io).missing === true);
+}
+{
+  const raw = '/tmp/yapper-data-link';
+  const links = { [raw]: DATA };
+  const io = fakeIO({ links });
+  const plan = L.dataPlan({ userData: raw, engineHome: null, meetings: MEET, io });
+  links[raw] = '/Users/ana/OtherData';
+  check('a data symlink repointed after the plan is refused before Trash',
+    L.verifyPathProof(plan.targets[0].proof, io).ok === false);
+}
+{
+  const ids = {
+    [APPS]: { dev: 1, ino: 'bundle' }, [MEET]: { dev: 1, ino: 'meetings' },
+    [DATA]: { dev: 1, ino: 'settings' }
+  };
+  const io = fakeIO({ ids });
+  const r = pf({ io, alsoData: true });
+  check('the final bundle and data proofs both protect the meetings identity',
+    r.bundleProof.protected.path === MEET && r.targets[0].proof.protected.path === MEET,
+    JSON.stringify(r));
+  ids[MEET] = { dev: 1, ino: 'replacement-meetings' };
+  check('a changed meetings folder stops the bundle before Trash',
+    L.verifyPathProof(r.bundleProof, io).ok === false);
+  check('and stops a data target too',
+    L.verifyPathProof(r.targets[0].proof, io).ok === false);
+}
+{
+  const safeMeetings = '/Users/ana/Safe/Meetings';
+  const links = { [MEET]: safeMeetings };
+  const io = fakeIO({ links });
+  const r = pf({ io, alsoData: true });
+  links[MEET] = '/Users/ana/Elsewhere/Meetings';
+  check('repointing the meetings symlink also invalidates every Trash proof',
+    L.verifyPathProof(r.bundleProof, io).ok === false
+      && L.verifyPathProof(r.targets[0].proof, io).ok === false);
+}
 
 // ---------- 6. uninstalling, step by step ----------
 
@@ -695,17 +939,22 @@ async function uninstallChecks() {
     afterWithdraw = 'not-registered', trashFails = {}, preflight = null } = {}) {
     const log = [];
     const deps = {
-      run: () => ({ kind, bundle: APPS }),
+      run: () => ({ kind, bundle: APPS,
+        bundleIdentity: { dev: 1, ino: `ino:${APPS}` }, bundleMount: '/' }),
       preflight: also => {
         log.push(['preflight', !!also]);
         if (preflight) return preflight;
-        return { ok: true, bundle: APPS, targets: also ? [{ label: 'settings', path: DATA }] : [], skipped: [] };
+        return { ok: true, bundle: APPS,
+          bundleProof: { path: APPS, identity: { dev: 1, ino: `ino:${APPS}` }, mount: '/' },
+          targets: also ? [{ label: 'settings', path: DATA,
+            proof: { path: DATA, identity: { dev: 1, ino: `ino:${DATA}` }, mount: '/' } }] : [],
+          skipped: [] };
       },
       confirm: async () => { log.push(['confirm']); return { proceed, alsoData }; },
       setLoginItem: on => log.push(['set', on]),
       getLoginItem: () => { log.push(['get']); return { status: afterWithdraw }; },
-      trash: async p => {
-        log.push(['trash', p]);
+      trash: async (p, proof) => {
+        log.push(['trash', p, proof]);
         const f = trashFails[p];
         return f ? { ok: false, code: f.code, message: f.message } : { ok: true };
       },
@@ -727,6 +976,8 @@ async function uninstallChecks() {
       steps(log)[0] === 'preflight' && steps(log).indexOf('set') > steps(log).indexOf('confirm'),
       JSON.stringify(steps(log)));
     check('the bundle goes before the data', eq(trashed(log), [APPS, DATA]), JSON.stringify(trashed(log)));
+    check('and both Trash calls receive the proof from the final plan',
+      log.filter(e => e[0] === 'trash').every(e => !!e[2]), JSON.stringify(log));
     check('and it finishes', r.done === true, JSON.stringify(r));
   }
   {
