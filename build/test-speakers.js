@@ -82,6 +82,16 @@ check('load state lists recorder first, then numbered voices',
     { label: 'Speaker 2', name: 'Carlos' }
   ]);
 
+check('notes generalize numbered voices without merging a disagreement',
+  speakers.generalizeNoteSpeakers('- Speaker 1 proposed Friday; Speaker 2 preferred Monday.\n- Speaker 1 clarified scope.', 'en'),
+  '- One participant proposed Friday; another participant preferred Monday.\n- One participant clarified scope.');
+check('the notes fallback speaks natural Spanish too',
+  speakers.generalizeNoteSpeakers('- Speaker 1 propuso el viernes; Speaker 2 prefirió el lunes.', 'es'),
+  '- Una persona propuso el viernes; otra persona prefirió el lunes.');
+check('automatic note language does not leak numbered labels',
+  speakers.generalizeNoteSpeakers('## Resumen\nSpeaker 1 explicó que la entrega fue aprobada para el viernes.', 'auto'),
+  '## Resumen\nUna persona explicó que la entrega fue aprobada para el viernes.');
+
 check('malformed helper output is harmless', speakers.parseHelperOutput('{not json'), []);
 check('valid helper output is bounded and normalized',
   speakers.parseHelperOutput(JSON.stringify({ segments: rawSegments })).length, 3);
@@ -108,8 +118,8 @@ if (process.platform === 'darwin' && fs.existsSync(helper)) {
 // Normalised: git checks main.js out with CRLF on Windows, and the bounded
 // gaps below count those extra characters.
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
-check('the notes prompt preserves unknown numbered identities',
-  /write the exact label[\s\S]{0,160}instead of vague phrases such as "the speaker"/i.test(mainSource), true);
+check('the notes prompt uses identities as evidence but never prints numbered labels',
+  /Use these labels only as structural evidence[\s\S]*Never write technical labels such as "Speaker 1"[\s\S]*one participant[\s\S]*another participant/i.test(mainSource), true);
 
 // A run can be cancelled once the far side turns out to have said nothing:
 // the helper stops, the promise resolves at once, and the result says why.

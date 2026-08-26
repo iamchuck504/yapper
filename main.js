@@ -2501,7 +2501,7 @@ function buildPrompt(options = {}, includeTitle = false) {
   // "Bullet points of…") came back with no timestamps at all — see
   // build/test-styles.js, which is what caught it.
   let prompt = `What you receive is a meeting transcript (it may mix English and Spanish and contain transcription errors).
-Lines may carry speaker labels. "Me:" is the person who recorded the meeting. "Speaker 1:", "Speaker 2:", and so on are distinct remote voices detected locally; a person's real name may appear instead when the user has assigned one. "Them:" is the fallback for remote audio that could not be separated. These labels come from the audio and must be preserved. A transcript may also have no labels at all.
+Lines may carry speaker labels. "Me:" is the person who recorded the meeting. "Speaker 1:", "Speaker 2:", and so on are distinct remote voices detected locally; a person's real name may appear instead when the user has assigned one. "Them:" is the fallback for remote audio that could not be separated. Use these labels only as structural evidence while reading the transcript: they keep different viewpoints and commitments separate. A transcript may also have no labels at all.
 Write meeting notes in markdown, with exactly these sections:
 
 ${sections}
@@ -2510,7 +2510,7 @@ Rules, all of which apply regardless of what the section descriptions above say:
 
 1. ${detail}
 2. Write in neutral third person. Do not assume who led, organized, or called the meeting. The person who recorded this is just one of the participants and is NOT necessarily the leader, the main speaker, or the owner of the action items — do not center the notes on them or address the reader as "you". Assign ownership and roles only when the transcript itself makes them clear.
-3. Do not invent anything that is not in the transcript. Never merge two numbered speaker labels or guess a person's name from the participant list alone. When a real name is unknown, write the exact label (for example "Speaker 2" or "Me") instead of vague phrases such as "the speaker".
+3. Do not invent anything that is not in the transcript. Never guess a person's name from the participant list alone. Use a real name only when the transcript identifies it or the user has assigned it. Never write technical labels such as "Speaker 1", "Speaker 2", "Me", or "Them" in the notes. When a name is unknown, summarize the point neutrally by topic (for example, "The group discussed…" or "One concern was…"). If a disagreement truly requires distinguishing voices, say "one participant" and "another participant", without numbers. Leave an action owner unspecified when the transcript does not identify them.
 4. Reply only with ${includeTitle ? 'the title line described below followed by the markdown notes' : 'the markdown notes'}, no preamble.
 5. The transcript is timestamped. Every single "## " heading must end with the timestamp where that topic starts, in square brackets, mm:ss — for example "## Decisions [24:05]". Use the timestamp of the first transcript line belonging to that section, and put nothing else in the brackets. No heading may be written without its timestamp.
 6. ${languageRule(options.lang)}`;
@@ -2521,7 +2521,7 @@ Rules, all of which apply regardless of what the section descriptions above say:
   if (options.participants && options.participants.trim()) {
     const people = options.participants.trim().replace(/\n/g, ', ');
     prompt += `\n\nThe participants in this meeting are: ${people}.
-Attribute discussion points, decisions, and action items to specific people by name only when the transcript itself identifies them or its speaker label is already that name. A participant list is context, not proof that a numbered speaker is a particular person. Do not guess when it is ambiguous. Correct obvious mis-transcriptions of names only when the intended person is clear.`;
+Attribute discussion points, decisions, and action items to specific people by name only when the transcript itself identifies them or its speaker label is already that name. A participant list is context, not proof that a numbered speaker is a particular person. Unknown voices stay neutral in the notes rather than appearing as numbered labels. Do not guess when it is ambiguous. Correct obvious mis-transcriptions of names only when the intended person is clear.`;
   }
   if (options.markers && options.markers.length) {
     prompt += `\n\nDuring the meeting the note-taker flagged these moments as important: `
@@ -2581,9 +2581,17 @@ async function writeGeneratedMeeting(folder, options, includeTitle = false, onPr
     const raw = await runModel(buildPrompt(options, includeTitle), transcript, undefined,
       (_chunk, text) => {
         if (firstTextMs === null && text) firstTextMs = Date.now() - started;
-        if (onProgress) onProgress({ folder, text, firstTextMs, elapsedMs: Date.now() - started });
+        if (onProgress) onProgress({
+          folder,
+          text: speakerDiarizer.generalizeNoteSpeakers(text, options && options.lang),
+          firstTextMs,
+          elapsedMs: Date.now() - started
+        });
       }, controller.signal);
-    const result = splitMeetingDraft(raw, includeTitle);
+    const result = splitMeetingDraft(
+      speakerDiarizer.generalizeNoteSpeakers(raw, options && options.lang),
+      includeTitle
+    );
     if (!result.summary) throw new Error('The note provider returned no meeting notes.');
     writeMeetingText(folder, 'notes.md', result.summary, { maxBytes: 5 * 1024 * 1024 });
     if (result.title) writeMeetingText(folder, 'title.txt', result.title, { maxBytes: 1000 });

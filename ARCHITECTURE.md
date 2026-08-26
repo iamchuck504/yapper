@@ -116,7 +116,7 @@ that ship are the files that run.
 | `provision.js` | 505 | First-run engine download for installed copies (Windows and macOS): pinned, SHA-256 verified, size-bounded, resumable and retried |
 | `library.js` | 169 | The index over every meeting: build, refresh, select by day or week |
 | `sysaudio.js` | 335 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
-| `speaker-diarizer.js` | 242 | Optional macOS Core ML diarization, timestamp alignment, stable labels and per-meeting name maps |
+| `speaker-diarizer.js` | 278 | Optional macOS Core ML diarization, timestamp alignment, stable transcript labels, neutral note prose and per-meeting name maps |
 | `meetings.js` | 89 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |

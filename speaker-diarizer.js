@@ -226,6 +226,41 @@ function speakerState(rawTranscript, value) {
   return transcriptSpeakerLabels(rawTranscript).map(label => ({ label, name: map[label] || '' }));
 }
 
+/**
+ * Numbered voices are useful evidence in the transcript, but poor prose in
+ * meeting notes. Keep the distinction without exposing the implementation:
+ * "Speaker 1 disagreed with Speaker 2" becomes "one participant disagreed
+ * with another participant" (or the Spanish equivalent). The prompt asks the
+ * model to do this naturally; this is the deterministic last line of defence.
+ */
+function generalizeNoteSpeakers(value, language = 'en') {
+  const text = String(value || '');
+  if (!/\bSpeaker [1-9]\d*\b/.test(text)) return text;
+
+  let spanish = language === 'es';
+  if (language === 'auto') {
+    const lower = text.toLowerCase();
+    const es = (lower.match(/\b(?:el|la|los|las|una|uno|que|para|con|por|del|se|fue|como|pero|también)\b/g) || []).length;
+    const en = (lower.match(/\b(?:the|a|an|that|for|with|from|was|were|as|but|also|will)\b/g) || []).length;
+    spanish = es > en;
+  }
+
+  const first = spanish ? 'una persona' : 'one participant';
+  const other = spanish ? 'otra persona' : 'another participant';
+  return text.split(/\r?\n/).map(line => {
+    const names = new Map();
+    return line.replace(/\bSpeaker [1-9]\d*\b/g, (label, offset) => {
+      if (!names.has(label)) names.set(label, names.size ? other : first);
+      let replacement = names.get(label);
+      const before = line.slice(0, offset);
+      if (/^\s*(?:(?:[-*+] |\d+[.)] )?)$/.test(before)) {
+        replacement = replacement[0].toUpperCase() + replacement.slice(1);
+      }
+      return replacement;
+    });
+  }).join('\n');
+}
+
 module.exports = {
   stampSeconds,
   cleanSegments,
@@ -237,5 +272,6 @@ module.exports = {
   normalizeSpeakerMap,
   applySpeakerMap,
   transcriptSpeakerLabels,
-  speakerState
+  speakerState,
+  generalizeNoteSpeakers
 };

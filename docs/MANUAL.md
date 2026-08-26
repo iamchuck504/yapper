@@ -292,8 +292,10 @@ UI; several are deliberate trade-offs, marked as such.
 3. **Speaker labels differ by platform.** macOS keeps microphone and system
    tracks apart. On 14+ an additional local Core ML pass separates the remote
    side into `Speaker 1`, `Speaker 2`, and so on; the user can map those labels
-   to attendee names. macOS 13 falls back to `Me:`/`Them:`. Windows receives an
-   already mixed stream and still has no reliable speaker labels.
+   to attendee names. They remain useful in the full transcript, but generated
+   notes use real assigned names or neutral prose rather than numbered speaker
+   labels. macOS 13 falls back to `Me:`/`Them:`. Windows receives an already
+   mixed stream and still has no reliable speaker labels.
 4. **Transcription ceiling is whisper `small`.** On clean audio it is very
    good; a managed cloud ASR pipeline is generally stronger on heavy accents,
    crosstalk and bad microphones. `medium` was measured against `small` on real

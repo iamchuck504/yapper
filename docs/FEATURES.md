@@ -226,8 +226,10 @@ the remote/system track as **Speaker 1**, **Speaker 2**, and so on. The meeting
 shows a **Who is speaking?** panel: choose or type each person's name, then use
 **Regenerate** to update the notes with those names. Labels remain stable within
 that meeting; Yapper does not infer a person's identity from the attendee list.
-If the local Core ML detector is unavailable, the transcript still completes
-with the reliable `Me`/`Them` side-of-call labels.
+Those technical labels stay in the full transcript and matching panel, not the
+generated notes: notes use assigned names when known and otherwise summarize
+the discussion neutrally. If the local Core ML detector is unavailable, the
+transcript still completes with the reliable `Me`/`Them` side-of-call labels.
 
 ### Editing, regenerating, reading aloud
 
@@ -412,7 +414,8 @@ Stated plainly, so it is planned around rather than discovered:
 
 - **Speaker detection is currently macOS-only.** macOS 14+ separates remote
   voices locally; Windows still receives one mixed stream and has no reliable
-  speaker labels. Names are assigned by the user, not guessed.
+  speaker labels. Names are assigned by the user, not guessed; unknown numbered
+  labels never appear as people in the generated notes.
 - **No calendar integration.** Detection knows a microphone is in use, not that
   "the 10:00 with Ana" is starting.
 - **No mobile, no sync, no sharing, no accounts.** Meetings live on the machine
