@@ -304,16 +304,21 @@ mac-only version would leave `latest.yml` off the newest release and Windows
 copies would stop seeing updates, silently. Cutting from Windows afterwards
 replaces those with real ones.
 
-**Nothing has been published since 0.1.4.** Eighteen changes are committed and
-unpublished, waiting on a reason to cut a version: the System meter, `llm.js`
-finally being tracked in git, the LaunchServices fix, the menu bar item, the
-recording indicator, the bubble corner and its dragging, the permission
-priming, the waveform drawing, the whole record-view rebuild, and the theme
-setting.
+The public feed now has a macOS-first `v0.1.13`. It deliberately carries the
+last verified Windows `0.1.7` installer and manifest so existing Windows copies
+do not lose their updater feed; those carried files do not make Windows 0.1.13
+available or verified.
 
-Whoever cuts the next version should cut it **from Windows**, because that is
-where the untested surface is: a Windows-built installer that someone has
-actually run is worth more than another cross-build from the Mac.
+The next Windows pass should build **the same 0.1.13 version** from
+`macos-login-item` at or after `39f20ef`, complete the runtime checklist in
+`.github/WINDOWS-RELEASE-CHECKLIST.md`, and upload the EXE, blockmap and
+`latest.yml` into the existing `v0.1.13` release. Do not create another release
+or run `npm run release`: replacing the Windows platform files in the existing
+cross-platform release is the intended handoff.
+
+This pass matters because Windows is still the untested surface: a
+Windows-built installer that someone has actually installed, recorded with,
+updated and removed is worth more than another cross-build from the Mac.
 
 ---
 
