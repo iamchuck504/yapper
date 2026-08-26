@@ -1,6 +1,8 @@
-// The transcript export has to survive Markdown: a verbatim record that gets
-// half-eaten by asterisks and underscores is not a record. Drives the real
-// export menu with a stubbed save dialog and inspects what lands on disk.
+// Exports are real documents, not only files that exist. The transcript has to
+// survive Markdown, and the PDF has to carry its identity while letting notes
+// flow across pages instead of making every section an indivisible sheet.
+// Drives the real export menu with a stubbed save dialog and inspects both the
+// document HTML and what lands on disk.
 const path = require('path');
 const fs = require('fs');
 const { app, dialog } = require('electron');
@@ -15,7 +17,32 @@ app.setPath('userData', path.join(ROOT, 'user'));
 const folder = path.join(ROOT, 'Meetings', '2026-07-29_1400');
 fs.mkdirSync(folder);
 fs.writeFileSync(path.join(folder, 'title.txt'), 'Launch Sync', 'utf8');
-fs.writeFileSync(path.join(folder, 'notes.md'), '## Summary [00:00]\nIt went fine.', 'utf8');
+fs.writeFileSync(path.join(folder, 'notes.md'), `## Summary [00:00]
+The launch review covered readiness, customer communication, support coverage, and the final release decision. The team agreed that the remaining work is small enough to finish without moving the date.
+
+## Key points [01:15]
+- The release candidate completed the full regression suite.
+- Support has the escalation guide and the customer-facing status language.
+- Product analytics will watch activation and first-session completion.
+- The rollback package was tested in staging and remains available.
+
+## Decisions [08:40]
+- Keep the planned release window.
+- Use the staged rollout rather than opening access to every account at once.
+- Review the first cohort before expanding the rollout.
+
+## Action items [13:20]
+- Maya: publish the final release notes before the rollout begins.
+- Carlos: confirm the support rotation and escalation channel.
+- Nina: share the activation dashboard with the launch group.
+
+## Risks [18:05]
+- A late support handoff could slow the response to early customer questions.
+- The team will pause expansion if activation falls below the agreed threshold.
+
+## Next steps [22:10]
+- Complete the named action items, begin the first cohort, and reconvene after the initial metrics are available.
+`, 'utf8');
 // deliberately awkward: markdown characters, an hour boundary, and a long gap
 fs.writeFileSync(path.join(folder, 'transcript.txt'), [
   '[00:00:01] We should ship the *beta* on Friday.',
@@ -32,7 +59,11 @@ function check(name, ok, detail) {
 }
 
 const saved = path.join(ROOT, 'out.md');
-dialog.showSaveDialog = async () => ({ canceled: false, filePath: saved });
+const savedPdf = path.join(ROOT, 'out.pdf');
+dialog.showSaveDialog = async (_win, opts) => ({
+  canceled: false,
+  filePath: String(opts.defaultPath || '').endsWith('.pdf') ? savedPdf : saved
+});
 
 require('../main.js');
 
@@ -76,6 +107,43 @@ app.whenReady().then(async () => {
     /\n\n\*\*\[02:30\]\*\*/.test(body) && /\n\n\*\*\[01:05:00\]\*\*/.test(body), body);
   check('consecutive lines stay in the same paragraph',
     /\*\*\[00:01\]\*\*.*  \n\*\*\[00:07\]\*\*/.test(body), 'split them too eagerly');
+
+  // The exact HTML sent to Chromium is the pagination contract. A title/date
+  // masthead should be visible, while only small reading units — not an entire
+  // notes section — are kept together at a page boundary.
+  const pdfHtml = await $(`buildPdfHtml('Launch Sync', 'light')`);
+  check('the PDF has a document header',
+    /<header class="pdf-header">/.test(pdfHtml), pdfHtml.slice(0, 500));
+  check('a light PDF keeps light paper through the end of its final page',
+    /html \{ background: #FBFAF8; \}/.test(pdfHtml), 'the html canvas uses the dark root theme');
+  check('the header carries the meeting title and date',
+    /<h1 class="pdf-title">Launch Sync<\/h1>/.test(pdfHtml)
+      && /<div class="pdf-date">29\/07\/2026 · 14:00<\/div>/.test(pdfHtml),
+    pdfHtml.slice(0, 900));
+  check('whole note sections may flow across pages',
+    /\.note-sec\s*\{[^}]*break-inside:\s*auto;[^}]*page-break-inside:\s*auto;/.test(pdfHtml)
+      && !/\.note-sec\s*\{[^}]*page-break-inside:\s*avoid;/.test(pdfHtml),
+    pdfHtml.match(/\.note-sec\s*\{[^}]*\}/)?.[0] || 'missing rule');
+  check('a section rule, timestamp and title stay together',
+    /<div class="pdf-section-head"><div class="note-rule">/.test(pdfHtml)
+      && /\.pdf-section-head\s*\{[^}]*break-inside:\s*avoid;[^}]*break-after:\s*avoid;/.test(pdfHtml),
+    'missing atomic section heading');
+
+  // Force a genuinely multi-page document through Chromium too. It is long on
+  // purpose: the old whole-section rule turned each one of these chapters into
+  // a mostly empty page, while the new rule can use the space that remains.
+  const longPdfNotes = Array.from({ length: 8 }, (_, section) => {
+    const bullets = Array.from({ length: 8 }, (_, item) =>
+      `- Detail ${section + 1}.${item + 1}: enough context to make this a realistic meeting note that wraps cleanly when needed.`);
+    return `## Topic ${section + 1} [${String(section * 3).padStart(2, '0')}:00]\n${bullets.join('\n')}`;
+  }).join('\n\n');
+  await $(`renderNotes(${JSON.stringify(longPdfNotes)})`);
+  await $(`pdfTheme = 'light'`);
+  const pdf = await $(`runExport('pdf')`);
+  await new Promise(r => setTimeout(r, 400));
+  check('writes a readable PDF document',
+    pdf === savedPdf && fs.existsSync(savedPdf) && fs.statSync(savedPdf).size > 1000,
+    `${pdf} (${fs.existsSync(savedPdf) ? fs.statSync(savedPdf).size : 0} bytes)`);
 
   console.log(fails ? `\n${fails} failures` : '\nPASS');
   app.exit(fails ? 1 : 0);

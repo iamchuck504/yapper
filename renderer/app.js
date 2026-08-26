@@ -3197,31 +3197,76 @@ function buildPdfHtml(title, mode) {
   for (const sec of notesEl.querySelectorAll('.note-sec')) {
     const clone = sec.cloneNode(true);
     clone.querySelectorAll('.li-add, button').forEach(el => el.remove());
+    const rule = clone.querySelector(':scope > .note-rule');
+    const head = clone.querySelector(':scope > .note-head');
+    if (rule && head) {
+      // Chromium may fragment the one-pixel rule independently from the title,
+      // leaving a timestamp alone at the foot of one page and repeating it on
+      // the next. One export-only wrapper makes the chapter heading atomic.
+      const wrap = document.createElement('div');
+      wrap.className = 'pdf-section-head';
+      rule.before(wrap);
+      wrap.append(rule, head);
+    }
     body += clone.outerHTML;
   }
-  // The print margins are zero so the theme color reaches the edge of every
-  // sheet (a margin set at print time cannot be painted). The frame is body
-  // padding instead, and each section carries its gap as padding rather than
-  // margin, because a margin is discarded at a page break and padding is not —
-  // that gap is what keeps page two from starting flush against the edge.
+  // Theme variables live on body.light in the app stylesheet and therefore do
+  // not travel upward to the html canvas. Give that canvas the matching paper
+  // colour explicitly, or the unused half of a light final page turns dark.
+  const paper = mode === 'light' ? '#FBFAF8' : '#0C0D10';
+  // Electron supplies an equal margin on every sheet, including one that begins
+  // halfway through a long section. Sections are deliberately allowed to flow
+  // across pages: keeping a whole chapter indivisible made ordinary notes use
+  // one page per section. Only a heading and each individual paragraph/list
+  // item stay together, avoiding both wasteful blank space and stranded titles.
   const print = `
-    html { background: var(--bg); }
+    html { background: ${paper}; }
     body {
       display: block; height: auto; overflow: visible;
-      padding: 0.55in 0.65in;
+      padding: 0;
       -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
-    .note-sec { page-break-inside: avoid; padding-top: 28px; }
-    .note-sec .note-rule { margin-top: 0; }
-    .pdf-date + .note-sec { padding-top: 14px; }
-    .pdf-title { font-size: 22px; font-weight: 600; letter-spacing: -0.2px; color: var(--text); margin-bottom: 4px; }
-    .pdf-date { font-size: 11px; color: var(--text-3); }
+    .pdf-header {
+      display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
+      padding-bottom: 13px; border-bottom: 1px solid var(--rule);
+    }
+    .pdf-title {
+      min-width: 0; font-size: 22px; line-height: 1.2; font-weight: 600;
+      letter-spacing: -0.2px; color: var(--text); margin: 0;
+    }
+    .pdf-date {
+      flex: none; padding-bottom: 2px; font-size: 11px; line-height: 1.3;
+      white-space: nowrap; color: var(--text-3);
+    }
+    .note-sec {
+      break-inside: auto; page-break-inside: auto;
+    }
+    .pdf-section-head {
+      break-inside: avoid; page-break-inside: avoid;
+      break-after: avoid; page-break-after: avoid;
+    }
+    .pdf-section-head .note-rule {
+      height: auto; margin: 24px 0 3px; padding-top: 6px;
+      background: none; border-top: 1px solid var(--rule);
+    }
+    .pdf-section-head .note-rule .at {
+      position: static; display: block; padding: 0; background: transparent;
+    }
+    .note-sec.sec-action .pdf-section-head .note-rule,
+    .note-sec.sec-risk .pdf-section-head .note-rule { border-color: var(--accent-soft); }
+    .note-sec h3 { break-after: avoid; page-break-after: avoid; }
+    .note-sec p, .note-sec li {
+      break-inside: avoid; page-break-inside: avoid; orphans: 2; widows: 2;
+    }
+    .pdf-header + .note-sec .note-rule { margin-top: 18px; }
     .pdf-foot { margin-top: 30px; padding-top: 9px; border-top: 1px solid var(--rule); font-size: 10px; color: var(--text-3); }`;
   return '<!DOCTYPE html><html><head><meta charset="utf-8">'
     + `<link rel="stylesheet" href="style.css"><style>${print}</style></head>`
     + `<body${mode === 'light' ? ' class="light"' : ''}>`
+    + '<header class="pdf-header">'
     + `<h1 class="pdf-title">${escapeHtml(title)}</h1>`
     + `<div class="pdf-date">${escapeHtml(resultDateStr)}</div>`
+    + '</header>'
     + body
     + '<div class="pdf-foot">Generated with Yapper</div></body></html>';
 }

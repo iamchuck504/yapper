@@ -3981,12 +3981,12 @@ ipcMain.handle('export-pdf', async (_e, html, suggestedName) => {
     fs.writeFileSync(tmpHtml, doc, 'utf8');
     await pdfWin.loadFile(tmpHtml);
     await new Promise(r => setTimeout(r, 250));   // let the webfont settle
-    // Margins are zero on purpose: Chromium cannot paint the page background
-    // into a print margin, and the notes come themed. The document brings its
-    // own frame as body padding instead.
+    // A real print margin repeats on every sheet, including one that starts
+    // midway through a long section. Keeping it here instead of in fragmented
+    // document CSS also avoids Chromium shifting a continued list horizontally.
     const data = await pdfWin.webContents.printToPDF({
       printBackground: true,
-      margins: { marginType: 'custom', top: 0, bottom: 0, left: 0, right: 0 },
+      margins: { marginType: 'custom', top: 0.55, bottom: 0.55, left: 0.65, right: 0.65 },
       pageSize: 'Letter'
     });
     fs.writeFileSync(res.filePath, data);

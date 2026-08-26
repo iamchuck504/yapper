@@ -259,7 +259,7 @@ Five ways, from the Export menu:
 
 | Export | What you get |
 |---|---|
-| **PDF** | the notes, formatted |
+| **PDF** | the notes as a continuous document, headed with the meeting name and date |
 | **Markdown** | the notes as `.md` |
 | **Transcript (Markdown)** | the full transcript, bold timestamps, a new paragraph after each long silence |
 | **Transcript (.txt)** | plain text |

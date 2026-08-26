@@ -106,7 +106,7 @@ that ship are the files that run.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `main.js` | 3975 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
+| `main.js` | 3998 | Windows, the whole IPC surface, meeting files, settings, meeting auto-detection, note prompts, shortcut upkeep, auto-update |
 | `engine.js` | 1149 | whisper.cpp lifecycle, the tier table, calibration, Metal-to-CPU fallback, WAV read/write, full-file transcription |
 | `digest.js` | 357 | The day, assembled from the notes; the week, written from them and checked |
 | `search.js` | 363 | Retrieval: passages, query parsing, BM25 ranking, the grounded-answer prompt |
@@ -138,7 +138,7 @@ the Trash refuse the bundle, and check what happens next.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 3861 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
+| `renderer/app.js` | 3906 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
 | `renderer/startup-switch.js` | 127 | The Start at login switch: what it shows when a call is refused, lost or answered late |
 | `renderer/style.css` | 1782 | Everything visual, light and dark |
 | `renderer/index.html` | 595 | Main window markup |
@@ -764,7 +764,9 @@ why:
 - **`calibration.wav` is asar-unpacked.** This process can read inside the
   asar; the whisper server is a separate process and cannot.
 - **The PDF export writes to temp** with a `<base>` back into `renderer/` —
-  it used to write next to its own code, which an installed app cannot.
+  it used to write next to its own code, which an installed app cannot. Its
+  print margins repeat on every page, sections may flow across page boundaries,
+  and the first page identifies the meeting by name and date.
 - **Single-instance lock.** Two instances would fight over the whisper server's
   port; the second launch focuses the first and exits.
 - **Auto-update is electron-updater** (§10), wired only when packaged: checked
@@ -899,7 +901,7 @@ run can never touch a real meeting):
 | `test-theme.js` | Auto, Light and Dark: what a new install opens on, that the preference is stored as the word chosen rather than the colour it resolved to, that Auto follows the system changing under a running app, and that the corner button commits to a side instead of flipping Auto |
 | `test-smoke.js` | Every view, control and export, while listening for renderer errors |
 | `test-import.js` | A real `.m4a` and `.webm`, checking the resulting WAV is genuinely playable and not silent |
-| `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting |
+| `test-delete-ui.js`, `test-options-ui.js`, `test-llm-ui.js`, `test-export.js` | Deletion confirmation, per-meeting attendees, provider settings, transcript formatting, PDF identity and multipage flow |
 | `test-bubble-fit.js`, `test-splash-mark.js`, `icon-verify.js` | The overlay in all three states — capsule, hover-open, pinned — fits its contents, opens and closes on the hover messages, keeps the pin across a reload, migrates the old expanded preference, and its bars track the level they are sent; the splash mark loads under CSP; the icon's corners, halo and every `.ico` size |
 | `probe-system-audio.js` | macOS: mutes the output, plays a clip, records, and checks the file still has signal. Energy alone would prove nothing — the microphone hears the speakers too — so muting is what makes the capture path the only possible source |
 | `probe-empty.js` | Not an assertion — it boots against an empty profile and prints what every view says, so a first run can be read instead of guessed at. It is how the weekly panel's wall of zeros and its dead "write it again" button were found |
