@@ -46,13 +46,24 @@ app.whenReady().then(async () => {
 
   await $(`openMeetingByFolder(${JSON.stringify(folder)})`);
   await new Promise(r => setTimeout(r, 400));
+  check('participants is visibly optional and explains its separate purpose',
+    /Participants\s+Optional/i.test(await $(`document.querySelector('.participants-field label').textContent`))
+      && /does not assign voices/i.test(await $(`document.getElementById('participants-help').textContent`)),
+    await $(`document.querySelector('.participants-bar').textContent`));
+  check('participants accepts a simple list of names',
+    /separated by commas/i.test(await $(`document.getElementById('participants-meet').placeholder`)),
+    await $(`document.getElementById('participants-meet').placeholder`));
   check('optional speaker matching control appears',
     !(await $(`document.getElementById('speaker-map').classList.contains('hidden')`)), 'control is hidden');
   check('speaker matching is collapsed by default',
     !(await $(`document.getElementById('speaker-map').open`)), 'control is open');
   check('the control identifies itself as optional',
-    /Identify speakers\s+Optional/i.test(await $(`document.querySelector('#speaker-map summary').textContent`)),
+    /Match voices to names\s+Optional/i.test(await $(`document.querySelector('#speaker-map summary').textContent`)),
     await $(`document.querySelector('#speaker-map summary').textContent`));
+  check('speaker matching explains that it attributes speech and action items',
+    /Who said what/i.test(await $(`document.querySelector('.speaker-map-copy').textContent`))
+      && /action items to the right person/i.test(await $(`document.querySelector('.speaker-map-copy').textContent`)),
+    await $(`document.querySelector('.speaker-map-copy').textContent`));
   await $(`document.getElementById('speaker-map').open = true`);
   const speakerInputs = await $(`document.querySelectorAll('#speaker-map-fields input').length`);
   check('recorder and two remote voices are offered', speakerInputs === 3, speakerInputs);

@@ -420,18 +420,25 @@
 
       <div class="participants-bar">
         <svg viewBox="0 0 16 16" width="14" height="14"><circle cx="5.5" cy="5" r="2.3" fill="none" stroke="currentColor" stroke-width="1.2"/><circle cx="11" cy="5.5" r="1.9" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M1.5 13c0-2 1.8-3.3 4-3.3s4 1.3 4 3.3M10 9.9c1.9.1 4 1.1 4.5 3.1" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
-        <input id="participants-meet" type="text" placeholder="Participants — add names, then Regenerate to attribute the notes by person" autocomplete="off" spellcheck="false" />
+        <div class="participants-field">
+          <label for="participants-meet">
+            <strong>Participants</strong>
+            <span class="optional-badge">Optional</span>
+          </label>
+          <span id="participants-help">Who attended. Helps notes and search; it does not assign voices.</span>
+          <input id="participants-meet" type="text" placeholder="Add names, separated by commas" aria-describedby="participants-help" autocomplete="off" spellcheck="false" />
+        </div>
       </div>
 
       <details id="speaker-map" class="speaker-map hidden">
         <summary>
-          <strong>Identify speakers</strong>
-          <span>Optional</span>
+          <strong>Match voices to names</strong>
+          <span class="optional-badge">Optional</span>
         </summary>
         <div class="speaker-map-body">
           <div class="speaker-map-copy">
-            <strong>Match voices to names</strong>
-            <span>The transcript updates now; Regenerate updates the notes.</span>
+            <strong>Who said what</strong>
+            <span>Use this only when Yapper detects multiple voices. It updates the transcript and helps regenerated notes assign action items to the right person.</span>
           </div>
           <div id="speaker-map-fields" class="speaker-map-fields"></div>
         </div>

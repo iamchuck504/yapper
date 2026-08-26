@@ -140,8 +140,8 @@ the Trash refuse the bundle, and check what happens next.
 |---|---:|---|
 | `renderer/app.js` | 3909 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
 | `renderer/startup-switch.js` | 127 | The Start at login switch: what it shows when a call is refused, lost or answered late |
-| `renderer/style.css` | 1860 | Everything visual, light and dark |
-| `renderer/index.html` | 601 | Main window markup |
+| `renderer/style.css` | 1866 | Everything visual, light and dark |
+| `renderer/index.html` | 608 | Main window markup |
 | `renderer/bubble.html` | 198 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
 | `renderer/bubble.js` | 181 | Its behaviour, including sizing itself to its own contents |
 | `renderer/splash.html` | 116 | Boot screen, including the first-run calibration status; follows the theme |
