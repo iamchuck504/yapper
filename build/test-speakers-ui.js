@@ -46,8 +46,14 @@ app.whenReady().then(async () => {
 
   await $(`openMeetingByFolder(${JSON.stringify(folder)})`);
   await new Promise(r => setTimeout(r, 400));
-  check('speaker matching panel appears',
-    !(await $(`document.getElementById('speaker-map').classList.contains('hidden')`)), 'panel is hidden');
+  check('optional speaker matching control appears',
+    !(await $(`document.getElementById('speaker-map').classList.contains('hidden')`)), 'control is hidden');
+  check('speaker matching is collapsed by default',
+    !(await $(`document.getElementById('speaker-map').open`)), 'control is open');
+  check('the control identifies itself as optional',
+    /Identify speakers\s+Optional/i.test(await $(`document.querySelector('#speaker-map summary').textContent`)),
+    await $(`document.querySelector('#speaker-map summary').textContent`));
+  await $(`document.getElementById('speaker-map').open = true`);
   const speakerInputs = await $(`document.querySelectorAll('#speaker-map-fields input').length`);
   check('recorder and two remote voices are offered', speakerInputs === 3, speakerInputs);
   const participantOptions = await $(`document.querySelectorAll('#speaker-name-options option').length`);

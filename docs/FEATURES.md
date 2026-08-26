@@ -223,7 +223,8 @@ time to first notes, and total note-writing time.
 
 On macOS 14 or newer, the final local pass also separates distinct voices on
 the remote/system track as **Speaker 1**, **Speaker 2**, and so on. The meeting
-shows a **Who is speaking?** panel: choose or type each person's name, then use
+shows a collapsed **Identify speakers (optional)** control: open it only when
+you want to choose or type each person's name, then use
 **Regenerate** to update the notes with those names. Labels remain stable within
 that meeting; Yapper does not infer a person's identity from the attendee list.
 Those technical labels stay in the full transcript and matching panel, not the

@@ -2177,6 +2177,9 @@ function openMeetingView(title, summary, transcript, hasRecording = true, partic
   showGenerationTiming(timing);
   participantsMeet.value = participants || '';
   clearTimeout(speakerSaveTimer);
+  // Speaker identification is useful when names matter, but it is optional and
+  // should not occupy every meeting until the user asks for it.
+  speakerMapEl.open = false;
   paintSpeakerMap(speakers || []);
   transcriptEl.textContent = transcript || '(no transcript)';
   btnRegen.disabled = !transcript;

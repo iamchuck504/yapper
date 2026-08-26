@@ -138,10 +138,10 @@ the Trash refuse the bundle, and check what happens next.
 
 | File | Lines | Responsibility |
 |---|---:|---|
-| `renderer/app.js` | 3906 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
+| `renderer/app.js` | 3909 | Main window: capture graph, views, progressive/cancelable notes, exports, reminders, search, digests, settings |
 | `renderer/startup-switch.js` | 127 | The Start at login switch: what it shows when a call is refused, lost or answered late |
-| `renderer/style.css` | 1782 | Everything visual, light and dark |
-| `renderer/index.html` | 595 | Main window markup |
+| `renderer/style.css` | 1860 | Everything visual, light and dark |
+| `renderer/index.html` | 601 | Main window markup |
 | `renderer/bubble.html` | 198 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
 | `renderer/bubble.js` | 181 | Its behaviour, including sizing itself to its own contents |
 | `renderer/splash.html` | 116 | Boot screen, including the first-run calibration status; follows the theme |
@@ -885,7 +885,7 @@ run can never touch a real meeting):
 | `test-search-ui.js` | The search view against a real model: results carry their meeting, date, timestamp and participants, a result opens its meeting, nothing-found says so, and a question about something never discussed returns no answer rather than an invented one |
 | `test-home-ui.js` | The day and the week against a real model: only today's meetings and decisions appear, every line opens its source, an empty day offers the last one that had something, the weekly review cites real meetings and does not repeat the task list, and a week with one set of notes is explained rather than written |
 | `test-actions-ui.js` | The action list: filters, the meeting each item came from, and completing one |
-| `test-speakers-ui.js` | The speaker-matching panel through the real IPC: participant suggestions, immediate transcript update, immutable raw labels and names surviving reopen |
+| `test-speakers-ui.js` | The optional, collapsed speaker-matching control through the real IPC: participant suggestions, immediate transcript update, immutable raw labels and names surviving reopen |
 | `test-silence-warning.js` | A microphone delivering exact zeros — the asleep wireless headset — is announced on screen within seconds, the recording keeps going, and the warning clears itself when the device wakes |
 | `test-mic-permission-ui.js` | An explicit macOS microphone refusal keeps its actionable Privacy & Security instructions on screen instead of being overwritten by a generic no-audio warning |
 | `test-bubble-corner.js` | Which corner the capsule appears in: measured geometrically against the display's work area rather than by reading the setting back, including that a resize keeps it in the corner instead of walking it out |

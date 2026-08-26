@@ -423,14 +423,20 @@
         <input id="participants-meet" type="text" placeholder="Participants — add names, then Regenerate to attribute the notes by person" autocomplete="off" spellcheck="false" />
       </div>
 
-      <div id="speaker-map" class="speaker-map hidden">
-        <div class="speaker-map-copy">
-          <strong>Who is speaking?</strong>
-          <span>Match the detected voices to names. The transcript updates now; Regenerate updates the notes.</span>
+      <details id="speaker-map" class="speaker-map hidden">
+        <summary>
+          <strong>Identify speakers</strong>
+          <span>Optional</span>
+        </summary>
+        <div class="speaker-map-body">
+          <div class="speaker-map-copy">
+            <strong>Match voices to names</strong>
+            <span>The transcript updates now; Regenerate updates the notes.</span>
+          </div>
+          <div id="speaker-map-fields" class="speaker-map-fields"></div>
         </div>
-        <div id="speaker-map-fields" class="speaker-map-fields"></div>
         <datalist id="speaker-name-options"></datalist>
-      </div>
+      </details>
 
       <div id="regen-status" class="hidden"></div>
       <div id="notes"></div>
