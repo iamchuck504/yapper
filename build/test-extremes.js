@@ -102,15 +102,15 @@ app.whenReady().then(async () => {
   say('\n--- 3. awkward text ---');
   const odd = meeting('2026-07-29_1901', {
     'title.txt': 'Reunión con Maya & Chuck — "el 100%" <urgente> #1',
-    'participants.txt': 'Maya Ürsula, Chuck O\'Brien, 田中さん',
-    'transcript.txt': '[00:00:01] Hablamos del 50% y de *esto* y de _aquello_.\n[00:00:09] 田中さん dijo que sí. 🎉',
-    'notes.md': '## Summary [00:01]\nSalió bien — el 100% de acuerdo.\n\n## Action items [00:09]\n- Maya Ürsula: revisar *el informe*\n'
+    'participants.txt': 'Maya, Chuck, Sebastian',
+    'transcript.txt': '[00:00:01] Hablamos del 50% y de *esto* y de _aquello_.\n[00:00:09] Maya confirmó el envío a São Paulo. 🎉',
+    'notes.md': '## Summary [00:01]\nSalió bien — el 100% de acuerdo.\n\n## Action items [00:09]\n- Maya: revisar *el informe* de São Paulo\n'
   });
   const loaded = await $(`window.yapper.loadMeeting(${JSON.stringify(odd)})`);
   check('reads a title with accents, quotes and symbols',
     loaded.title.includes('Maya') && loaded.title.includes('100%'), loaded.title);
-  check('reads participants with non-Latin characters',
-    loaded.participants.includes('田中'), loaded.participants);
+  check('reads only the approved placeholder participants',
+    loaded.participants === 'Maya, Chuck, Sebastian', loaded.participants);
 
   await $(`(async () => {
     currentFolder = ${JSON.stringify(odd)};
@@ -126,14 +126,14 @@ app.whenReady().then(async () => {
   check('the title is shown as it is', shown.title.includes('<urgente>'), shown.title);
   check('does not read the text as HTML', !shown.escaped, 'put raw tags into the DOM');
   check('the notes keep the emoji and the accents',
-    shown.notes.includes('Ürsula'), shown.notes.slice(0, 80));
+    shown.notes.includes('São Paulo'), shown.notes.slice(0, 80));
 
   const exp = await $(`runExport('md')`);
   check('exports a title with characters a filename cannot hold',
     !!exp && fs.existsSync(exp), String(exp));
   if (exp && fs.existsSync(exp)) {
     check('what was exported keeps the text',
-      fs.readFileSync(exp, 'utf8').includes('Ürsula'), 'something was lost');
+      fs.readFileSync(exp, 'utf8').includes('São Paulo'), 'something was lost');
   }
 
   // ---- 4. empty and absurd ----

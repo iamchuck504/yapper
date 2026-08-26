@@ -40,8 +40,8 @@ The team settled the new pricing.
 - Maya: write the pricing page copy
 `);
 
-meeting('2026-07-20_1400', 'Atlas Migration', 'Carlos, Chuck',
-  `[00:00:05] Carlos: the Atlas vendor cannot deliver until August.
+meeting('2026-07-20_1400', 'Atlas Migration', 'Robert, Chuck',
+  `[00:00:05] Robert: the Atlas vendor cannot deliver until August.
 [00:00:45] So project Atlas slips by two weeks.
 [00:01:30] Nothing about pricing here.`,
   `## Summary [00:05]
@@ -51,7 +51,7 @@ Atlas is delayed by the vendor.
 - Project Atlas slips two weeks.
 
 ## Action items [00:05]
-- Carlos: chase the vendor for a firm date
+- Robert: chase the vendor for a firm date
 `);
 
 require('../main.js');

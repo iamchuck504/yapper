@@ -231,8 +231,9 @@ let theme = THEMES.includes(window.yapper.theme) ? window.yapper.theme : 'dark';
 localStorage.removeItem('yapper-theme');
 
 const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+let systemTheme = systemDark.matches ? 'dark' : 'light';
 const resolvedTheme = () =>
-  theme === 'auto' ? (systemDark.matches ? 'dark' : 'light') : theme;
+  theme === 'auto' ? systemTheme : theme;
 
 function applyTheme() {
   const showing = resolvedTheme();
@@ -252,7 +253,14 @@ function setTheme(next) {
 
 // On auto, the system can change under a running app — at sunset, or when
 // someone flips it in System Settings. Following it is the whole point.
-systemDark.addEventListener('change', () => { if (theme === 'auto') applyTheme(); });
+function systemThemeChanged(showing) {
+  const next = showing === 'dark' ? 'dark' : 'light';
+  if (systemTheme === next) return;
+  systemTheme = next;
+  if (theme === 'auto') applyTheme();
+}
+systemDark.addEventListener('change', e => systemThemeChanged(e.matches ? 'dark' : 'light'));
+window.yapper.onSystemTheme(systemThemeChanged);
 
 // The button beside the title is the quick way, and it commits to a side:
 // flipping "auto" would otherwise land on whatever the system already was.

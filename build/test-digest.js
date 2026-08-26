@@ -68,7 +68,7 @@ const standup = meeting('2026-07-29_0900', {
   ]
 });
 const review = meeting('2026-07-29_1400', {
-  title: 'Design Review', participants: ['Chuck', 'Carlos'],
+  title: 'Design Review', participants: ['Chuck', 'Robert'],
   sections: [
     { heading: 'Decisions', body: 'None' },
     { heading: 'Open questions', body: '- Who owns the migration script?' }
@@ -84,7 +84,7 @@ const MEETINGS = [standup, review, untouched, lastWeek];
 const ITEMS = [
   { text: 'update the changelog', owner: 'Maya', due: '', priority: 'normal', done: false, folder: standup.folder, meeting: 'Standup', sources: [standup.folder] },
   { text: 'fix the login bug', owner: '', due: '', priority: 'high', done: false, folder: review.folder, meeting: 'Design Review', sources: [review.folder] },
-  { text: 'send the vendor contract', owner: 'Carlos', due: 'July 24', priority: 'normal', done: false, folder: lastWeek.folder, meeting: 'Planning', sources: [lastWeek.folder] },
+  { text: 'send the vendor contract', owner: 'Robert', due: 'July 24', priority: 'normal', done: false, folder: lastWeek.folder, meeting: 'Planning', sources: [lastWeek.folder] },
   { text: 'book the venue', owner: 'Chuck', due: 'August 12', priority: 'normal', done: false, folder: lastWeek.folder, meeting: 'Planning', sources: [lastWeek.folder] },
   { text: 'archive the old repo', owner: 'Chuck', due: 'July 20', priority: 'normal', done: true, folder: lastWeek.folder, meeting: 'Planning', sources: [lastWeek.folder] }
 ];
@@ -148,7 +148,7 @@ check('last week is left out',
   facts.meetings.some(m => m.title === 'Planning'), false);
 check('counts the decisions of the week', facts.decisionCount, 2);
 check('people, by how often they came up',
-  facts.people.map(p => `${p.name}:${p.count}`), ['Chuck:2', 'Carlos:1', 'Maya:1']);
+  facts.people.map(p => `${p.name}:${p.count}`), ['Chuck:2', 'Maya:1', 'Robert:1']);
 check('the days with a meeting', facts.days, [{ date: '2026-07-29', count: 3 }]);
 check('meetings without notes are flagged',
   facts.missingNotes.map(m => m.title), ['Sync']);

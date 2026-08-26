@@ -109,17 +109,17 @@ const VOICES = {
     'I checked the latest prototype and the main workflow is responding correctly.',
     'I will review the action list before the next project checkpoint.'
   ] },
-  Atlas: { voice: 'Daniel', name: 'Alex', phrases: [
+  Atlas: { voice: 'Daniel', name: 'Sebastian', phrases: [
     'The launch checklist is current, and the accessibility review is assigned.',
     'The customer feedback confirms that faster meeting notes are the priority.',
     'I will send the updated rollout plan after this meeting.'
   ] },
-  Beacon: { voice: 'Moira', name: 'Brooke', phrases: [
+  Beacon: { voice: 'Moira', name: 'Robert', phrases: [
     'The performance measurements remain within the expected operating range.',
     'I reviewed the transcription sample and the timestamps stayed in order.',
     'The next test should include a long silence followed by returning voices.'
   ] },
-  Cedar: { voice: 'Fred', name: 'Casey', phrases: [
+  Cedar: { voice: 'Fred', name: 'Maya', phrases: [
     'The support guide now explains how participants can be matched to their names.',
     'I will confirm the export files and share the final quality report.',
     'The team agreed to keep unknown identities as numbered speaker labels.'
@@ -330,18 +330,18 @@ llm.generate = async (_config, { system, input, onDelta, signal }) => {
     'YAPPER_TITLE: Three Hour Launch Rehearsal',
     '',
     '## Summary [00:05]',
-    'Chuck, Alex, Brooke, and Casey reviewed a controlled three-hour release rehearsal.',
+    'Chuck, Sebastian, Robert, and Maya reviewed a controlled three-hour release rehearsal.',
     '',
     '## Discussion points [25:00]',
-    'Alex reviewed the rollout plan, Brooke tracked transcription performance, and Casey checked exports.',
+    'Sebastian reviewed the rollout plan, Robert tracked transcription performance, and Maya checked exports.',
     '',
     '## Decisions [88:00]',
     'The group retained exact identities and verified recovery after the planned silent interval.',
     '',
     '## Action items [150:25]',
-    '- Alex will send the rollout plan.',
-    '- Brooke will retain the performance measurements.',
-    '- Casey will share the quality report.',
+    '- Sebastian will send the rollout plan.',
+    '- Robert will retain the performance measurements.',
+    '- Maya will share the quality report.',
     '',
     `## Next steps [${String(Math.floor((DURATION_SEC - 20) / 60)).padStart(2, '0')}:${String((DURATION_SEC - 20) % 60).padStart(2, '0')}]`,
     'Chuck will review the final build before the next checkpoint.'
@@ -393,7 +393,7 @@ app.whenReady().then(async () => {
     say('\n--- 2. accelerated recording IPC soak ---');
     const recordRss = rss();
     const tRecord = Date.now();
-    const folder = await $(`window.yapper.recordingStart('Chuck, Alex, Brooke, Casey')`);
+    const folder = await $(`window.yapper.recordingStart('Chuck, Sebastian, Robert, Maya')`);
     // One-second chunks preserve the recorder's append-only behavior while the
     // renderer batches one minute per round trip so the simulation stays fast.
     for (let minute = 0; minute < MINUTES; minute++) {
@@ -499,12 +499,12 @@ app.whenReady().then(async () => {
     }
     const mapped = await $(`window.yapper.setSpeakerMap(${JSON.stringify(folder)}, ${JSON.stringify(speakerMap)})`);
     const mappedTranscript = mapped.transcript || '';
-    check('all four assigned names are persisted', ['Chuck', 'Alex', 'Brooke', 'Casey'].every(name =>
+    check('all four assigned names are persisted', ['Chuck', 'Sebastian', 'Robert', 'Maya'].every(name =>
       mappedTranscript.includes(`${name}:`)), Object.keys(speakerMap).join(', '));
     const tNotes = Date.now();
     const draft = await $(`window.yapper.generateNotes(${JSON.stringify(folder)}, {
       style: 'general', detail: 'concise', custom: '',
-      participants: 'Chuck, Alex, Brooke, Casey', markers: ['00:25:00', '02:30:25']
+      participants: 'Chuck, Sebastian, Robert, Maya', markers: ['00:25:00', '02:30:25']
     }, true)`);
     metrics.notes = { wallMs: Date.now() - tNotes, ...draft.metrics };
     check('notes begin streaming quickly', draft.metrics.firstTextMs !== null && draft.metrics.firstTextMs < 250,
@@ -518,7 +518,7 @@ app.whenReady().then(async () => {
       `${noteInput.length} characters, last stamp ${Math.max(...noteStamps)}`);
     check('the notes instruction forbids vague speaker references', /instead of vague phrases such as "the speaker"/i.test(noteSystem));
     check('generated notes use names and never “the speaker”',
-      ['Alex', 'Brooke', 'Casey'].every(name => draft.summary.includes(name))
+      ['Sebastian', 'Robert', 'Maya'].every(name => draft.summary.includes(name))
       && !/the speaker/i.test(draft.summary));
 
     say('\n--- 6. reopen UI and exports ---');
@@ -550,7 +550,7 @@ app.whenReady().then(async () => {
           catch { window.__soakLive.push({ error: 'invalid live payload' }); }
         });
       })()`);
-      const liveStarted = await $(`window.yapper.liveStart('Chuck, Alex, Brooke, Casey')`);
+      const liveStarted = await $(`window.yapper.liveStart('Chuck, Sebastian, Robert, Maya')`);
       check('live preview starts', liveStarted === true, String(liveStarted));
       if (liveStarted) {
         const blockBytes = BPS / 5;

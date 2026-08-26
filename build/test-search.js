@@ -49,17 +49,17 @@ const MEETINGS = [
   },
   {
     folder: 'f2', name: '2026-07-20_1400', title: 'Atlas Migration', date: '2026-07-20',
-    participants: ['Carlos', 'Chuck'],
+    participants: ['Robert', 'Chuck'],
     sections: [
       { heading: 'Decisions', body: '- Atlas migration is pushed two weeks.' },
-      { heading: 'Action items', body: '- Carlos: talk to the vendor about the delay' }
+      { heading: 'Action items', body: '- Robert: talk to the vendor about the delay' }
     ]
   },
   {
     folder: 'f3', name: '2026-06-02_0900', title: 'Launch Retro', date: '2026-06-02',
-    participants: ['Maria', 'Chuck'],
+    participants: ['Maya', 'Chuck'],
     sections: [
-      { heading: 'Summary', body: 'Maria walked through how the launch went.' },
+      { heading: 'Summary', body: 'Maya walked through how the launch went.' },
       { heading: 'Decisions', body: '- No changes to the launch process.' }
     ]
   }
@@ -67,11 +67,11 @@ const MEETINGS = [
 
 const TRANSCRIPTS = {
   f1: transcript,
-  f2: `[00:00:05] Carlos here. The Atlas vendor cannot deliver until August.
+  f2: `[00:00:05] Robert here. The Atlas vendor cannot deliver until August.
 [00:00:40] So Atlas slips two weeks, we agreed.
 [00:02:00] Pricing is not in scope for this one.`,
-  f3: `[00:00:03] Maria: the launch went better than we expected.
-[00:00:30] Maria said the onboarding emails were the weak part.`
+  f3: `[00:00:03] Maya: the launch went better than we expected.
+[00:00:30] Maya said the onboarding emails were the weak part.`
 };
 
 const index = s.buildIndex(MEETINGS, m => TRANSCRIPTS[m.folder] || '');
@@ -104,12 +104,12 @@ eq('and one of pure filler words does not either', find('the and of').results.le
 
 // ---------------------------------------------------------------- people
 
-r = find('what did Maria say about the launch');
+r = find('what did Maya say about the launch');
 eq('a question about a person finds it', titles(r)[0], 'Launch Retro');
 eq('and it detects it as a question', r.query.question, true);
-check('recognising the name', r.query.people.includes('Maria'), JSON.stringify(r.query.people));
+check('recognising the name', r.query.people.includes('Maya'), JSON.stringify(r.query.people));
 
-r = find('show me the pending items assigned to Carlos');
+r = find('show me the pending items assigned to Robert');
 check('a person action items come from their meeting',
   r.results.some(x => x.meeting.title === 'Atlas Migration'), JSON.stringify(titles(r)));
 check('and it prioritises the action items section',

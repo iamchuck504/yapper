@@ -366,7 +366,7 @@ record: it is what the notes come from, what you read, search and export.
 
 That is 110 MB per hour that would otherwise be about 4.8 GB a month for one
 daily meeting — and a recording of your colleagues is more sensitive than its
-transcript. another meeting-notes app does the same.
+transcript.
 
 The rules around it:
 

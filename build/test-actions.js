@@ -19,7 +19,7 @@ It went fine.
 - Maya: prepare the rollout plan by Friday
 - **Chuck** — review the pricing deck
 - Send the contract to legal
-- Richard: sign off on the budget by March 3
+- Sebastian: sign off on the budget by March 3
 - URGENT: fix the login bug
 
 ## Open questions [02:40]
@@ -76,7 +76,7 @@ check('different owners are not merged',
 check('if one has no owner, yes',
   a.isDuplicate({ text: 'review the deck', owner: '' }, { text: 'review the deck', owner: 'Chuck' }), true);
 check('a full name matches the first name',
-  a.isDuplicate({ text: 'review the deck', owner: 'Maya' }, { text: 'review the deck', owner: 'Maya Ursula' }), true);
+  a.isDuplicate({ text: 'review the deck', owner: 'Maya' }, { text: 'review the deck', owner: 'Maya Sebastian' }), true);
 
 // ---------------------------------------------------------------- merging
 

@@ -46,6 +46,9 @@ Current `0.1.13` handoff (updated 2026-08-26):
 ## 3. Build-only gates — do not publish
 
 - [ ] `npm ci`
+- [ ] `npm run test:windows:package` (runs the automated pure, Electron,
+  dependency, icon, unpacked-build, package-verification, installer, and
+  update-manifest gates)
 - [ ] `npm test`
 - [ ] `npm audit --audit-level=high`
 - [ ] `npx electron-builder --win --dir --publish never`
@@ -73,7 +76,7 @@ Use an isolated `YAPPER_HOME` wherever the test supports it.
   - `build/test-import.js`
   - `build/test-tray.js`
   - `build/test-app-menu.js`
-- [ ] Run `node build/icon-verify.js`; inspect desktop, Start menu, taskbar,
+- [ ] Run `npx electron build/icon-verify.js`; inspect desktop, Start menu, taskbar,
   Alt-Tab, and pinned icons.
 - [ ] Install the NSIS EXE as a normal user and confirm it needs no admin
   rights.

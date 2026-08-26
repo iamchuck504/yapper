@@ -104,7 +104,7 @@ app.whenReady().then(async () => {
   say('--- 1. grabando ---');
   const t1 = Date.now();
   const folder = await $(`(async () => {
-    const f = await window.yapper.recordingStart('Maya, Chuck, Richard');
+    const f = await window.yapper.recordingStart('Maya, Chuck, Sebastian');
     paused = false; recording = true; markers = []; elapsedMs = 0; runStart = Date.now();
     return f;
   })()`);
@@ -229,7 +229,7 @@ app.whenReady().then(async () => {
   const draft = await within(
     $(`window.yapper.generateNotes(${JSON.stringify(folder)},
       { style: 'general', detail: 'concise', custom: '',
-        participants: 'Maya, Chuck, Richard', markers: ['00:12:30', '01:05:00'] }, true)
+        participants: 'Maya, Chuck, Sebastian', markers: ['00:12:30', '01:05:00'] }, true)
       .then(n => n, e => ({ error: e.message }))`),
     'generating notes and title from two hours', 10 * 60 * 1000);
   const notes = draft && draft.summary;

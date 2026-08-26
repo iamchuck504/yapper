@@ -19,8 +19,20 @@ const audio = path.join(meeting, 'recording.wav');
 const outsideFile = path.join(outside, 'secret.txt');
 fs.writeFileSync(audio, 'audio');
 fs.writeFileSync(outsideFile, 'secret');
-fs.symlinkSync(outside, path.join(root, 'linked-meeting'));
-fs.symlinkSync(outsideFile, path.join(meeting, 'linked-audio.wav'));
+// Directory junctions exercise the same realpath escape on Windows without
+// requiring Developer Mode or an elevated shell. File symlinks do require one,
+// so keep those assertions when the host permits them and report an explicit
+// skip otherwise. A normal `npm test` must be runnable by the same unprivileged
+// user that runs Yapper.
+fs.symlinkSync(outside, path.join(root, 'linked-meeting'),
+  process.platform === 'win32' ? 'junction' : 'dir');
+let hasFileSymlink = true;
+try {
+  fs.symlinkSync(outsideFile, path.join(meeting, 'linked-audio.wav'), 'file');
+} catch (err) {
+  if (process.platform !== 'win32' || !['EPERM', 'EACCES'].includes(err.code)) throw err;
+  hasFileSymlink = false;
+}
 
 let fails = 0;
 function check(name, fn, expected = true) {
@@ -46,18 +58,24 @@ rejects('rejects an empty path', () => resolveDirectChild(root, ''));
 
 check('accepts a user-selected regular file', () => resolveRegularFile(outsideFile) === fs.realpathSync(outsideFile));
 check('accepts a direct regular meeting file', () => resolveDirectFile(meeting, audio) === fs.realpathSync(audio));
-rejects('rejects a meeting-file symlink', () => resolveDirectFile(meeting, path.join(meeting, 'linked-audio.wav')));
+if (hasFileSymlink) {
+  rejects('rejects a meeting-file symlink', () => resolveDirectFile(meeting, path.join(meeting, 'linked-audio.wav')));
+} else {
+  console.log('skip  file-symlink checks need Windows Developer Mode or elevation');
+}
 rejects('rejects a file outside the meeting', () => resolveDirectFile(meeting, outsideFile));
 check('returns a safe canonical path for a new meeting file',
   () => resolveDirectFileForWrite(meeting, path.join(meeting, 'new.txt'))
     === path.join(fs.realpathSync(meeting), 'new.txt'));
 
-rejects('bounded meeting reads reject an internal symlink',
-  () => readMeetingText(meeting, 'linked-audio.wav', { required: true }));
-rejects('bounded meeting writes reject an internal symlink',
-  () => writeMeetingText(meeting, 'linked-audio.wav', 'replacement'));
-check('rejected write leaves the outside target untouched',
-  () => fs.readFileSync(outsideFile, 'utf8') === 'secret');
+if (hasFileSymlink) {
+  rejects('bounded meeting reads reject an internal symlink',
+    () => readMeetingText(meeting, 'linked-audio.wav', { required: true }));
+  rejects('bounded meeting writes reject an internal symlink',
+    () => writeMeetingText(meeting, 'linked-audio.wav', 'replacement'));
+  check('rejected write leaves the outside target untouched',
+    () => fs.readFileSync(outsideFile, 'utf8') === 'secret');
+}
 check('missing optional meeting text reads as empty',
   () => readMeetingText(meeting, 'missing.txt') === '');
 check('missing meeting file is reported absent',

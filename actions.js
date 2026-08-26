@@ -107,7 +107,7 @@ function splitOwner(line) {
 
   const looksLikeName = words.length <= 4
     && !NOT_A_NAME.test(candidate)
-    // ALL CAPS is a label, not a name: nobody writes Maya: in their notes
+    // ALL CAPS is a label, not a name: nobody writes MAYA: in their notes
     && candidate !== candidate.toUpperCase()
     && !/\b(and|the|to|for|with|about|review|send|write|check|prepare|follow|decide|discuss)\b/i.test(candidate)
     && /^[\p{Lu}\p{L}]/u.test(candidate);

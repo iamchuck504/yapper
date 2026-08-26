@@ -1,9 +1,8 @@
 """Generate the Yapper app icon (.ico + preview .png).
 
 The mark is two strokes merging into one: several voices going in, a single set
-of notes coming out. It is deliberately not a picture of audio — the marks that
-stand out (Claude's burst, another meeting-notes app's spiral) are abstract, and the tile carries
-the accent colour so the icon does not vanish in a dock or taskbar.
+of notes coming out. It is deliberately not a picture of audio: the abstract
+shape and accent colour keep the icon visible in a dock or taskbar.
 """
 import os
 

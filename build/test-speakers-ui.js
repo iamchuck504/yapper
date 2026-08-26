@@ -19,7 +19,7 @@ const raw = [
 ].join('\n');
 fs.writeFileSync(path.join(folder, 'transcript.raw.txt'), raw, 'utf8');
 fs.writeFileSync(path.join(folder, 'transcript.txt'), raw, 'utf8');
-fs.writeFileSync(path.join(folder, 'participants.txt'), 'Chuck, Maya, Carlos', 'utf8');
+fs.writeFileSync(path.join(folder, 'participants.txt'), 'Chuck, Maya, Robert', 'utf8');
 fs.writeFileSync(path.join(folder, 'title.txt'), 'Release Plan', 'utf8');
 fs.writeFileSync(path.join(folder, 'notes.md'), '## Summary [00:01]\nThe group planned the release.', 'utf8');
 const legacyFolder = path.join(ROOT, 'Meetings', '2026-08-21_0930');
@@ -71,7 +71,7 @@ app.whenReady().then(async () => {
   check('participant names are offered as suggestions', participantOptions === 3, participantOptions);
 
   await $(`(() => {
-    const names = { Me: 'Chuck', 'Speaker 1': 'Maya', 'Speaker 2': 'Carlos' };
+    const names = { Me: 'Chuck', 'Speaker 1': 'Maya', 'Speaker 2': 'Robert' };
     document.querySelectorAll('#speaker-map-fields input').forEach(input => {
       input.value = names[input.dataset.speaker];
       input.dispatchEvent(new Event('change', { bubbles: true }));
@@ -82,7 +82,7 @@ app.whenReady().then(async () => {
   const transcript = fs.readFileSync(path.join(folder, 'transcript.txt'), 'utf8');
   check('names are persisted into the working transcript',
     /Maya: We can ship/.test(transcript) && /Chuck: I will verify/.test(transcript)
-      && /Carlos: I will tell/.test(transcript), transcript);
+      && /Robert: I will tell/.test(transcript), transcript);
   check('the immutable labelled transcript is untouched',
     fs.readFileSync(path.join(folder, 'transcript.raw.txt'), 'utf8'), raw);
   check('the rendered transcript updates immediately',
@@ -96,7 +96,7 @@ app.whenReady().then(async () => {
   const expectedSpeakers = [
     { label: 'Me', name: 'Chuck' },
     { label: 'Speaker 1', name: 'Maya' },
-    { label: 'Speaker 2', name: 'Carlos' }
+    { label: 'Speaker 2', name: 'Robert' }
   ];
   check('speaker names survive reopening',
     JSON.stringify(reopened.speakers) === JSON.stringify(expectedSpeakers), JSON.stringify(reopened.speakers));

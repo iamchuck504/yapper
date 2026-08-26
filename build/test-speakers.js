@@ -58,28 +58,28 @@ const rawTranscript = merged.join('\n');
 const named = speakers.applySpeakerMap(rawTranscript, {
   Me: 'Chuck',
   'Speaker 1': 'Maya',
-  'Speaker 2': 'Carlos'
+  'Speaker 2': 'Robert'
 });
 check('speaker names replace labels only at line prefixes', named.split('\n'), [
   '[00:00:01] Maya: First voice begins.',
   '[00:00:02] Chuck: My response.',
-  '[00:00:04] Carlos: A different voice answers.',
+  '[00:00:04] Robert: A different voice answers.',
   '[00:00:08] Maya: The first voice returns.'
 ]);
 check('remapping always works from the immutable raw transcript',
-  speakers.applySpeakerMap(rawTranscript, { 'Speaker 1': 'Ana' }).includes('Ana: First voice'), true);
+  speakers.applySpeakerMap(rawTranscript, { 'Speaker 1': 'Maya' }).includes('Maya: First voice'), true);
 check('speaker-like words inside speech are untouched',
   speakers.applySpeakerMap('[00:00:01] Speaker 1: I said Speaker 2: as an example.', {
-    'Speaker 1': 'Ana', 'Speaker 2': 'Luis'
-  }), '[00:00:01] Ana: I said Speaker 2: as an example.');
+    'Speaker 1': 'Maya', 'Speaker 2': 'Robert'
+  }), '[00:00:01] Maya: I said Speaker 2: as an example.');
 check('unsafe map keys and multiline names are rejected or cleaned',
-  speakers.normalizeSpeakerMap({ '__proto__': 'bad', 'Speaker 1': ' Ana:\nAdmin ' }),
-  { 'Speaker 1': 'Ana Admin' });
+  speakers.normalizeSpeakerMap({ '__proto__': 'bad', 'Speaker 1': ' Maya:\nRobert ' }),
+  { 'Speaker 1': 'Maya Robert' });
 check('load state lists recorder first, then numbered voices',
-  speakers.speakerState(rawTranscript, { 'Speaker 2': 'Carlos' }), [
+  speakers.speakerState(rawTranscript, { 'Speaker 2': 'Robert' }), [
     { label: 'Me', name: '' },
     { label: 'Speaker 1', name: '' },
-    { label: 'Speaker 2', name: 'Carlos' }
+    { label: 'Speaker 2', name: 'Robert' }
   ]);
 
 check('notes generalize numbered voices without merging a disagreement',

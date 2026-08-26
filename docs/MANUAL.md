@@ -14,8 +14,7 @@ is about using it and judging it.
 If you only want to get it running, the step-by-step guides are shorter and
 newer: **[Installing on Windows](INSTALL-WINDOWS.md)**, **[Installing on
 macOS](INSTALL-MACOS.md)**, and **[what every feature does](FEATURES.md)**. This
-document keeps the honest assessment — what works, what is missing, and how it
-compares to another meeting-notes app in both directions.
+document keeps the honest assessment — what works and what is missing.
 
 ---
 
@@ -190,8 +189,7 @@ saves a partial response, and restores the prior notes during a rewrite.
 **The audio's job ends with the transcript.** Once a real transcript exists,
 the recording is deleted — the transcript is the record. A per-meeting toggle
 (off by default, resets every session) keeps one meeting's audio when that is
-wanted. This is the same posture another meeting-notes app takes, and it is the reason a year of
-meetings costs megabytes, not gigabytes.
+wanted. This is why a year of meetings costs megabytes, not gigabytes.
 
 ### Action items
 
@@ -342,79 +340,7 @@ UI; several are deliberate trade-offs, marked as such.
 
 ---
 
-## 5. Yapper vs another meeting-notes app
-
-another meeting-notes app facts below are from another meeting-notes app's own security documentation and 2026
-reviews (sources at the end); worth re-verifying at decision time since the
-product moves fast.
-
-The philosophical difference, one line: **another meeting-notes app is a cloud service with a
-local capture client; Yapper is a local application, full stop.**
-
-| | Yapper | another meeting-notes app |
-|---|---|---|
-| Capture | System audio + mic, no bot in the call | Same approach, no bot |
-| Transcription | **On the machine** (whisper.cpp) | **In the cloud** (audio flows to Deepgram/AssemblyAI/OpenAI, deleted after) |
-| Audio retention | Deleted after transcript; per-meeting keep toggle | Deleted after transcription |
-| Where notes live | Plain files in `Documents\Meetings` | AWS-hosted cloud (encrypted), synced |
-| Notes LLM | User's choice: Claude CLI, Gemini free, OpenRouter, Ollama (local), Anthropic, any compatible | Managed (GPT-4o / Claude) |
-| Speaker separation | None | Two-speaker (you vs. others) |
-| Calendar | None | Integrated (meetings, titles, upcoming) |
-| Platforms | Windows, macOS (Apple Silicon) | macOS, Windows, iOS |
-| Sharing / teams | None | Links, workspaces, Notion/HubSpot/Slack/Zapier, API (Enterprise) |
-| Account | None | Required |
-| History limit | None — it is the user's disk | Free plan capped at 25 meetings |
-| Price | $0 + optional BYOK usage | Free (capped) / $14 / $35 per user/month |
-| Offline | Record + transcribe fully offline | Needs the cloud to transcribe |
-| Code | Owned, modifiable, tested | Closed |
-
-### Where Yapper is genuinely ahead
-
-1. **Audio never leaves the machine.** another meeting-notes app's own docs describe audio
-   flowing through third-party ASR services (then deleted). Yapper's never
-   goes anywhere. With Ollama, even the transcript text stays local — a fully
-   offline pipeline no cloud product can offer.
-2. **Data ownership.** A meeting is a folder: `transcript.txt`, `notes.md`.
-   Grep it, back it up, leave the product with everything. No account, no
-   25-meeting cap, no export request.
-3. **Cost structure.** $0 for the app; notes cost whatever the chosen provider
-   costs, including free (Gemini tier, an existing Claude subscription, or
-   Ollama). another meeting-notes app's real use starts at $14/user/month.
-4. **Grounding enforced by code, not prompts.** Across the app, "nothing
-   invented" is mechanical: an action item's owner exists only if written
-   (`URGENT:` is not a person), a due date only if a date was said, the weekly
-   review drops any bullet citing a meeting that is not there, and Ask answers
-   only from retrieved passages, cited, or refuses. Cloud tools promise this
-   in prompts; Yapper also enforces it after the model responds.
-5. **Adaptation is measured, not assumed** — the calibration tier system, the
-   silence watchdog, the honest empty states. The app states what it cannot do
-   on this machine instead of degrading silently.
-6. **The team owns the code** and the test harness, and the architecture is
-   documented at decision level (ARCHITECTURE.md).
-
-### Where another meeting-notes app is genuinely ahead
-
-1. **It installs without a warning.** Both now install and self-update, but
-   another meeting-notes app's Windows binary is code-signed; Yapper's Windows installer still
-   trips SmartScreen. Yapper's macOS path is signed and notarized, but its first
-   run still downloads the engine where another meeting-notes app is ready immediately.
-2. **Platforms and sync.** Mac + Windows + iPhone, notes following the user.
-   Yapper is one desktop machine with no sync.
-3. **Speaker attribution.** "You said / they said" changes how useful a
-   transcript is, and Yapper has none of it.
-4. **Calendar awareness.** another meeting-notes app knows a meeting is coming, its title and
-   attendees. Yapper notices a microphone in use.
-5. **Transcription robustness on hard audio.** Managed cloud ASR handles
-   accents, crosstalk and bad mics better than a local `small` model.
-6. **Collaboration is a product**: share links, team workspaces, CRM/Notion/
-   Slack integrations, an API tier. Yapper exports files.
-7. **Maturity**: onboarding, auto-updates, support, SOC 2 / GDPR posture, and
-   the polish of thousands of users' feedback. Yapper has one user and a test
-   suite.
-
----
-
-## 6. What closing the gaps would need
+## 5. What closing the gaps would need
 
 Neutral estimates of shape, not commitments; ordered by leverage.
 
@@ -437,20 +363,6 @@ Neutral estimates of shape, not commitments; ordered by leverage.
   channel split above is the cheap first step.
 - **Renderer split** — mechanical refactor of the 2,500-line file into
   modules; no user-visible change, pays down the maintenance cost.
-
----
-
-## 7. Sources for the another meeting-notes app comparison
-
-- [another meeting-notes app — Security](https://www.another meeting-notes app.ai/security) and
-  [Security, Privacy & Data FAQs](https://docs.another meeting-notes app.ai/help-center/consent-security-privacy/security-privacy-data-faqs)
-  (audio to Deepgram/AssemblyAI/OpenAI, deleted after; notes in AWS; no bot)
-- [another meeting-notes app — Local-first vs cloud](https://www.another meeting-notes app.ai/blog/local-first-ai-notetaker-vs-cloud)
-- [another meeting-notes app AI Pricing 2026 — free plan's 25-note cap](https://get-alfred.ai/blog/another meeting-notes app-pricing)
-- [another meeting-notes app AI Review 2026 — Efficient App](https://efficient.app/apps/another meeting-notes app),
-  [work-management.org review](https://work-management.org/productivity-tools/another meeting-notes app-ai-review/),
-  [skillscouter review](https://skillscouter.com/another meeting-notes app-review/)
-  (features, tiers at $14/$35, iOS app, two-speaker detection, GPT-4o/Claude)
 
 All screenshots in this manual are real captures of the current build against
 demo data, regenerable with `build\shoot-manual.js`.

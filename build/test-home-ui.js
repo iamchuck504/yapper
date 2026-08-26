@@ -55,14 +55,14 @@ A short standup about the rollout.
 // … one that was transcribed and never written up …
 meeting(`${TODAY}_1600`, {
   'title.txt': 'Vendor Sync',
-  'participants.txt': 'Chuck, Carlos',
-  'transcript.txt': '[00:00:03] Carlos said the contract is still unsigned.'
+  'participants.txt': 'Chuck, Robert',
+  'transcript.txt': '[00:00:03] Robert said the contract is still unsigned.'
 });
 
 // … a second meeting this week, so the week has a thread to find …
 meeting(`${monday}_1000`, {
   'title.txt': 'Rollout Planning',
-  'participants.txt': 'Chuck, Maya, Carlos',
+  'participants.txt': 'Chuck, Maya, Robert',
   'transcript.txt': '[00:00:02] We planned the rollout for next Tuesday.',
   'notes.md': `## Summary [00:02]
 Planning for the rollout.
@@ -74,7 +74,7 @@ Planning for the rollout.
 - Nobody owns the rollback script.
 
 ## Action items [01:20]
-- Carlos: send the vendor contract by ${OVERDUE}
+- Robert: send the vendor contract by ${OVERDUE}
 `
 });
 

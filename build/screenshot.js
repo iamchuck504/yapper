@@ -36,7 +36,7 @@ app.whenReady().then(async () => {
     '## Summary', 'Weekly sync on the launch. Scope was trimmed to hit Friday.', '',
     '## Key points', '- Payments module passed QA', '- Docs still lag behind the API', '',
     '## Decisions', '- Ship the payments module on Friday', '',
-    '## Action items', '- **Maya:** review the budget before Thursday', '- **Troy:** prep the client demo', '',
+    '## Action items', '- **Maya:** review the budget before Thursday', '- **Sebastian:** prep the client demo', '',
     '## Risks', '- The migration window overlaps with the holiday', '',
     '## Open questions', '- Do we keep the legacy endpoint for one more sprint?', '',
     '## Next steps', '- Reconvene Monday with the rollout plan'

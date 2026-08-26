@@ -212,6 +212,14 @@ function broadcast(channel, payload) {
   }
 }
 
+// Chromium's prefers-color-scheme notification does not reliably follow a
+// nativeTheme update in a running Windows renderer. Main receives the native
+// event on both platforms, so use it as the authoritative wake-up while still
+// letting the renderer's media query cover browser-side changes.
+nativeTheme.on('updated', () => {
+  broadcast('system-theme', nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
+});
+
 // Small always-on-top window showing the live transcript while recording.
 // Where the capsule appears when a recording starts. It does not remember
 // being dragged — every meeting puts it back — so the corner it starts in is
@@ -1114,7 +1122,7 @@ function appIconPath() {
 }
 
 function refreshShortcutIcons() {
-  if (process.platform !== 'win32') return;
+  if (process.platform !== 'win32' || process.env.YAPPER_TEST) return;
   const icon = appIconPath();
   if (!fs.existsSync(icon)) return;
 

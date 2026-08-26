@@ -125,6 +125,11 @@ for (const f of ['preload.js', 'engine.js', 'live.js', 'main.js', 'llm.js',
   check(`existe ${f}`, fs.existsSync(path.join(root, f)), 'the document names it and it is not there');
 }
 check('the README links to the architecture', /ARCHITECTURE\.md/.test(read('README.md')), 'no link');
+check('the Windows sanity runner exists',
+  fs.existsSync(path.join(root, 'build', 'test-windows-sanity.ps1')), 'is missing');
+check('package scripts expose both Windows sanity levels',
+  pkg.scripts['test:windows'] && pkg.scripts['test:windows:package'],
+  JSON.stringify(pkg.scripts));
 
 // --- every test the docs list, exists ---
 const named = [...doc.matchAll(/`((?:test-|icon-)[\w-]+\.js)`/g)].map(m => m[1]);

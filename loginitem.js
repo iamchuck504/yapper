@@ -25,7 +25,10 @@
 //   Fail closed. Every question the filesystem can refuse to answer — realpath,
 //   stat, access — has an outcome here that blocks. None has one that shrugs
 //   and carries on with the path it was handed.
-const path = require('path');
+// Every path this module reasons about is a macOS path, even when its pure
+// safety tests run in Windows CI. Using the host's path rules turned `/` into
+// Windows separators and made containment proofs produce false answers.
+const path = require('path').posix;
 
 /** How this copy of the app is running. */
 const KIND = Object.freeze({

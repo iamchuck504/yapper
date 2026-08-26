@@ -10,7 +10,7 @@ Runs on **Windows** and **macOS (Apple Silicon)**. Both record both sides of a c
 >
 > For architecture and build structure: **[ARCHITECTURE.md](ARCHITECTURE.md)**.
 >
-> **Manual with screenshots + honest assessment** (what it does well, what is missing, and the comparison against another meeting-notes app in both directions): **[docs/MANUAL.md](docs/MANUAL.md)**.
+> **Manual with screenshots + honest assessment** (what it does well and what is still missing): **[docs/MANUAL.md](docs/MANUAL.md)**.
 >
 > **macOS build runbook:** **[mac/README.md](mac/README.md)** — how the engine and native helpers are compiled, and which permissions the app needs.
 >
@@ -21,7 +21,7 @@ Runs on **Windows** and **macOS (Apple Silicon)**. Both record both sides of a c
 > the engine on first run. Publishing a new version: bump `version` in
 > `package.json` and `npm run release`.
 
-## Live (another meeting-notes app-style)
+## Live transcription
 
 - **Streaming transcription.** The renderer sends continuous PCM; `live.js` keeps a rolling 12 s buffer and re-transcribes it every ~0.7 s. A word is only "confirmed" when two consecutive passes agree (LocalAgreement-2); the tentative tail is shown dimmed and corrects itself. Long pauses start a new paragraph.
 - **How far behind it runs.** Measured by replaying a minute of a real meeting at wall-clock speed on an RTX 4080 SUPER: **2.6 s median** between what is said and what is confirmed (worst case 4.8 s). The tentative tail shows up sooner, around 1 s. A safety valve confirms anything that has gone 1.5 s without agreement, so a difficult passage cannot freeze the transcript.
@@ -91,7 +91,7 @@ Measured end to end with a 2 h meeting on the `fast` tier (`build/test-two-hours
 | Opening the meeting | 512 ms |
 | Exporting | .md 8 KB · .txt 159 KB · PDF 133 KB in 497 ms |
 
-**The audio is deleted once transcribed.** The transcript is the record: the notes come from it, it is what you read, search and export, and it is what gets kept. The audio exists to produce it and to survive a power cut along the way; once a transcript is on disk, the recording goes. That is 110 MB per hour which would otherwise be 4.8 GB a month for one daily meeting — and a recording of your colleagues is more sensitive than its transcript. another meeting-notes app does the same: it never stores audio.
+**The audio is deleted once transcribed.** The transcript is the record: the notes come from it, it is what you read, search and export, and it is what gets kept. The audio exists to produce it and to survive a power cut along the way; once a transcript is on disk, the recording goes. That is 110 MB per hour which would otherwise be 4.8 GB a month for one daily meeting — and a recording of your colleagues is more sensitive than its transcript.
 
 - The transcript is written first, the audio released after. A failure in between costs nothing.
 - If transcription **fails**, the audio is kept so you can retry. That is exactly what it is for.
@@ -170,7 +170,7 @@ or the **Yapper** shortcut on the desktop (Windows) / in Applications (macOS).
 - **Note style**: General, Minutes, **Memo**, Stand-up, 1:1, Client call, Brainstorm — changes the sections of the minutes. *Memo* is meant for forwarding to someone who was not there: prose instead of bullets, neutral language, and it says explicitly when something was discussed but not decided.
 - **Detail**: Concise (short bullets) or Detailed (exhaustive).
 - **Extra instructions**: free-form context for Claude (attendees, project, what to focus on).
-- **Participants**: the names are passed to Whisper as an initial prompt, so it stops writing "Maya" as "Nympho". It belongs to **that meeting**, not to your preferences: the field starts empty every time, so last week's names cannot leak into today's minutes.
+- **Participants**: the names are passed to Whisper as an initial prompt, so it can preserve names such as "Maya" accurately. It belongs to **that meeting**, not to your preferences: the field starts empty every time, so last week's names cannot leak into today's minutes.
 - **Deleting meetings**: every sidebar row has a bin that appears on hover. Failed recordings (no audio) are dimmed and labelled *Empty recording*. It always asks first, listing what the folder holds, and it goes to the system trash — it never deletes audio irreversibly.
 - **↻ Regenerate**: redoes the notes of any saved meeting with a different style/detail.
 - **Automatic title**: if you do not type a title, the same model response that writes the notes also names the meeting from what was discussed (2-6 words); if the recording is too thin for that, it falls back to the date. This avoids waiting for a second model request.
@@ -250,6 +250,8 @@ Inside the `.ico`, sizes up to 128 go as **classic DIB** and only 256 as PNG. Ch
 
 ```
 npm test                          # everything that runs without a model or a GPU
+npm run test:windows              # Windows: pure suite plus isolated Electron sanity checks
+npm run test:windows:package      # the same checks, then build and verify the Windows installer
 ```
 
 Individual suites, with plain node:

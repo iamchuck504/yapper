@@ -16,6 +16,10 @@ const { app, BrowserWindow } = require('electron');
  * on its Chromium cache: failing to clean up is not a reason to fail to run.
  */
 function sandbox(name) {
+  // Main uses this to suppress integration with the real Windows shell. A
+  // throwaway userData directory is not enough: Desktop, Start menu and pinned
+  // shortcuts still belong to the signed-in user unless explicitly gated.
+  process.env.YAPPER_TEST = '1';
   const base = path.join(app.getPath('temp'), `yapper-${name}`);
   let root = base;
   try {

@@ -84,9 +84,9 @@ That is not a style preference. macOS 26 runs legacy `.icns` files through an
 appearance pass: on a Mac set to dark icons it darkens the tile and keeps the
 artwork. A near-black mark on a darkened tile is a black slab, which is exactly
 how the icon arrived in the dock on the first build — verified by rendering
-what `NSWorkspace` hands the Finder, and by comparing against another meeting-notes app and
-Claude, whose tiles get darkened too but whose marks carry their own colour and
-survive. An amber mark survives the same way, in either appearance.
+what `NSWorkspace` hands the Finder and comparing it with other coloured app
+marks that survive the same appearance pass. An amber mark survives the same
+way, in either appearance.
 
 `build/icon-dark.js` writes that file from `yapper-icon.png`, with the bundled
 Electron:

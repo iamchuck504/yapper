@@ -33,7 +33,7 @@ The launch review covered readiness, customer communication, support coverage, a
 
 ## Action items [13:20]
 - Maya: publish the final release notes before the rollout begins.
-- Carlos: confirm the support rotation and escalation channel.
+- Robert: confirm the support rotation and escalation channel.
 - Nina: share the activation dashboard with the launch group.
 
 ## Risks [18:05]

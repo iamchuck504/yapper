@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('yapper', {
   // living in localStorage as well, where the renderer's copy and the one main
   // paints the window from could disagree. They did.
   theme: ipcRenderer.sendSync('get-theme'),
+  onSystemTheme: cb => ipcRenderer.on('system-theme', (_e, showing) => cb(showing)),
   getOpenAtLogin: () => invoke('get-open-at-login'),
   getKeepAudio: () => invoke('get-keep-audio'),
   setKeepAudio: keep => invoke('set-keep-audio', keep),

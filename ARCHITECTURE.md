@@ -332,7 +332,7 @@ that actually changed, try again.
 
 ## 5. IPC surface
 
-88 channels, all declared in `preload.js` — that file is the complete list of
+89 channels, all declared in `preload.js` — that file is the complete list of
 what the renderer can do. `build/test-ipc-wiring.js` asserts every channel has a
 counterpart in `main.js` and that nothing is registered but unreachable, because
 a typo here fails at runtime inside a click.
@@ -358,11 +358,13 @@ frame, so there is no round trip to wait for), `recording-state`,
 `autodetect-set`, `spoken-language-set` (the language Whisper is told to expect; `auto` detects on every pass), `mark-shortcut`, `sys-gain` (macOS: the system meter's slider,
 since the mixing it controls happens in main), and five bubble messages.
 
-**Main → renderer (18)** — `ui-command` (a menu accelerator naming what it wants: search, export, rename…; the page decides what that means right now), `transcribe-progress`, `notes-progress` (partial
+**Main → renderer (19)** — `ui-command` (a menu accelerator naming what it wants: search, export, rename…; the page decides what that means right now), `transcribe-progress`, `notes-progress` (partial
 notes plus first-text timing), `live-transcript`,
 `meeting-detected`, `meeting-ended`, `start-recording`, `mark-moment`,
 `remote-stop`, `remote-pause`, `bubble-state`, `keep-audio-changed`,
 `engine-setup-progress`, `update-ready`, `system-audio-status`,
+`system-theme` (the native dark/light change, forwarded explicitly because a
+running Windows renderer does not reliably emit the media-query change),
 `window-visible` (whether the window is really on screen: while recording,
 background throttling is lifted and Chromium then calls a hidden window
 visible, so the page cannot tell on its own what is worth painting),
@@ -669,8 +671,7 @@ recording is deleted.
 The reasoning: 16 kHz mono WAV is 110 MB an hour — 4.8 GB a month for one
 two-hour meeting a day — and a recording of colleagues is more sensitive than
 its transcript. What keeping it buys is re-transcription with a better model and
-verifying a disputed quote, and both matter for days rather than years. This is
-also the posture another meeting-notes app takes: it never stores audio at all.
+verifying a disputed quote, and both matter for days rather than years.
 
 Order matters and is deliberate: the transcript is written first, then the audio
 is released, so a crash between the two costs nothing. Release happens only when
