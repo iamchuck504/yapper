@@ -120,6 +120,10 @@ if (process.platform === 'darwin' && fs.existsSync(helper)) {
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
 check('the notes prompt uses identities as evidence but never prints numbered labels',
   /Use these labels only as structural evidence[\s\S]*Never write technical labels such as "Speaker 1"[\s\S]*one participant[\s\S]*another participant/i.test(mainSource), true);
+check('the notes prompt requires every explicitly named action owner',
+  /EVERY action item with an explicitly named owner[\s\S]{0,180}"Name: task"[\s\S]{0,180}Never generalize a known owner/i.test(mainSource), true);
+check('direct address is evidence for a named action owner',
+  /A direct request such as "Maya, can you review this\?" is evidence that Maya owns/i.test(mainSource), true);
 
 // A run can be cancelled once the far side turns out to have said nothing:
 // the helper stops, the promise resolves at once, and the result says why.

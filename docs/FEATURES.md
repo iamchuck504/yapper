@@ -228,8 +228,10 @@ shows a **Who is speaking?** panel: choose or type each person's name, then use
 that meeting; Yapper does not infer a person's identity from the attendee list.
 Those technical labels stay in the full transcript and matching panel, not the
 generated notes: notes use assigned names when known and otherwise summarize
-the discussion neutrally. If the local Core ML detector is unavailable, the
-transcript still completes with the reliable `Me`/`Them` side-of-call labels.
+the discussion neutrally. A name stated in the conversation is preserved, and
+every explicitly named action owner remains attached to their task. If the
+local Core ML detector is unavailable, the transcript still completes with the
+reliable `Me`/`Them` side-of-call labels.
 
 ### Editing, regenerating, reading aloud
 

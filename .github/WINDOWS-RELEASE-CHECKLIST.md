@@ -79,7 +79,8 @@ Use an isolated `YAPPER_HOME` wherever the test supports it.
 - [ ] Confirm the transcript is persisted before audio is released.
 - [ ] Generate notes from a transcript containing `Speaker 1`/`Speaker 2` and
   confirm the notes use real assigned names or neutral prose, never numbered
-  speaker labels.
+  speaker labels. A task assigned by direct address must still retain its real
+  named owner.
 - [ ] Test CPU engine provisioning; test NVIDIA/CUDA provisioning if hardware
   is available.
 - [ ] Confirm settings and API keys survive an in-place update and remain

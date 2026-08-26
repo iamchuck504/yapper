@@ -2381,7 +2381,7 @@ Bullet points with the topics discussed and what was said about each.
 What was decided or agreed. If there were no decisions, write "No decisions recorded."
 
 ## Action items
-Tasks or commitments, including owner and due date if mentioned. If none, write "No action items recorded."
+Tasks or commitments. Every explicitly named owner must start their bullet as "Name: task"; include the due date if mentioned. Keep an ownerless task without inventing a name. If none, write "No action items recorded."
 
 ## Open questions
 Topics left unresolved. Omit this section if there are none.`,
@@ -2398,7 +2398,7 @@ Issues blocking progress. If none, write "No blockers raised."
 What each person plans to do next.
 
 ## Action items
-Tasks or commitments, including owner and due date if mentioned. If none, write "No action items recorded."`,
+Tasks or commitments. Every explicitly named owner must start their bullet as "Name: task"; include the due date if mentioned. Keep an ownerless task without inventing a name. If none, write "No action items recorded."`,
   one_on_one: `## Summary
 A short paragraph with the essence of the conversation.
 
@@ -2412,7 +2412,7 @@ Feedback given in either direction. Omit this section if there was none.
 What both people agreed on. If none, write "No agreements recorded."
 
 ## Action items
-Tasks or commitments, including owner and due date if mentioned. If none, write "No action items recorded."`,
+Tasks or commitments. Every explicitly named owner must start their bullet as "Name: task"; include the due date if mentioned. Keep an ownerless task without inventing a name. If none, write "No action items recorded."`,
   client: `## Summary
 A short paragraph with the essence of the call.
 
@@ -2426,7 +2426,7 @@ What was promised to the client, with dates if mentioned. If none, write "No com
 Potential problems raised. Omit this section if there are none.
 
 ## Action items
-Tasks or commitments, including owner and due date if mentioned. If none, write "No action items recorded."
+Tasks or commitments. Every explicitly named owner must start their bullet as "Name: task"; include the due date if mentioned. Keep an ownerless task without inventing a name. If none, write "No action items recorded."
 
 ## Next steps
 What happens after this call.`,
@@ -2448,7 +2448,7 @@ What was decided or agreed, in prose. Where something was discussed but not sett
 What the meeting concluded is required from someone: approvals, resources, information, a decision from elsewhere. Neutral wording, no promises on anyone's behalf. Omit this section if nothing was asked for.
 
 ## Next steps
-A short prose paragraph on what happens after this, including owners and dates only where the transcript states them.`,
+A short prose paragraph on what happens after this. Preserve every owner and date explicitly stated in the transcript; leave an owner unstated only when the transcript does.`,
   minutes: `## TL;DR
 A few high-level bullet points capturing the essence of the meeting at a glance.
 
@@ -2459,7 +2459,7 @@ Bullet points recapping what was discussed, grouped by topic. Use short sub-bull
 Bullet points of what was decided or agreed. If none, write "No decisions recorded."
 
 ## Action items
-Bullet points of tasks or commitments, including owner and due date if mentioned. If none, write "No action items recorded."
+Bullet points of tasks or commitments. Every explicitly named owner must start their bullet as "Name: task"; include the due date if mentioned. Keep an ownerless task without inventing a name. If none, write "No action items recorded."
 
 ## Next steps
 Bullet points of follow-ups and what happens after the meeting. Omit this section if there are none.`,
@@ -2509,19 +2509,20 @@ ${sections}
 Rules, all of which apply regardless of what the section descriptions above say:
 
 1. ${detail}
-2. Write in neutral third person. Do not assume who led, organized, or called the meeting. The person who recorded this is just one of the participants and is NOT necessarily the leader, the main speaker, or the owner of the action items — do not center the notes on them or address the reader as "you". Assign ownership and roles only when the transcript itself makes them clear.
-3. Do not invent anything that is not in the transcript. Never guess a person's name from the participant list alone. Use a real name only when the transcript identifies it or the user has assigned it. Never write technical labels such as "Speaker 1", "Speaker 2", "Me", or "Them" in the notes. When a name is unknown, summarize the point neutrally by topic (for example, "The group discussed…" or "One concern was…"). If a disagreement truly requires distinguishing voices, say "one participant" and "another participant", without numbers. Leave an action owner unspecified when the transcript does not identify them.
-4. Reply only with ${includeTitle ? 'the title line described below followed by the markdown notes' : 'the markdown notes'}, no preamble.
-5. The transcript is timestamped. Every single "## " heading must end with the timestamp where that topic starts, in square brackets, mm:ss — for example "## Decisions [24:05]". Use the timestamp of the first transcript line belonging to that section, and put nothing else in the brackets. No heading may be written without its timestamp.
-6. ${languageRule(options.lang)}`;
+2. Write in neutral third person. Do not assume who led, organized, or called the meeting. The person who recorded this is just one participant and is NOT automatically the leader, main speaker, or owner of the action items. Neutrality applies only where identity or responsibility is unknown: it must never erase a real name, an explicitly attributed position, or a named commitment.
+3. Do not invent anything that is not in the transcript. Never guess a person's name from the participant list alone. A name spoken in direct address (for example, "Carlos, please send the proposal"), a statement that a named person will do something, or a user-assigned speaker name is explicit evidence. Preserve those names wherever the attribution matters. In particular, EVERY action item with an explicitly named owner must include that name at the start of the bullet as "Name: task". Never generalize a known owner to "the team" or "a participant". Leave the owner unspecified only when no real name is supported.
+4. Never write technical labels such as "Speaker 1", "Speaker 2", "Me", or "Them" in the notes. For an unknown voice, summarize the point neutrally by topic (for example, "The group discussed…" or "One concern was…"). If a disagreement truly requires distinguishing unknown voices, say "one participant" and "another participant", without numbers.
+5. Reply only with ${includeTitle ? 'the title line described below followed by the markdown notes' : 'the markdown notes'}, no preamble.
+6. The transcript is timestamped. Every single "## " heading must end with the timestamp where that topic starts, in square brackets, mm:ss — for example "## Decisions [24:05]". Use the timestamp of the first transcript line belonging to that section, and put nothing else in the brackets. No heading may be written without its timestamp.
+7. ${languageRule(options.lang)}`;
   if (includeTitle) {
     prompt += `
-7. Before the first "## " heading, write exactly one metadata line in this form: "YAPPER_TITLE: Concrete Topic". The title must be 2 to 6 words in Title Case, in the same language as the notes, name the concrete topic, project, or decision, and have no quotes or period. If the transcript is too short or unintelligible to title, write "YAPPER_TITLE: Untitled Meeting". This replaces a separate title request, so do not omit the line.`;
+8. Before the first "## " heading, write exactly one metadata line in this form: "YAPPER_TITLE: Concrete Topic". The title must be 2 to 6 words in Title Case, in the same language as the notes, name the concrete topic, project, or decision, and have no quotes or period. If the transcript is too short or unintelligible to title, write "YAPPER_TITLE: Untitled Meeting". This replaces a separate title request, so do not omit the line.`;
   }
   if (options.participants && options.participants.trim()) {
     const people = options.participants.trim().replace(/\n/g, ', ');
     prompt += `\n\nThe participants in this meeting are: ${people}.
-Attribute discussion points, decisions, and action items to specific people by name only when the transcript itself identifies them or its speaker label is already that name. A participant list is context, not proof that a numbered speaker is a particular person. Unknown voices stay neutral in the notes rather than appearing as numbered labels. Do not guess when it is ambiguous. Correct obvious mis-transcriptions of names only when the intended person is clear.`;
+Attribute discussion points, decisions, and action items to specific people by name when the transcript identifies them or its speaker label is already that name. A direct request such as "Maya, can you review this?" is evidence that Maya owns the requested review; preserve her name in the action item even when the line itself has a numbered speaker label. A participant list alone is context, not proof that a numbered speaker is a particular person. Unknown voices stay neutral rather than appearing as numbered labels. Do not guess when it is ambiguous. Correct obvious mis-transcriptions of names only when the intended person is clear.`;
   }
   if (options.markers && options.markers.length) {
     prompt += `\n\nDuring the meeting the note-taker flagged these moments as important: `
