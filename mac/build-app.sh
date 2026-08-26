@@ -15,7 +15,7 @@ set -euo pipefail
 VERSION="$(node -p "require('./package.json').version")"
 REPO="iamchuck504/yapper-releases"
 APPLE_KEYCHAIN_PROFILE="${APPLE_KEYCHAIN_PROFILE:-yapper-notary}"
-CSC_NAME="${CSC_NAME:-6DA3D507B0277225D26570969C3E05D454228496}"
+CSC_NAME="${CSC_NAME:-C7E31963800F85BF0BAC1D9C9D9CDE260884ACB9}"
 CSC_KEYCHAIN="${CSC_KEYCHAIN:-${HOME}/Library/Application Support/Yapper Signing/yapper-signing.keychain-db}"
 export APPLE_KEYCHAIN_PROFILE
 export CSC_NAME
