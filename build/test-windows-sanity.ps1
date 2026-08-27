@@ -86,6 +86,8 @@ try {
 
     Run-Console 'Unit, security, and static parity suite' 'npm.cmd' @('test')
     Run-Console 'Dependency audit' 'npm.cmd' @('audit', '--audit-level=high')
+    Run-Electron 'test-keystore'
+    Run-Electron 'test-provider-keys'
     Run-Electron 'icon-verify'
 
     $electronTests = @(

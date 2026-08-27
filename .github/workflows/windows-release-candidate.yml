@@ -31,6 +31,12 @@ jobs:
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Exercise exact installer, updater, and uninstaller
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass `
+            -File build/test-windows-installer.ps1 `
+            -SetupExe "dist\Yapper-Setup-${{ steps.package.outputs.version }}.exe"
       - name: Upload private release candidate
         uses: actions/upload-artifact@v4
         with:
