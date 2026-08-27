@@ -45,6 +45,8 @@ const preload = read('preload.js');
 const renderer = read('renderer/app.js');
 const rendererCode = code('renderer/app.js');
 const html = read('renderer/index.html');
+const pkg = JSON.parse(read('package.json'));
+const windowsInstaller = read('build/installer.nsh');
 
 // ---- the renderer has to know where it is running ----
 check('preload exposes the platform', /platform:\s*process\.platform/.test(preload),
@@ -105,6 +107,15 @@ check('Windows still registers its path and arguments',
 check('and Windows still keeps the answer in its settings file',
   /platform !== 'darwin'[\s\S]{0,160}readSettings\(\)\.openAtLogin/.test(login),
   'Windows was moved onto macOS semantics it has no API for');
+const sourceAppId = mainCode.match(/const APP_ID\s*=\s*'([^']+)'/)?.[1];
+check('the Windows login value and packaged app share one app ID',
+  sourceAppId === pkg.build.appId,
+  `main.js uses ${sourceAppId || 'no app ID'}; electron-builder uses ${pkg.build.appId}`);
+check('the Windows uninstaller removes both login-item registry values',
+  (windowsInstaller.match(/DeleteRegValue HKCU/g) || []).length === 2
+  && /CurrentVersion\\Run" "\$\{APP_ID\}"/.test(windowsInstaller)
+  && /Explorer\\StartupApproved\\Run" "\$\{APP_ID\}"/.test(windowsInstaller),
+  'uninstall would leave either the active Run value or its Windows approval metadata behind');
 
 // The filesystem adapter is the half that cannot be tested without a
 // filesystem, so its mapping is checked here.

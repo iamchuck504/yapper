@@ -32,6 +32,8 @@ $sentinel = 'windows-update-state-survived'
 $startMenu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Yapper.lnk'
 $desktop = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Yapper.lnk'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$startupApprovedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+$loginValueName = 'com.yapper.meetingnotes'
 $serverLog = Join-Path $env:TEMP "yapper-update-feed-$PID.log"
 $serverErr = Join-Path $env:TEMP "yapper-update-feed-$PID.err.log"
 $server = $null
@@ -68,11 +70,14 @@ function Shortcut([string]$Path) {
     return $shell.CreateShortcut($Path)
 }
 
-function Startup-Entries {
-    if (-not (Test-Path $runKey)) { return @() }
-    return @((Get-ItemProperty $runKey).PSObject.Properties | Where-Object {
-        $_.Name -notmatch '^PS' -and [string]$_.Value -match [regex]::Escape($exe)
-    })
+function Registry-ValueExists([string]$Key, [string]$Name) {
+    if (-not (Test-Path -LiteralPath $Key)) { return $false }
+    return (Get-Item -LiteralPath $Key).GetValueNames() -contains $Name
+}
+
+function Registry-Value([string]$Key, [string]$Name) {
+    if (-not (Registry-ValueExists $Key $Name)) { return $null }
+    return (Get-Item -LiteralPath $Key).GetValue($Name)
 }
 
 Push-Location $root
@@ -137,7 +142,8 @@ try {
     $settings = Get-Content -LiteralPath $settingsFile -Raw | ConvertFrom-Json
     Confirm ($settings.sentinel -eq $sentinel -and $settings.theme -eq 'light') 'application startup preserves existing settings'
     Confirm ($settings.openAtLogin -eq $true) 'Start with Windows defaults on for a fresh profile'
-    Confirm ((Startup-Entries).Count -gt 0) 'the installed executable is registered in the current-user Run key'
+    Confirm (Registry-ValueExists $runKey $loginValueName) 'the app ID is registered in the current-user Run key'
+    Confirm ([string](Registry-Value $runKey $loginValueName) -match [regex]::Escape($exe)) 'the Run value targets the installed executable'
 
     Start-Sleep -Seconds 10
     Step "Quit and apply $targetVersion"
@@ -168,7 +174,8 @@ try {
     Start-Sleep -Seconds 12
     $running = @(Get-Process Yapper -ErrorAction SilentlyContinue)
     Confirm ($running.Count -gt 0) 'installed 0.1.13 remains running after startup'
-    Confirm ((Startup-Entries).Count -gt 0) 'Start with Windows registration still targets the updated executable'
+    Confirm (Registry-ValueExists $runKey $loginValueName) 'Start with Windows retains the app ID after update'
+    Confirm ([string](Registry-Value $runKey $loginValueName) -match [regex]::Escape($exe)) 'Start with Windows still targets the updated executable'
 
     $uninstallEntry = @(Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue |
         Where-Object { $_.DisplayName -like 'Yapper*' -and $_.UninstallString -match [regex]::Escape($appDir) })
@@ -183,7 +190,8 @@ try {
     Confirm (-not (Test-Path -LiteralPath $exe)) 'installed executable is removed'
     Confirm (-not (Test-Path -LiteralPath $startMenu)) 'Start menu shortcut is removed'
     Confirm (-not (Test-Path -LiteralPath $desktop)) 'desktop shortcut is removed'
-    Confirm ((Startup-Entries).Count -eq 0) 'Start with Windows registration is removed'
+    Confirm (-not (Registry-ValueExists $runKey $loginValueName)) 'Start with Windows registration is removed'
+    Confirm (-not (Registry-ValueExists $startupApprovedKey $loginValueName)) 'Start with Windows approval metadata is removed'
     Confirm (Test-Path -LiteralPath $settingsFile) 'settings are preserved by uninstall'
     Confirm ((Get-Content -LiteralPath $settingsFile -Raw | ConvertFrom-Json).sentinel -eq $sentinel) 'preserved settings retain their content'
     Confirm ((Get-Content -LiteralPath $meetingMarker -Raw).Trim() -eq $sentinel) 'meetings are preserved by uninstall'
