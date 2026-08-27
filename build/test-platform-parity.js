@@ -230,6 +230,17 @@ check('Windows writes the separated blocks while keeping the mixed recording',
   /rendererTracks[\s\S]{0,120}writeTracks\(rendererTracks\.mic,\s*rendererTracks\.sys\)/.test(mainCode)
   && /writeRecorded\(buf\)/.test(mainCode),
   'the live/recovery mix or the final Me/Them tracks would be missing');
+const diarizerCode = code('speaker-diarizer.js');
+const diarizerWorkerCode = code('speaker-diarize-worker.js');
+check('Windows sends its remote track to an isolated local diarization worker',
+  /platform === 'win32'/.test(diarizerCode)
+  && /new Worker\(workerFile/.test(diarizerCode)
+  && /createOfflineSpeakerDiarization/.test(diarizerWorkerCode),
+  'Windows would collapse every remote voice back to Them');
+check('the Windows diarizer has the same failure-safe transcript fallback as macOS',
+  /segments:\s*\[\],\s*available:\s*false/.test(diarizerCode)
+  && /speaker detection timed out/.test(diarizerCode),
+  'a model failure could prevent the transcript from finishing');
 
 console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

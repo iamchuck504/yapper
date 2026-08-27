@@ -7,7 +7,9 @@
 // label and the meeting still finishes normally.
 
 const fs = require('fs');
+const path = require('path');
 const { spawn } = require('child_process');
+const { Worker } = require('worker_threads');
 
 const MAX_HELPER_OUTPUT = 16 * 1024 * 1024;
 const MAX_SEGMENTS = 500000;
@@ -40,9 +42,8 @@ function parseHelperOutput(text) {
 
 /** Run the local Core ML helper. Failure is data, not an exception: callers
  * must always be able to complete the transcript without diarization. */
-function diarizeFile(helper, audioFile, options = {}) {
-  if (process.platform !== 'darwin' || !helper || !audioFile
-      || !fs.existsSync(helper) || !fs.existsSync(audioFile)) {
+function diarizeMacFile(helper, audioFile, options = {}) {
+  if (!helper || !audioFile || !fs.existsSync(helper) || !fs.existsSync(audioFile)) {
     const none = Promise.resolve({ segments: [], available: false, reason: 'unavailable' });
     none.cancel = () => { };
     return none;
@@ -110,6 +111,92 @@ function diarizeFile(helper, audioFile, options = {}) {
   });
   promise.cancel = () => cancel();
   return promise;
+}
+
+function unpackedPath(file) {
+  return file.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+}
+
+/** Run sherpa-onnx in an isolated worker on Windows. The worker and its pinned
+ * models are bundled with the installer, and a failure preserves Them: just as
+ * the native macOS route does. */
+function diarizeWindowsFile(helper, audioFile, options = {}) {
+  const assetsDir = options.windowsAssets
+    || (helper ? path.join(path.dirname(helper), 'speaker-diarizer-windows') : '');
+  const workerFile = options.workerFile
+    || unpackedPath(path.join(__dirname, 'speaker-diarize-worker.js'));
+  if (!audioFile || !assetsDir || !fs.existsSync(audioFile)
+      || !fs.existsSync(assetsDir) || !fs.existsSync(workerFile)) {
+    const none = Promise.resolve({ segments: [], available: false, reason: 'unavailable' });
+    none.cancel = () => { };
+    return none;
+  }
+
+  const timeoutMs = Math.max(1000, Number(options.timeoutMs) || DEFAULT_TIMEOUT_MS);
+  let cancel = () => { };
+  const promise = new Promise(resolve => {
+    let worker;
+    let settled = false;
+    let timer;
+    const finish = result => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const stop = () => {
+      try { worker?.terminate(); } catch { /* already gone */ }
+    };
+
+    try {
+      worker = new Worker(workerFile, { workerData: { assetsDir, audioFile } });
+    } catch (err) {
+      finish({ segments: [], available: false, reason: err.message });
+      return;
+    }
+    cancel = () => {
+      if (settled) return;
+      stop();
+      finish({ segments: [], available: true, reason: 'not needed' });
+    };
+    worker.on('message', message => {
+      if (!message || typeof message !== 'object') return;
+      if (message.type === 'progress' && typeof options.onProgress === 'function') {
+        options.onProgress(Number(message.done), Number(message.total));
+      } else if (message.type === 'result') {
+        const segments = cleanSegments(message.segments);
+        stop();
+        finish({
+          segments,
+          available: true,
+          reason: segments.length ? '' : 'no remote speech detected'
+        });
+      } else if (message.type === 'error') {
+        stop();
+        finish({ segments: [], available: true, reason: String(message.reason || 'speaker detection failed').slice(0, 500) });
+      }
+    });
+    worker.on('error', err => finish({ segments: [], available: false, reason: err.message }));
+    worker.on('exit', code => {
+      if (!settled) finish({ segments: [], available: true, reason: `speaker worker exited ${code}` });
+    });
+    timer = setTimeout(() => {
+      stop();
+      finish({ segments: [], available: true, reason: 'speaker detection timed out' });
+    }, timeoutMs);
+    timer.unref();
+  });
+  promise.cancel = () => cancel();
+  return promise;
+}
+
+function diarizeFile(helper, audioFile, options = {}) {
+  const platform = options.platform || process.platform;
+  if (platform === 'darwin') return diarizeMacFile(helper, audioFile, options);
+  if (platform === 'win32') return diarizeWindowsFile(helper, audioFile, options);
+  const none = Promise.resolve({ segments: [], available: false, reason: 'unavailable' });
+  none.cancel = () => { };
+  return none;
 }
 
 function displaySegments(segments) {
@@ -266,6 +353,8 @@ module.exports = {
   cleanSegments,
   parseHelperOutput,
   diarizeFile,
+  diarizeMacFile,
+  diarizeWindowsFile,
   displaySegments,
   labelRemoteLines,
   sanitizeName,

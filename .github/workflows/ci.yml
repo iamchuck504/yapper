@@ -51,6 +51,9 @@ jobs:
       - name: Package Windows app
         if: runner.os == 'Windows'
         run: npx electron-builder --win --dir --publish never
+      - name: Exercise Windows local speaker diarization
+        if: runner.os == 'Windows'
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File build/test-packaged-windows-diarizer.ps1
       - name: Inspect Windows package and Electron fuses
         if: runner.os == 'Windows'
         run: node build/verify-package.js dist/win-unpacked

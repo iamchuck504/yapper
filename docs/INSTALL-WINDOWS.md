@@ -20,7 +20,7 @@ one — the app measures your machine and adapts (see
 
 **[github.com/iamchuck504/yapper-releases/releases/latest](https://github.com/iamchuck504/yapper-releases/releases/latest)**
 
-Take `Yapper-Setup-<version>.exe` (~83 MB).
+Take `Yapper-Setup-<version>.exe` (~155 MB, including the local speaker model).
 
 ## 2. Run the installer, past the warning
 

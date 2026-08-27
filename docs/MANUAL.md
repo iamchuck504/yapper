@@ -25,7 +25,7 @@ document keeps the honest assessment — what works and what is missing.
 > Download: **https://github.com/iamchuck504/yapper-releases/releases/latest**
 > (an installers-only repo: the code lives here, the releases live there)
 
-**Windows** — `Yapper-Setup-<version>.exe` (~83 MB) installs per-user, no admin
+**Windows** — `Yapper-Setup-<version>.exe` (~155 MB, including the local speaker model) installs per-user, no admin
 rights, creates the shortcuts. Installed copies **keep themselves updated** from
 the release feed: checked at launch and every four hours, downloaded in the
 background, applied on quit — or immediately via the "Update ready — restart"
@@ -261,7 +261,7 @@ transcript, notes, title. Useful for phone recordings and voice memos.
 | Auto-update from the release feed | Working on Windows and signed macOS builds |
 | macOS | Working: Metal engine, system audio, meeting detection, notifications. Apple Silicon only |
 | Mobile | **Missing** |
-| Speaker labels | macOS 14+: `Me:` plus separated remote voices and user name mapping; macOS 13: `Me:`/`Them:`; Windows: missing |
+| Speaker labels | Windows and macOS 14+: `Me:` plus locally separated remote voices and user name mapping; macOS 13: `Me:`/`Them:` |
 | Calendar integration | **Missing** |
 | Sync, sharing, team features | **Missing** |
 
@@ -287,14 +287,15 @@ UI; several are deliberate trade-offs, marked as such.
    Recording fallback. Refused, Yapper records the microphone alone and says
    so. A publish remains an explicit, audited release action: local builds are
    not silently uploaded.
-3. **Speaker labels differ by platform.** macOS keeps microphone and system
-   tracks apart. On 14+ an additional local Core ML pass separates the remote
-   side into `Speaker 1`, `Speaker 2`, and so on; the user can map those labels
+3. **Speaker detection has a platform-specific engine.** Both platforms keep
+   microphone and system tracks apart. Windows uses a pinned local sherpa-onnx
+   WebAssembly worker; macOS 14+ uses Core ML. Each separates the remote side
+   into `Speaker 1`, `Speaker 2`, and so on, and the user can map those labels
    to attendee names. They remain useful in the full transcript, but generated
    notes preserve real spoken or assigned names — including every explicitly
    named action owner — and use neutral prose only for unknown voices rather
-   than numbered labels. macOS 13 falls back to `Me:`/`Them:`. Windows receives
-   an already mixed stream and still has no reliable speaker labels.
+   than numbered labels. macOS 13 falls back to `Me:`/`Them:`. Either local
+   detector may also fall back without blocking the transcript.
 4. **Transcription ceiling is whisper `small`.** On clean audio it is very
    good; a managed cloud ASR pipeline is generally stronger on heavy accents,
    crosstalk and bad microphones. `medium` was measured against `small` on real
@@ -349,8 +350,9 @@ Neutral estimates of shape, not commitments; ordered by leverage.
   full loop proven by `build/e2e-update.ps1`.
 - **Code signing** — a certificate (or Azure Trusted Signing) to stop the
   SmartScreen warning; now the highest-leverage item for sharing.
-- ~~**"You vs Them" speaker attribution**~~ — **done on macOS**, then extended
-  with local remote-speaker diarization and explicit name mapping on macOS 14+.
+- ~~**"You vs Them" speaker attribution**~~ — **done on both platforms**, then
+  extended with local remote-speaker diarization and explicit name mapping on
+  Windows and macOS 14+.
 - **Calendar integration** — Google/Microsoft OAuth, read-only calendar scope;
   would turn detection from "a mic is in use" into "the 10:00 with Ana is
   starting", with titles and attendees prefilled.
@@ -359,8 +361,8 @@ Neutral estimates of shape, not commitments; ordered by leverage.
 - ~~macOS notarization~~ — **done in the release path**: Developer ID, hardened
   runtime, notarization, stapling and Gatekeeper checks are mandatory before
   upload. Publishing a newly remediated build remains an explicit action.
-- **True diarization** — heavier (tinydiarize / pyannote class models); the
-  channel split above is the cheap first step.
+- ~~**True diarization**~~ — **done locally** with Core ML on macOS 14+ and a
+  pinned sherpa-onnx/pyannote-class WebAssembly model on Windows.
 - **Renderer split** — mechanical refactor of the 2,500-line file into
   modules; no user-visible change, pays down the maintenance cost.
 

@@ -116,7 +116,7 @@ that ship are the files that run.
 | `provision.js` | 505 | First-run engine download for installed copies (Windows and macOS): pinned, SHA-256 verified, size-bounded, resumable and retried |
 | `library.js` | 169 | The index over every meeting: build, refresh, select by day or week |
 | `sysaudio.js` | 335 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
-| `speaker-diarizer.js` | 278 | Optional macOS Core ML diarization, timestamp alignment, stable transcript labels, neutral note prose and per-meeting name maps |
+| `speaker-diarizer.js` | 367 | Optional macOS Core ML and Windows WebAssembly diarization, timestamp alignment, stable transcript labels, neutral note prose and per-meeting name maps |
 | `meetings.js` | 89 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
@@ -151,9 +151,9 @@ the Trash refuse the bundle, and check what happens next.
 organised in labelled sections (capture, live preview, recording, meeting view,
 exports, reminders, settings) but it is one module.
 
-### The native helpers (macOS)
+### Native helpers (macOS) and the local Windows diarizer
 
-The macOS capture APIs and the local Core ML diarizer have no JavaScript equivalent,
+The macOS capture APIs and the local Core ML diarizer have no direct JavaScript equivalent,
 so each is a small Swift binary compiled by `mac/build-app.sh` and
 unpacked from the asar — nothing can be executed from inside one.
 
@@ -173,15 +173,19 @@ JavaScript — buffering, mixing, which bundle id counts as a meeting — stays 
 `sysaudio.js` and `meetings.js`, where it can be tested without a Mac in the
 loop.
 
-The diarizer similarly returns only bounded JSON time ranges. FluidAudio's
-models run locally through Core ML; `speaker-diarizer.js` owns the fallbacks,
-stable display numbering, alignment to Whisper lines and user name mapping.
+The macOS diarizer similarly returns only bounded JSON time ranges. FluidAudio's
+models run locally through Core ML. Windows runs the same bounded interface in
+`speaker-diarize-worker.js`, using a pinned SHA-256-verified sherpa-onnx
+WebAssembly bundle. The build downloads that ~46 MB compressed bundle from the
+official release, records every extracted hash, and ships the licenses; the
+worker keeps model loading and inference off Electron's UI thread. In both
+cases `speaker-diarizer.js` owns the fallbacks, stable display numbering,
+alignment to Whisper lines and user name mapping.
 
 None is required. Without the audio helper the app records the microphone
 alone and says so; without the mic probe, auto-detection stays off; without the
-diarizer, remote lines keep the `Them:` track label. That is the
-same shape as the CUDA build on Windows: better when present, never fatal when
-absent.
+diarizer, remote lines keep the `Them:` track label: better when present, never
+fatal when absent.
 
 ---
 
@@ -252,12 +256,13 @@ On both platforms a call is transcribed as two source files instead of only the
 mix: the microphone track and the system-audio track each get their own
 `transcribeFile()` pass (and their own head start), and the lines are interleaved
 by timestamp with `Me:` plus remote labels. On Windows the renderer's
-audio-thread tap sends aligned source blocks alongside the mix. On macOS 14+,
-FluidAudio diarizes the system track on
-the Neural Engine in parallel with Whisper and `speaker-diarizer.js` aligns its
-time ranges to Whisper's lines as stable `Speaker 1`, `Speaker 2`, etc. A
-failure is non-fatal and falls back to `Them:`. Which side of the call spoke is
-still a fact of which stream carried the words, not an inference. Windows whose PCM is digital silence are
+audio-thread tap sends aligned source blocks alongside the mix, and the local
+sherpa-onnx worker diarizes the system track. On macOS 14+, FluidAudio does the
+same on the Neural Engine. Each runs in parallel with Whisper, and
+`speaker-diarizer.js` aligns its time ranges to Whisper's lines as stable
+`Speaker 1`, `Speaker 2`, etc. A failure is non-fatal and falls back to `Them:`.
+Which side of the call spoke is still a fact of which stream carried the words,
+not an inference. Windows whose PCM is digital silence are
 skipped before reaching the server, a window's leading silence is trimmed (and
 its stamps corrected back) because Whisper stamps sloppily across it, and a
 segment whose claimed audio region is silence is dropped as a hallucination —
@@ -738,7 +743,8 @@ Two ways to run it, and they deliberately share every path in the code:
 models next to the code, `npm start` runs it. The engine home is the repo.
 
 **Users get an installer.** `npm run dist` produces
-`dist\Yapper-Setup-<version>.exe` (~83 MB, NSIS, per-user, no admin) plus the
+`dist\Yapper-Setup-<version>.exe` (~155 MB including the local speaker model,
+NSIS, per-user, no admin) plus the
 `latest.yml` + blockmap feed files; `npm run release` builds and publishes them
 to the GitHub release feed in one step. What shipping changed in the code, and
 why:
@@ -859,7 +865,8 @@ three groups.
 | `test-dedup.js` | Transcript cleanup: which repeats are removed, which survive, and the time window that separates a seam artefact from a person restating something |
 | `test-two-track.js` | Per-side call tracks: the silence detector that spares the far-side track its inferences, and the merge that interleaves both sides by time with Me/remote labels without inventing, dropping or reordering a word |
 | `test-pcm-worklet.js` | The renderer audio-thread boundary: stereo-to-mono conversion, aligned microphone/system blocks, their exact mixed sum, and silence for a missing source |
-| `test-speakers.js` | Diarization JSON bounds, timestamp overlap, stable Speaker N numbering, safe name mapping and the native helper self-test |
+| `test-speakers.js` | Diarization JSON bounds, timestamp overlap, stable Speaker N numbering, safe name mapping, native helper self-test and Windows worker lifecycle |
+| `test-windows-diarizer.js` | A pinned official two-voice fixture proves the bundled Windows model finds both voices locally |
 | `test-two-track-app.js` | The two-track branch through the real app: a folder with per-side tracks comes back labelled, ordered, free of words hallucinated into the silent stretches, and with its audio released |
 | `test-library.js` | The meeting index: what counts as content, day and week selection, and the stamp that decides when a cached entry can be reused |
 | `test-actions.js` | Extraction and deduplication: only what the notes actually say becomes an item, `URGENT:` is not an owner, an undated item never gains a date, and restating a task merges instead of duplicating |
@@ -871,7 +878,7 @@ three groups.
 | `test-ipc-wiring.js` | Every bridge channel has a counterpart |
 | `test-meeting-detect.js` | Which running app counts as a meeting, in both vocabularies — including the helper-process bundle ids Electron apps actually report, which is what the first macOS build got wrong |
 | `test-sysaudio.js` | Mixing system audio into the microphone: saturating instead of wrapping, the bounded buffer, and a helper that is absent leaving the microphone untouched rather than writing silence over it |
-| `test-platform-parity.js` | Cross-platform seams: no Windows screen-capture or setup assumptions on macOS, correct login-item semantics, and Windows retaining the same per-side recording facts as macOS |
+| `test-platform-parity.js` | Cross-platform seams: no Windows screen-capture or setup assumptions on macOS, correct login-item semantics, and Windows retaining and diarizing the same per-side recording facts as macOS |
 
 **Driving the real app** (Electron, a throwaway `Documents` and `userData` so a
 run can never touch a real meeting):
@@ -945,10 +952,9 @@ the doc cannot quietly drift away from the code.
   — degraded, and said out loud, but not what was asked for.
 - Apple Silicon only. An Intel or universal build needs a second engine compile
   and doubles the artifact size.
-- Speaker separation is person-level only on macOS 14+, where the remote track
-  is diarized locally. It is meeting-local: `Speaker 1` in one meeting is not
-  recognized as the same voice in another, and names require explicit user
-  mapping. macOS 13 falls back to `Me:`/`Them:`. On Windows the streams arrive
-  already mixed, so there are no reliable labels.
+- Speaker separation is person-level on Windows and macOS 14+. It is
+  meeting-local: `Speaker 1` in one meeting is not recognized as the same
+  voice in another, and names require explicit user mapping. macOS 13 falls
+  back to `Me:`/`Them:`.
 - No playback from the timestamps in the notes.
 - `renderer/app.js` is about 3,000 lines in one module.

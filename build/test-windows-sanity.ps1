@@ -84,8 +84,10 @@ try {
         }
     }
 
+    Run-Console 'Prepare pinned Windows speaker diarizer' 'npm.cmd' @('run', 'prepare:windows-diarizer')
     Run-Console 'Unit, security, and static parity suite' 'npm.cmd' @('test')
     Run-Console 'Dependency audit' 'npm.cmd' @('audit', '--audit-level=high')
+    Run-Console 'Real two-speaker Windows diarization' 'node.exe' @('build/test-windows-diarizer.js')
     Run-Electron 'test-keystore'
     Run-Electron 'test-provider-keys'
     Run-Electron 'icon-verify'
@@ -117,6 +119,8 @@ try {
             @('electron-builder', '--win', '--dir', '--publish', 'never')
         Run-Console 'Packaged-app verification' 'node.exe' `
             @('build/verify-package.js', 'dist/win-unpacked')
+        Run-Console 'Packaged Windows speaker diarization' 'powershell.exe' `
+            @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'build/test-packaged-windows-diarizer.ps1')
         Run-Console 'Windows installer build' 'npm.cmd' `
             @('run', 'dist', '--', '--publish', 'never')
         Test-InstallerManifest

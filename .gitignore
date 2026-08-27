@@ -28,6 +28,7 @@ build/icon-candidates/
 build/icon-v*/
 build/icon-preview.png
 build/whisper/
+build/speaker-diarizer-windows/
 
 # whisper.cpp binaries and models (downloaded by setup, never committed).
 # Without the trailing slash too: on a dev machine these are often symlinks to

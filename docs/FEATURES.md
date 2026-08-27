@@ -222,8 +222,9 @@ section at a time while the provider writes them; only the complete response is
 saved. A small timing line measured on the current computer shows transcription,
 time to first notes, and total note-writing time.
 
-On macOS 14 or newer, the final local pass also separates distinct voices on
-the remote/system track as **Speaker 1**, **Speaker 2**, and so on. The meeting
+On Windows and macOS 14 or newer, the final local pass also separates distinct
+voices on the remote/system track as **Speaker 1**, **Speaker 2**, and so on.
+Windows uses a pinned local WebAssembly model and macOS uses Core ML. The meeting
 keeps the two optional people fields distinct: **Participants** records who
 attended for meeting context and search, but does not assign voices; the
 collapsed **Match voices to names** control records who said what. Open it only
@@ -234,7 +235,7 @@ Those technical labels stay in the full transcript and matching panel, not the
 generated notes: notes use assigned names when known and otherwise summarize
 the discussion neutrally. A name stated in the conversation is preserved, and
 every explicitly named action owner remains attached to their task. If the
-local Core ML detector is unavailable, the transcript still completes with the
+local detector is unavailable, the transcript still completes with the
 reliable `Me`/`Them` side-of-call labels.
 
 ### Editing, regenerating, reading aloud

@@ -133,6 +133,40 @@ check('direct address is evidence for a named action owner',
   const none = diarizeFile(null, null);
   check('an unavailable run still carries cancel()', typeof none.cancel === 'function', true);
   none.cancel();
+
+  const workerDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yapper-diarize-worker-'));
+  const wav = path.join(workerDir, 'sys.wav');
+  const assets = path.join(workerDir, 'assets');
+  const worker = path.join(workerDir, 'mock-worker.js');
+  fs.mkdirSync(assets);
+  fs.writeFileSync(wav, Buffer.alloc(64));
+  fs.writeFileSync(worker, [
+    "const { parentPort } = require('worker_threads');",
+    "parentPort.postMessage({ type: 'progress', done: 1, total: 2 });",
+    "parentPort.postMessage({ type: 'result', segments: [",
+    "  { speaker: 'voice-a', start: 0, end: 2 },",
+    "  { speaker: 'voice-b', start: 2, end: 4 }",
+    "] });"
+  ].join('\n'));
+  let progress = false;
+  const portable = await diarizeFile(path.join(workerDir, 'speaker-diarize'), wav, {
+    platform: 'win32', windowsAssets: assets, workerFile: worker,
+    onProgress: () => { progress = true; }
+  });
+  check('the Windows worker returns normalized local speaker segments',
+    portable.available && portable.segments.length === 2 && progress, true);
+
+  fs.writeFileSync(worker, "setInterval(() => {}, 1000);\n");
+  const t1 = Date.now();
+  const portableCancel = diarizeFile(path.join(workerDir, 'speaker-diarize'), wav, {
+    platform: 'win32', windowsAssets: assets, workerFile: worker, timeoutMs: 20000
+  });
+  setTimeout(() => portableCancel.cancel(), 50);
+  const portableCancelled = await portableCancel;
+  check('the Windows worker can be cancelled without waiting for inference',
+    Date.now() - t1 < 5000 && portableCancelled.reason === 'not needed', true);
+  fs.rmSync(workerDir, { recursive: true, force: true });
+
   if (process.platform === 'darwin') {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yapper-diarize-cancel-'));
     const wav = path.join(dir, 'sys.wav');

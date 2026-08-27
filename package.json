@@ -1,6 +1,6 @@
 {
   "name": "yapper",
-  "version": "0.1.14",
+  "version": "0.1.13",
   "description": "Records meetings, transcribes them on-device with Whisper, and writes structured notes with the model you choose",
   "author": "Carlos Lopez",
   "main": "main.js",
@@ -10,6 +10,7 @@
     "test:windows": "powershell -ExecutionPolicy Bypass -File build/test-windows-sanity.ps1",
     "test:windows:package": "powershell -ExecutionPolicy Bypass -File build/test-windows-sanity.ps1 -Package",
     "verify-package": "node build/verify-package.js",
+    "prepare:windows-diarizer": "node build/prepare-windows-diarizer.js",
     "dist": "electron-builder --win",
     "release": "node build/release.js"
   },
@@ -44,6 +45,7 @@
       "meetings.js",
       "sysaudio.js",
       "speaker-diarizer.js",
+      "speaker-diarize-worker.js",
       "security.js",
       "storage.js",
       "preload.js",
@@ -56,7 +58,9 @@
       "build/calibration.wav",
       "build/mic-probe",
       "build/system-audio",
-      "build/speaker-diarize"
+      "build/speaker-diarize",
+      "build/speaker-diarizer-windows/**/*",
+      "THIRD-PARTY-NOTICES.md"
     ],
     "electronFuses": {
       "runAsNode": false,
@@ -73,8 +77,11 @@
       "build/calibration.wav",
       "build/mic-probe",
       "build/system-audio",
-      "build/speaker-diarize"
+      "build/speaker-diarize",
+      "speaker-diarize-worker.js",
+      "build/speaker-diarizer-windows/**/*"
     ],
+    "beforePack": "build/prepare-windows-diarizer.js",
     "win": {
       "target": [
         {

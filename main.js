@@ -2198,9 +2198,9 @@ ipcMain.handle('transcribe', async (_e, folder) => {
   let diarization = null;
   try {
     if (twoTrack) {
-      // Core ML uses the Neural Engine while Whisper uses Metal/CPU, so doing
-      // both now hides most of diarization's cost behind transcription. The
-      // helper is optional and its failure never costs the transcript.
+      // Speaker detection runs beside transcription: Core ML on macOS and a
+      // pinned local WebAssembly worker on Windows. The helper is optional and
+      // its failure never costs the transcript.
       let waitingForSpeakers = false;
       let diarizationDone = false;
       const diarizationRaw = speakerDiarizer.diarizeFile(helperPath('speaker-diarize'), sysWav, {

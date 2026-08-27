@@ -309,8 +309,9 @@ from the older public Windows build so existing copies do not lose their update
 feed. The private `0.1.13` Windows candidate completed the disposable
 install/update/uninstall lifecycle, but it was not published.
 
-The source-separation parity change is `0.1.14`: Windows retains aligned
-microphone and system tracks for reliable `Me`/`Them` labels, while preserving
+The source-separation and local remote-speaker parity changes are kept in
+`0.1.13`: Windows retains aligned microphone and system tracks, then uses the
+pinned local sherpa-onnx worker to distinguish remote voices while preserving
 the mixed recovery/live stream. Before publication, run the private Windows
 release-candidate workflow, complete the manual gates in
 `.github/WINDOWS-RELEASE-CHECKLIST.md`, and upload the EXE, blockmap and
