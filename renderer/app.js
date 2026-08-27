@@ -1862,7 +1862,7 @@ async function abortRecording(err) {
   markRecordingInSidebar(false);
   try { await stopLivePreview(); } catch { /* it may never have started */ }
   stopPcmTap();
-  cleanupCapture();          // also tells main the recording is over
+  await cleanupCapture();    // also tells main the recording is over
   // close the file, so whatever was captured before the failure still plays
   try { await window.yapper.recordingFinish('', []); } catch { /* nothing open */ }
   currentFolder = null;
@@ -2109,7 +2109,7 @@ async function startRecording() {
   }
 }
 
-function cleanupCapture() {
+async function cleanupCapture() {
   // Invalidate pending listMics/getUserMedia work before tearing down the
   // graph. Any stream that arrives afterwards sees a stale generation and is
   // stopped instead of being connected to this or the next recording.
@@ -2128,7 +2128,15 @@ function cleanupCapture() {
   recLive.classList.remove('paused');
   for (const key of [...micNodes.keys()]) dropMic(key);
   if (sysStream) { sysStream.getTracks().forEach(t => t.stop()); sysStream = null; }
-  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  // Closing an AudioContext is asynchronous on Windows. Waiting for it keeps
+  // Chromium from completing a device callback after the window (or the test
+  // runner) has already gone away, which otherwise occasionally terminates
+  // Electron with ERROR_INVALID_HANDLE despite a successful recording.
+  const closingAudioCtx = audioCtx;
+  audioCtx = null;
+  if (closingAudioCtx) {
+    try { await closingAudioCtx.close(); } catch { /* already closed */ }
+  }
   dest = null;
   micBus = null;
   sysGainNode = null;
@@ -2151,7 +2159,7 @@ async function stopAndProcess() {
   resetSysWave();                    // flat, not frozen on the last peak
   await stopLivePreview();
   stopPcmTap();
-  cleanupCapture();
+  await cleanupCapture();
   btnRecord.disabled = true;
   saveOptions();
   pipelineEl.classList.remove('hidden');

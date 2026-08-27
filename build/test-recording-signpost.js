@@ -10,7 +10,7 @@
 // One control answers both, so this checks both: the sidebar button becomes
 // the indicator while recording, and it is still the way back.
 const { app } = require('electron');
-const { sandbox, logger, mainWindow, watchdog } = require('./harness');
+const { sandbox, logger, mainWindow, watchdog, within } = require('./harness');
 
 const ROOT = sandbox('signpost');
 const say = logger(ROOT);
@@ -75,8 +75,11 @@ app.whenReady().then(async () => {
     check('the same button takes me back to the controls', await view(win), 'record');
     check('without starting a second recording', await $('recording'));
 
-    await $('stopAndProcess()').catch(() => { });
-    await pause(2000);
+    // Wait for the complete stop path. Swallowing a rejected executeJavaScript
+    // promise here used to let Electron exit while Windows was still closing
+    // its audio device, turning a passing assertion into a flaky process crash.
+    await within($('stopAndProcess()'), 'stopping the recording', 120000);
+    await pause(500);
     const after = await sidebar(win);
     check('on stopping it offers to start again', after.label, 'New meeting');
     check('and the pip goes away', [after.recording, after.pipShown], [false, false]);
