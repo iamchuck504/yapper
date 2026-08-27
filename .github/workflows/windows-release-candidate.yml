@@ -1,0 +1,43 @@
+name: Windows release candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-release-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Test and package Windows
+    runs-on: windows-2025
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run Windows sanity suite and build installer
+        run: npm run test:windows:package
+      - name: Read package version
+        id: package
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Upload private release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: Yapper-Windows-${{ steps.package.outputs.version }}-${{ github.sha }}
+          path: |
+            dist/Yapper-Setup-${{ steps.package.outputs.version }}.exe
+            dist/Yapper-Setup-${{ steps.package.outputs.version }}.exe.blockmap
+            dist/latest.yml
+          if-no-files-found: error
+          retention-days: 7
