@@ -1,5 +1,16 @@
 ﻿const $ = id => document.getElementById(id);
 
+// Shortcuts are the same actions on both desktops, but the labels should use
+// the keys the person in front of this computer actually has.
+const onMac = window.yapper.platform === 'darwin';
+const shortcut = key => onMac
+  ? `⌘${key.replace('Shift+', '⇧')}`
+  : `Ctrl+${key}`;
+$('btn-settings').title = `Settings (${shortcut(',')})`;
+$('btn-mark').title = `Flag this moment (${shortcut('Shift+M')}, works from any app)`;
+$('btn-rename').title = `Rename this meeting (${shortcut('Shift+R')})`;
+$('result-speed').title = `Measured locally on this ${onMac ? 'Mac' : 'PC'}`;
+
 const viewRecord = $('view-record');
 const viewMeeting = $('view-meeting');
 const viewReminders = $('view-reminders');

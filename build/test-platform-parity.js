@@ -52,6 +52,16 @@ const windowsInstaller = read('build/installer.nsh');
 // ---- the renderer has to know where it is running ----
 check('preload exposes the platform', /platform:\s*process\.platform/.test(preload),
   'the renderer cannot tell macOS from Windows');
+check('platform-neutral HTML does not ship macOS labels to Windows',
+  !/⌘|Measured locally on this Mac/.test(html),
+  'a title is hard-coded for macOS before the renderer knows the platform');
+check('the renderer paints shortcuts and machine labels for the current platform',
+  /const onMac = window\.yapper\.platform === 'darwin'/.test(rendererCode)
+  && /Settings \(\$\{shortcut\(','\)\}\)/.test(rendererCode)
+  && /Flag this moment \(\$\{shortcut\('Shift\+M'\)\}/.test(rendererCode)
+  && /Rename this meeting \(\$\{shortcut\('Shift\+R'\)\}\)/.test(rendererCode)
+  && /onMac \? 'Mac' : 'PC'/.test(rendererCode),
+  'Windows would show Mac keys or call the machine a Mac');
 
 // ---- 1. system audio is not asked for on macOS ----
 const gdmCalls = [...renderer.matchAll(/getDisplayMedia\(/g)];
