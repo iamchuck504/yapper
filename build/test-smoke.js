@@ -68,6 +68,10 @@ app.whenReady().then(async () => {
   check('opens on Today',
     !(await $("document.getElementById('view-home').classList.contains('hidden')")), 'did not open there');
 
+  // Hosted Windows runners can leave CSS animation clocks suspended even
+  // while the window is otherwise interactive. Remove only the entrance
+  // animation so opacity still proves the prompt itself is visible.
+  await $("document.getElementById('meeting-prompt').style.animation = 'none'");
   win.webContents.send('meeting-detected', { app: 'Zoom' });
   await new Promise(r => setTimeout(r, 400));
   // offsetParent is always null on a fixed element, so visibility is measured
