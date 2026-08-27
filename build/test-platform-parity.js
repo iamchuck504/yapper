@@ -48,6 +48,7 @@ const workletCode = code('renderer/pcm-worklet.js');
 const html = read('renderer/index.html');
 const pkg = JSON.parse(read('package.json'));
 const windowsInstaller = read('build/installer.nsh');
+const windowsDiarizerPrep = code('build/prepare-windows-diarizer.js');
 
 // ---- the renderer has to know where it is running ----
 check('preload exposes the platform', /platform:\s*process\.platform/.test(preload),
@@ -251,6 +252,9 @@ check('the Windows diarizer has the same failure-safe transcript fallback as mac
   /segments:\s*\[\],\s*available:\s*false/.test(diarizerCode)
   && /speaker detection timed out/.test(diarizerCode),
   'a model failure could prevent the transcript from finishing');
+check('Windows stages the diarizer on the destination volume before atomic rename',
+  /mkdtemp\(path\.join\(path\.dirname\(destination\),\s*'\.yapper-diarizer-'\)\)/.test(windowsDiarizerPrep),
+  'GitHub keeps TEMP and the checkout on different drives, where rename fails with EXDEV');
 
 console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

@@ -122,7 +122,10 @@ async function prepare() {
     await downloadArchive(archive);
   }
 
-  const staging = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'yapper-diarizer-'));
+  // The GitHub Windows runner keeps TEMP on C: and the checkout on D:.
+  // rename() is the atomic hand-off below, so stage beside the destination;
+  // a temp directory on another volume makes that hand-off fail with EXDEV.
+  const staging = await fs.promises.mkdtemp(path.join(path.dirname(destination), '.yapper-diarizer-'));
   try {
     const unpack = path.join(staging, 'unpack');
     const ready = path.join(staging, 'ready');
