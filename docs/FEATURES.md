@@ -33,12 +33,13 @@ some of it cannot be changed afterwards.
 ### What gets captured
 
 Both sides: **the system audio** (what you hear — Meet, Zoom, Teams) **and your
-microphone**, mixed into one track.
+microphone**. A mixed track supports recovery and the live transcript, while
+aligned source tracks preserve reliable `Me`/`Them` labels on both platforms.
 
 The two platforms get there differently. Windows uses Electron's loopback.
-macOS has no such thing, so a native helper captures system audio through
-ScreenCaptureKit and the mixing happens in the app — which is why macOS asks for
-the Screen Recording permission, and why without it you record only yourself.
+macOS uses a Core Audio process tap on 14.4+ and a ScreenCaptureKit fallback on
+macOS 13. The fallback needs Screen Recording permission; without system-audio
+permission Yapper records only the microphone and says so on screen.
 
 Audio is written to disk **as it arrives**, already in the format the
 transcriber consumes. A crash or a power cut costs you the tail of the meeting,
@@ -417,14 +418,15 @@ The rules around it:
 
 Stated plainly, so it is planned around rather than discovered:
 
-- **Speaker detection is currently macOS-only.** macOS 14+ separates remote
-  voices locally; Windows still receives one mixed stream and has no reliable
-  speaker labels. Names are assigned by the user, not guessed; unknown numbered
-  labels never appear as people in the generated notes.
+- **Separating multiple remote voices is currently macOS-only.** Both platforms
+  retain the recorder and remote sides separately and label them reliably as
+  `Me`/`Them`. macOS 14+ can additionally separate remote voices locally as
+  `Speaker 1`, `Speaker 2`, and so on. Names are assigned by the user, not
+  guessed; unknown numbered labels never appear as people in generated notes.
 - **No calendar integration.** Detection knows a microphone is in use, not that
   "the 10:00 with Ana" is starting.
 - **No mobile, no sync, no sharing, no accounts.** Meetings live on the machine
   that recorded them.
 - **No playback** from the timestamps in the notes.
-- **macOS**: Apple Silicon only; auto-detection needs 14.4; updates only notify;
-  the first open needs the Gatekeeper step.
+- **macOS**: Apple Silicon only; auto-detection needs 14.4; the first open needs
+  the Gatekeeper step.

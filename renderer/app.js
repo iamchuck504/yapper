@@ -1461,9 +1461,11 @@ navigator.mediaDevices.addEventListener('devicechange', async () => {
 });
 
 // ---------- the PCM tap ----------
-// One tap on the mixed graph is the only audio source in the app: the same
-// 16 kHz mono samples become the file on disk and the live transcript, so the
-// recording and what you read on screen can never drift apart.
+// One tap reads both sides of the graph on the same audio-thread clock. The
+// mixed 16 kHz mono samples become recording.wav and the live transcript; on
+// Windows the aligned source samples also become recording.mic.wav and
+// recording.sys.wav, preserving Me/Them for the final pass without letting the
+// recording and what you read on screen drift apart.
 
 const LIVE_RATE = 16000;
 let pcmNode = null;
@@ -1496,37 +1498,70 @@ function downsampleToInt16(input, srcRate) {
   return out;
 }
 
-function pushPcm(float32) {
+function pushPcm(frame) {
   if (!recording || paused) return;              // pausing simply stops the flow
-  pcmPending.push(downsampleToInt16(float32, audioCtx.sampleRate));
-  pcmPendingLen += pcmPending[pcmPending.length - 1].length;
+  // The ScriptProcessor fallback predates source separation. Keep its mixed
+  // recording reliable; current Electron takes the worklet path and supplies
+  // all three aligned arrays.
+  const packet = frame instanceof Float32Array ? { mixed: frame } : frame;
+  const part = { mixed: downsampleToInt16(packet.mixed, audioCtx.sampleRate) };
+  if (packet.mic && packet.sys) {
+    part.mic = downsampleToInt16(packet.mic, audioCtx.sampleRate);
+    part.sys = downsampleToInt16(packet.sys, audioCtx.sampleRate);
+  }
+  pcmPending.push(part);
+  pcmPendingLen += part.mixed.length;
   if (pcmPendingLen < LIVE_RATE / 5) return;   // batch ~200 ms per IPC message
+  flushPcm();
+}
+
+function flushPcm() {
+  if (!pcmPendingLen) return;
   const merged = new Int16Array(pcmPendingLen);
+  const separated = pcmPending.every(p => p.mic && p.sys)
+    ? { mic: new Int16Array(pcmPendingLen), sys: new Int16Array(pcmPendingLen) }
+    : null;
   let o = 0;
-  for (const p of pcmPending) { merged.set(p, o); o += p.length; }
+  for (const p of pcmPending) {
+    merged.set(p.mixed, o);
+    if (separated) {
+      separated.mic.set(p.mic, o);
+      separated.sys.set(p.sys, o);
+    }
+    o += p.mixed.length;
+  }
   pcmPending = [];
   pcmPendingLen = 0;
-  window.yapper.recordingChunk(merged.buffer);   // main writes it and feeds live
+  window.yapper.recordingChunk(merged.buffer, separated && {
+    mic: separated.mic.buffer,
+    sys: separated.sys.buffer
+  });
 }
 
 async function startPcmTap() {
   if (!audioCtx || pcmNode) return;
 
-  // Tap the same mix that gets recorded (post gain + noise filter).
-  pcmTapGain = audioCtx.createGain();
-  micLP.connect(pcmTapGain);
-  if (sysGainNode) sysGainNode.connect(pcmTapGain);
-
   try {
     await audioCtx.audioWorklet.addModule('pcm-worklet.js');
-    pcmNode = new AudioWorkletNode(audioCtx, 'pcm-tap');
+    pcmNode = new AudioWorkletNode(audioCtx, 'pcm-tap', {
+      numberOfInputs: 2,
+      numberOfOutputs: 1,
+      outputChannelCount: [1]
+    });
     pcmNode.port.onmessage = e => pushPcm(e.data);
+    // Separate inputs preserve the source identity, while the worklet creates
+    // the exact post-gain mix sent to the main process.
+    micLP.connect(pcmNode, 0, 0);
+    if (sysGainNode) sysGainNode.connect(pcmNode, 0, 1);
   } catch {
     // Older path: works everywhere, just runs on the main thread.
+    pcmTapGain = audioCtx.createGain();
+    micLP.connect(pcmTapGain);
+    if (sysGainNode) sysGainNode.connect(pcmTapGain);
     pcmNode = audioCtx.createScriptProcessor(4096, 1, 1);
     pcmNode.onaudioprocess = e => pushPcm(e.inputBuffer.getChannelData(0));
+    pcmTapGain.connect(pcmNode);
   }
-  pcmTapGain.connect(pcmNode);
   // The graph is only pulled when it reaches the destination; keep it silent.
   pcmSink = audioCtx.createGain();
   pcmSink.gain.value = 0;
@@ -1537,12 +1572,7 @@ async function startPcmTap() {
 function stopPcmTap() {
   // hand over the tail that never reached a full batch, or the last fifth of a
   // second of the meeting would be missing from the file
-  if (pcmPendingLen) {
-    const merged = new Int16Array(pcmPendingLen);
-    let o = 0;
-    for (const p of pcmPending) { merged.set(p, o); o += p.length; }
-    window.yapper.recordingChunk(merged.buffer);
-  }
+  flushPcm();
   for (const node of [pcmNode, pcmSink, pcmTapGain]) {
     if (node) { try { node.disconnect(); } catch { /* already gone */ } }
   }

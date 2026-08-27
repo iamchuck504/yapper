@@ -304,21 +304,18 @@ mac-only version would leave `latest.yml` off the newest release and Windows
 copies would stop seeing updates, silently. Cutting from Windows afterwards
 replaces those with real ones.
 
-The public feed now has a macOS-first `v0.1.13`. It deliberately carries the
-last verified Windows `0.1.7` installer and manifest so existing Windows copies
-do not lose their updater feed; those carried files do not make Windows 0.1.13
-available or verified.
+The public feed has a macOS-first `v0.1.13`; its Windows files are carried over
+from the older public Windows build so existing copies do not lose their update
+feed. The private `0.1.13` Windows candidate completed the disposable
+install/update/uninstall lifecycle, but it was not published.
 
-The next Windows pass should build **the same 0.1.13 version** from
-`macos-login-item` at or after `39f20ef`, complete the runtime checklist in
+The source-separation parity change is `0.1.14`: Windows retains aligned
+microphone and system tracks for reliable `Me`/`Them` labels, while preserving
+the mixed recovery/live stream. Before publication, run the private Windows
+release-candidate workflow, complete the manual gates in
 `.github/WINDOWS-RELEASE-CHECKLIST.md`, and upload the EXE, blockmap and
-`latest.yml` into the existing `v0.1.13` release. Do not create another release
-or run `npm run release`: replacing the Windows platform files in the existing
-cross-platform release is the intended handoff.
-
-This pass matters because Windows is still the untested surface: a
-Windows-built installer that someone has actually installed, recorded with,
-updated and removed is worth more than another cross-build from the Mac.
+`latest.yml` together. Do not publish from only one platform without preserving
+the other platform's updater files.
 
 ---
 

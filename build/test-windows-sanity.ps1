@@ -100,6 +100,7 @@ try {
         'test-recording-signpost',
         'test-bubble-corner',
         'test-record-cycle',
+        'test-windows-separated-tracks',
         'test-record-recovery',
         'test-silence-warning',
         'test-two-track-app',

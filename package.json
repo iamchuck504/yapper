@@ -1,12 +1,12 @@
 {
   "name": "yapper",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Records meetings, transcribes them on-device with Whisper, and writes structured notes with the model you choose",
   "author": "Carlos Lopez",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node build/test-llm.js && node build/test-keystore.js && node build/test-single-flight.js && node build/test-wedged-server.js && node build/test-progressive.js && node build/test-live-logic.js && node build/test-dedup.js && node build/test-two-track.js && node build/test-speakers.js && node build/test-actions.js && node build/test-library.js && node build/test-search.js && node build/test-digest.js && node build/test-provision.js && node build/test-bounds.js && node build/test-security.js && node build/verify-package.js && node build/test-meetings.js && node build/test-meeting-detect.js && node build/test-login-item.js && node build/test-startup-switch.js && node build/test-platform-parity.js && node build/test-sysaudio.js && node build/test-audio-orphans.js && node build/test-section-coverage.js && node build/test-ipc-wiring.js && node build/test-docs.js",
+    "test": "node build/test-llm.js && node build/test-keystore.js && node build/test-single-flight.js && node build/test-wedged-server.js && node build/test-progressive.js && node build/test-live-logic.js && node build/test-dedup.js && node build/test-two-track.js && node build/test-pcm-worklet.js && node build/test-speakers.js && node build/test-actions.js && node build/test-library.js && node build/test-search.js && node build/test-digest.js && node build/test-provision.js && node build/test-bounds.js && node build/test-security.js && node build/verify-package.js && node build/test-meetings.js && node build/test-meeting-detect.js && node build/test-login-item.js && node build/test-startup-switch.js && node build/test-platform-parity.js && node build/test-sysaudio.js && node build/test-audio-orphans.js && node build/test-section-coverage.js && node build/test-ipc-wiring.js && node build/test-docs.js",
     "test:windows": "powershell -ExecutionPolicy Bypass -File build/test-windows-sanity.ps1",
     "test:windows:package": "powershell -ExecutionPolicy Bypass -File build/test-windows-sanity.ps1 -Package",
     "verify-package": "node build/verify-package.js",

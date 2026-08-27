@@ -1,5 +1,6 @@
 # Exercises the exact release-candidate installer on a disposable Windows host.
-# Nothing is published: 0.1.12 reads 0.1.13 from a feed on 127.0.0.1.
+# Nothing is published: the baseline reads the package version under test from
+# a feed on 127.0.0.1.
 param(
     [string]$SetupExe = '',
     [string]$BaselineVersion = '0.1.12'
@@ -173,7 +174,7 @@ try {
     Start-Process -FilePath $exe | Out-Null
     Start-Sleep -Seconds 12
     $running = @(Get-Process Yapper -ErrorAction SilentlyContinue)
-    Confirm ($running.Count -gt 0) 'installed 0.1.13 remains running after startup'
+    Confirm ($running.Count -gt 0) "installed $targetVersion remains running after startup"
     Confirm (Registry-ValueExists $runKey $loginValueName) 'Start with Windows retains the app ID after update'
     Confirm ([string](Registry-Value $runKey $loginValueName) -match [regex]::Escape($exe)) 'Start with Windows still targets the updated executable'
 

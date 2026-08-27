@@ -145,7 +145,7 @@ the Trash refuse the bundle, and check what happens next.
 | `renderer/bubble.html` | 198 | The always-on-top overlay: a capsule at rest, the live transcript on hover |
 | `renderer/bubble.js` | 181 | Its behaviour, including sizing itself to its own contents |
 | `renderer/splash.html` | 116 | Boot screen, including the first-run calibration status; follows the theme |
-| `renderer/pcm-worklet.js` | 33 | The audio-thread tap that produces PCM |
+| `renderer/pcm-worklet.js` | 54 | The audio-thread tap that keeps aligned mixed, microphone and system PCM |
 
 `app.js` is the largest file and the obvious candidate for splitting. It is
 organised in labelled sections (capture, live preview, recording, meeting view,
@@ -248,10 +248,12 @@ note request instead; it streams that request and makes it cancelable. Canceling
 aborts the CLI process or HTTP connection, never writes a partial response, and
 restores the last complete notes during regeneration.
 
-On macOS a call is transcribed as two files instead of one: the microphone
-track and the system-audio track each get their own `transcribeFile()` pass
-(and their own head start), and the lines are interleaved by timestamp with
-`Me:` plus remote labels. On macOS 14+, FluidAudio diarizes the system track on
+On both platforms a call is transcribed as two source files instead of only the
+mix: the microphone track and the system-audio track each get their own
+`transcribeFile()` pass (and their own head start), and the lines are interleaved
+by timestamp with `Me:` plus remote labels. On Windows the renderer's
+audio-thread tap sends aligned source blocks alongside the mix. On macOS 14+,
+FluidAudio diarizes the system track on
 the Neural Engine in parallel with Whisper and `speaker-diarizer.js` aligns its
 time ranges to Whisper's lines as stable `Speaker 1`, `Speaker 2`, etc. A
 failure is non-fatal and falls back to `Them:`. Which side of the call spoke is
@@ -630,8 +632,8 @@ Nothing is in a database; everything is a file the user can open.
 ```
 Documents\Meetings\YYYY-MM-DD_HHMM\
   recording.wav      16 kHz mono PCM, written as it arrives
-  recording.mic.wav  macOS only: the microphone alone, same clock as the mix
-  recording.sys.wav  macOS only: system audio alone; both deleted at stop when
+  recording.mic.wav  the microphone alone, same clock as the mix
+  recording.sys.wav  system audio alone; both deleted at stop when
                      the system side stayed silent the whole meeting
   transcript.txt     "[hh:mm:ss] text" per line; when the per-side tracks
                      existed, carries Me / Speaker N / mapped-name labels
@@ -856,6 +858,7 @@ three groups.
 | `test-live-logic.js` | The confirmation rules — prefix agreement, repeat stripping, degenerate-output detection |
 | `test-dedup.js` | Transcript cleanup: which repeats are removed, which survive, and the time window that separates a seam artefact from a person restating something |
 | `test-two-track.js` | Per-side call tracks: the silence detector that spares the far-side track its inferences, and the merge that interleaves both sides by time with Me/remote labels without inventing, dropping or reordering a word |
+| `test-pcm-worklet.js` | The renderer audio-thread boundary: stereo-to-mono conversion, aligned microphone/system blocks, their exact mixed sum, and silence for a missing source |
 | `test-speakers.js` | Diarization JSON bounds, timestamp overlap, stable Speaker N numbering, safe name mapping and the native helper self-test |
 | `test-two-track-app.js` | The two-track branch through the real app: a folder with per-side tracks comes back labelled, ordered, free of words hallucinated into the silent stretches, and with its audio released |
 | `test-library.js` | The meeting index: what counts as content, day and week selection, and the stamp that decides when a cached entry can be reused |
@@ -868,7 +871,7 @@ three groups.
 | `test-ipc-wiring.js` | Every bridge channel has a counterpart |
 | `test-meeting-detect.js` | Which running app counts as a meeting, in both vocabularies — including the helper-process bundle ids Electron apps actually report, which is what the first macOS build got wrong |
 | `test-sysaudio.js` | Mixing system audio into the microphone: saturating instead of wrapping, the bounded buffer, and a helper that is absent leaving the microphone untouched rather than writing silence over it |
-| `test-platform-parity.js` | The Windows assumptions that mean something else on macOS — asking for screen capture to record, registering a login item by executable path, and telling a Mac user to run a PowerShell script |
+| `test-platform-parity.js` | Cross-platform seams: no Windows screen-capture or setup assumptions on macOS, correct login-item semantics, and Windows retaining the same per-side recording facts as macOS |
 
 **Driving the real app** (Electron, a throwaway `Documents` and `userData` so a
 run can never touch a real meeting):
@@ -876,6 +879,7 @@ run can never touch a real meeting):
 | Test | Covers |
 |---|---|
 | `test-record-cycle.js` | The whole recording cycle: audio in through the real IPC, paused halfway, stopped, every artefact checked |
+| `test-windows-separated-tracks.js` | Windows' real IPC writes and closes aligned mixed, microphone and system WAVs without confusing the mix with either source |
 | `test-notes-cancel.js` | Cancel reaches the actual model job, exits the busy state, restores the previous complete notes and leaves `notes.md` byte-for-byte unchanged |
 | `test-record-recovery.js` | Capture refused, and the audio device vanishing mid-start |
 | `test-faults.js` | Fault injection: the transcription server killed mid-pass, two transcriptions at once, a meeting deleted under a running job, a missing model, and file handles or child processes left behind across repeated cycles |

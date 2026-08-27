@@ -100,7 +100,7 @@ Measured end to end with a 2 h meeting on the `fast` tier (`build/test-two-hours
 
 ## How it works
 
-1. **Record meeting** — captures the system audio (what you hear: Meet, Zoom, Teams…) **and** your microphone, mixed into a single track. Windows takes the system side from Electron's loopback; macOS captures it with ScreenCaptureKit through a native helper and mixes it in the main process.
+1. **Record meeting** — captures the system audio (what you hear: Meet, Zoom, Teams…) **and** your microphone. A mixed track drives recovery and the live transcript, while aligned microphone/system tracks preserve which side spoke. Windows takes the system side from Electron's loopback; macOS uses a Core Audio process tap on 14.4+ and a ScreenCaptureKit fallback on macOS 13.
 2. The audio is written to disk **as it arrives**, already in the format the transcriber consumes (16 kHz mono WAV). If the power goes out mid-meeting, what was recorded up to that point still plays and still transcribes.
 3. **Stop and summarize** — a full windowed pass of whisper.cpp, then `claude -p` to generate the minutes.
 4. Each meeting is a folder in `Documents/Meetings/YYYY-MM-DD_HHMM/`:
@@ -120,7 +120,7 @@ Everything above works on both. These are the differences that remain:
 |---|---|---|
 | System audio | Electron loopback | Core Audio process tap; ScreenCaptureKit fallback on macOS 13 |
 | Meeting detection | registry consent store | CoreAudio process list |
-| Speaker labels | none (mixed capture) | `Me` + locally separated remote voices on macOS 14+; `Me`/`Them` fallback |
+| Speaker labels | reliable `Me`/`Them` from separate source tracks | `Me` + locally separated remote voices on macOS 14+; `Me`/`Them` fallback |
 | Updates | downloads and installs itself | downloads and installs itself |
 | Install | signed-by-nobody NSIS installer | Developer ID signed + Apple-notarized `.dmg` |
 | Hardware | x64 | Apple Silicon only |

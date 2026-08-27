@@ -1530,7 +1530,7 @@ let recFolder = null;
 let recBytes = 0;
 let pendingImport = null;  // capability granted by the native file picker
 
-// macOS also keeps each side of the call as its own file, because mixing
+// Both desktop platforms keep each side of the call as its own file, because mixing
 // destroys the one fact the recorder had for free: which side a word came
 // from. The microphone track is the person recording, the system track is
 // everyone else on the call — so the final pass can label lines Me:/Them:
@@ -1564,8 +1564,7 @@ function writeTracks(mic, sys) {
 
 // macOS records both sides of a call the only way it can: a native helper
 // captures system audio and its samples are added to the microphone's here.
-// On Windows the renderer has already done this in its audio graph, so this
-// stays dormant and the chunks arrive mixed.
+// On Windows the renderer sends the mix plus the two aligned source blocks.
 // The helper's mute watch has to tell Yapper's own audio output from anyone
 // else's (see othersPlaying in mac/system-audio.swift). Packaged, that is the
 // bundle id family; unpackaged it is Electron's own.
@@ -1715,16 +1714,18 @@ ipcMain.handle('recording-start', async (_e, participants) => {
   // nothing happen. Recording starts now; system audio joins the mix as soon
   // as it arrives, so the cost of being wrong is a fraction of a second of
   // one-sided audio rather than a delayed start.
-  if (process.platform === 'darwin') {
+  if (process.platform === 'darwin' || process.platform === 'win32') {
     recTracks = {
       micFd: engine.openWav(resolveDirectFileForWrite(recFolder, path.join(recFolder, MIC_TRACK))),
       sysFd: engine.openWav(resolveDirectFileForWrite(recFolder, path.join(recFolder, SYS_TRACK))),
       micBytes: 0, sysBytes: 0, sysSignal: false
     };
-    holdDisplayAwake(true);
-    lastMicChunkAt = Date.now();     // give the renderer its grace period
-    sysAudio.start();
-    startSoloDrain();
+    if (process.platform === 'darwin') {
+      holdDisplayAwake(true);
+      lastMicChunkAt = Date.now();     // give the renderer its grace period
+      sysAudio.start();
+      startSoloDrain();
+    }
   }
   sysRemainder = 0;
   startHeadStart(recFolder, participants);
@@ -1837,12 +1838,25 @@ function writeRecorded(buf) {
 
 let lastMicChunkAt = 0;
 
-ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
+ipcMain.on('recording-chunk', (_e, arrayBuffer, separated) => {
   if (!(arrayBuffer instanceof ArrayBuffer) || arrayBuffer.byteLength > MAX_AUDIO_CHUNK_BYTES) {
     console.warn('[security] ignored an invalid recording chunk');
     return;
   }
   let buf = Buffer.from(arrayBuffer);
+  let rendererTracks = null;
+  if (process.platform === 'win32' && separated != null) {
+    const valid = separated && separated.mic instanceof ArrayBuffer
+      && separated.sys instanceof ArrayBuffer
+      && separated.mic.byteLength === buf.length
+      && separated.sys.byteLength === buf.length
+      && separated.mic.byteLength <= MAX_AUDIO_CHUNK_BYTES;
+    if (valid) {
+      rendererTracks = { mic: Buffer.from(separated.mic), sys: Buffer.from(separated.sys) };
+    } else {
+      console.warn('[security] ignored invalid separated recording tracks');
+    }
+  }
   // Empty chunks still arrive when the audio graph is running but producing
   // nothing, and counting those as "the microphone is driving" is what let a
   // recording end up empty: the pace looked healthy, so the system audio was
@@ -1850,14 +1864,17 @@ ipcMain.on('recording-chunk', (_e, arrayBuffer) => {
   if (buf.length) lastMicChunkAt = Date.now();
   // The microphone sets the pace: take exactly as much system audio as the
   // renderer just sent, so the mix stays aligned with the file's own clock.
-  let sys = sysAudio.take(buf.length);
+  let sys = process.platform === 'darwin' ? sysAudio.take(buf.length) : null;
   if (sys) {
     sys = applySysGain(sys);
     sendSysWave(sys);
   }
   // Silence stands in for a side that produced nothing, so both tracks keep
   // the same clock as the mix.
-  if (buf.length) writeTracks(buf, sys || Buffer.alloc(buf.length));
+  if (buf.length) {
+    if (rendererTracks) writeTracks(rendererTracks.mic, rendererTracks.sys);
+    else writeTracks(buf, sys || Buffer.alloc(buf.length));
+  }
   if (sys) buf = sysaudio.mixPcm(buf, sys);
   writeRecorded(buf);
 });

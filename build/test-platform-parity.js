@@ -1,6 +1,6 @@
 // The bugs this file guards against all have the same shape: code written for
-// Windows that silently means something else on macOS, and that nobody notices
-// until a Mac user hits it. All three were real.
+// one desktop that silently means something else on the other, and that nobody
+// notices until someone hits it. All were real.
 //
 //  1. Recording asked for getDisplayMedia first, for the Windows loopback. On
 //     macOS that costs a Screen Recording permission and, if refused, rejects —
@@ -44,6 +44,7 @@ const mainCode = code('main.js');
 const preload = read('preload.js');
 const renderer = read('renderer/app.js');
 const rendererCode = code('renderer/app.js');
+const workletCode = code('renderer/pcm-worklet.js');
 const html = read('renderer/index.html');
 const pkg = JSON.parse(read('package.json'));
 const windowsInstaller = read('build/installer.nsh');
@@ -210,6 +211,25 @@ check('the setup.ps1 advice depends on the platform',
   'a Mac user would end up hunting for a PowerShell script');
 check('and macOS gets one it can actually follow',
   /Restart Yapper to download it/.test(ps1), 'it is not told what to do');
+
+// ---- 4. Windows keeps the source identity macOS already had ----
+check('Windows opens the same two per-side recording files as macOS',
+  /platform === 'darwin' \|\| process\.platform === 'win32'/.test(mainCode)
+  && /micFd:\s*engine\.openWav/.test(mainCode) && /sysFd:\s*engine\.openWav/.test(mainCode),
+  'Windows would fall back to a mixed transcript with no reliable speaker side');
+check('the audio-thread tap has separate mic and system inputs',
+  /numberOfInputs:\s*2/.test(rendererCode)
+  && /micLP\.connect\(pcmNode,\s*0,\s*0\)/.test(rendererCode)
+  && /sysGainNode\.connect\(pcmNode,\s*0,\s*1\)/.test(rendererCode),
+  'the two sources would be mixed before their identity reaches main.js');
+check('the worklet returns mixed, microphone and system blocks together',
+  /parts\s*=\s*\{\s*mixed:\s*\[\],\s*mic:\s*\[\],\s*sys:\s*\[\]\s*\}/.test(workletCode)
+  && /postMessage\(packet/.test(workletCode),
+  'independent callbacks could drift and put words on the wrong side');
+check('Windows writes the separated blocks while keeping the mixed recording',
+  /rendererTracks[\s\S]{0,120}writeTracks\(rendererTracks\.mic,\s*rendererTracks\.sys\)/.test(mainCode)
+  && /writeRecorded\(buf\)/.test(mainCode),
+  'the live/recovery mix or the final Me/Them tracks would be missing');
 
 console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

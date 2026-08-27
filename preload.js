@@ -21,7 +21,7 @@ contextBridge.exposeInMainWorld('yapper', {
   platform: process.platform,
 
   recordingStart: participants => invoke('recording-start', participants),
-  recordingChunk: buf => ipcRenderer.send('recording-chunk', buf),
+  recordingChunk: (buf, tracks) => ipcRenderer.send('recording-chunk', buf, tracks),
   recordingFinish: (title, markers) => invoke('recording-finish', title, markers),
   markShortcut: on => ipcRenderer.send('mark-shortcut', on),
   onMarkMoment: cb => ipcRenderer.on('mark-moment', () => cb()),
