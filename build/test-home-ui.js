@@ -85,6 +85,20 @@ meeting('2026-01-05_1100', {
   'notes.md': '## Decisions\n- Nothing was decided in January.\n'
 });
 
+// Keep the window test independent of whichever model or CLI happens to be
+// installed on the host. The parser still has to resolve every citation
+// against the real meetings created above.
+const llm = require('../llm');
+llm.generate = async () => `## Threads
+- The rollout moved from planning to a Thursday shipping decision. [Standup, Rollout Planning]
+
+## Shifts
+None
+
+## Unresolved
+- Ownership of the rollback script remains open. [Rollout Planning]
+`;
+
 require('../main.js');
 
 app.whenReady().then(async () => {
