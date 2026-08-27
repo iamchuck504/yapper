@@ -74,7 +74,14 @@ function Test-InstallerManifest {
 Push-Location $root
 try {
     if (-not (Test-Path -LiteralPath $electron)) {
-        throw 'Electron is missing. Run npm install first.'
+        $electronInstaller = Join-Path $root 'node_modules\electron\install.js'
+        if (-not (Test-Path -LiteralPath $electronInstaller)) {
+            throw 'Electron is missing. Run npm install first.'
+        }
+        Run-Console 'Install Electron runtime' 'node.exe' @($electronInstaller)
+        if (-not (Test-Path -LiteralPath $electron)) {
+            throw 'Electron runtime installation completed without producing electron.exe.'
+        }
     }
 
     Run-Console 'Unit, security, and static parity suite' 'npm.cmd' @('test')
