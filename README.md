@@ -18,8 +18,10 @@ Runs on **Windows** and **macOS (Apple Silicon)**. Both record both sides of a c
 > [yapper-releases](https://github.com/iamchuck504/yapper-releases/releases/latest)
 > (an installers-only repo, so a download does not mean cloning this one). Windows installs
 > per-user and updates itself from that feed; macOS ships a `.dmg`. Both download
-> the engine on first run. Publishing a new version: bump `version` in
-> `package.json` and `npm run release`.
+> the engine on first run. Publishing is platform-gated: bump `version` in
+> `package.json` and `package-lock.json`, run `bash mac/build-app.sh` on a Mac,
+> and `npm run release` on Windows. Either platform can create the release;
+> the second adds its verified assets to that same tag.
 
 ## Live transcription
 
@@ -102,9 +104,10 @@ Measured end to end with a 2 h meeting on the `fast` tier (`build/test-two-hours
 
 1. **Record meeting** — captures the system audio (what you hear: Meet, Zoom, Teams…) **and** your microphone. A mixed track drives recovery and the live transcript, while aligned microphone/system tracks preserve which side spoke. Windows takes the system side from Electron's loopback; macOS uses a Core Audio process tap on 14.4+ and a ScreenCaptureKit fallback on macOS 13.
 2. The audio is written to disk **as it arrives**, already in the format the transcriber consumes (16 kHz mono WAV). If the power goes out mid-meeting, what was recorded up to that point still plays and still transcribes.
-3. **Stop and summarize** — a full windowed pass of whisper.cpp, then `claude -p` to generate the minutes.
+3. **Stop and summarize** — a full windowed pass of whisper.cpp, then the configured provider generates the minutes through the common `llm.generate()` seam.
 4. Each meeting is a folder in `Documents/Meetings/YYYY-MM-DD_HHMM/`:
-   - `recording.wav` — the audio
+   - `recording.wav` — the mixed recovery/live track while processing
+   - `recording.mic.wav` / `recording.sys.wav` — aligned source tracks while processing
    - `transcript.txt` — the transcript with timestamps
    - `notes.md` — the generated minutes
    These are ordinary unencrypted files. Protect the account with FileVault or
@@ -122,7 +125,7 @@ Everything above works on both. These are the differences that remain:
 | Meeting detection | registry consent store | CoreAudio process list |
 | Speaker labels | `Me` + optional locally separated remote voices; `Me`/`Them` by default | `Me` + optional locally separated remote voices on macOS 14+; `Me`/`Them` by default |
 | Updates | downloads and installs itself | downloads and installs itself |
-| Install | signed-by-nobody NSIS installer | Developer ID signed + Apple-notarized `.dmg` |
+| Install | unsigned NSIS installer | Developer ID signed + Apple-notarized `.dmg` |
 | Hardware | x64 | Apple Silicon only |
 
 **macOS permissions.** The first recording asks for the microphone, and for **System Audio Recording Only** — the permission that lets Yapper hear the other side of the call, granted in System Settings › Privacy & Security, after which the app must be reopened. It does exactly what its name says: system audio through a Core Audio process tap, no screen and no other app's data. On macOS 13, where that permission does not exist, Yapper falls back to ScreenCaptureKit and has to ask for **Screen Recording** instead; no screen content is ever read there either, the video side being reduced to 2×2 pixels once a second and thrown away. Without either, Yapper records the microphone alone and says so on screen.
@@ -145,7 +148,7 @@ curl -fsSL https://github.com/iamchuck504/yapper-releases/releases/latest/downlo
 then checks the Developer ID Team ID, notarization ticket and Gatekeeper before
 installing. It never clears quarantine. The engine is not re-downloaded — it lives in
 `~/Library/Application Support/yapper`, outside the bundle — so an update is
-~95 MB, not another 650 MB, and meetings and granted permissions survive it.
+~117 MB, not another 650 MB, and meetings and granted permissions survive it.
 
 Note for whoever cuts a release: electron-builder writes one manifest per platform, `latest.yml` from the Windows build and `latest-mac.yml` from the mac one. Both belong on the release, and `mac/build-app.sh` uploads the mac one with the dmg — a release published from only one platform would otherwise tell the other's users that nothing is new.
 
@@ -187,9 +190,11 @@ or the **Yapper** shortcut on the desktop (Windows) / in Applications (macOS).
 
 **Windows**
 
-1. Copy the project folder (without `node_modules`, `bin` or `models` if you want it small: setup downloads those).
-2. On the new PC: install Node (`winget install OpenJS.NodeJS.LTS`) if it is not there.
-3. Run `powershell -ExecutionPolicy Bypass -File setup.ps1` — downloads the whisper.cpp engine (and the CUDA build if there is an NVIDIA GPU), the models, installs Electron and creates the shortcut.
+1. Download `Yapper-Setup-<version>.exe` from [yapper-releases](https://github.com/iamchuck504/yapper-releases/releases/latest).
+2. Run it as the current user; it needs no administrator rights. Until Windows
+   signing is added, SmartScreen may require **More info → Run anyway**.
+3. First launch downloads the whisper.cpp engine and models with progress on
+   screen; an NVIDIA machine also receives the faster CUDA build.
 
 **macOS** — for a signed/notarized release:
 
@@ -198,9 +203,10 @@ or the **Yapper** shortcut on the desktop (Windows) / in Applications (macOS).
    Developer ID signature and Apple's notarization ticket.
 3. First launch downloads the engine and models (~600 MB) with progress on
    screen. Nothing else to install.
-4. The first recording asks for the **microphone** and for **Screen Recording**.
-   The second one has to be granted in System Settings and the app reopened;
-   without it only the microphone is captured, and the app says so.
+4. The first recording asks for the **microphone** and system-audio access. On
+   macOS 14.4+ that is **System Audio Recording Only**; macOS 13 uses the
+   broader **Screen Recording** fallback. Grant it in System Settings and
+   reopen the app; without it only the microphone is captured, and Yapper says so.
 
 **Requirements for that Mac:** Apple Silicon, macOS 13 or newer. Meeting
 auto-detection needs macOS 14.4 (the CoreAudio process list it reads did not
@@ -302,4 +308,6 @@ Note: they write progress to a `progress.log` as well as stdout, because Electro
 
 - The first transcription after booting takes a little longer (loading the model).
 - On a long meeting, CPU transcription can take several minutes; the app shows live progress.
-- On macOS, system audio needs the Screen Recording permission; without it only the microphone is recorded, and the app says so.
+- On macOS 14.4+, system audio needs **System Audio Recording Only**. macOS 13
+  uses **Screen Recording** as its fallback. Without the applicable permission
+  only the microphone is recorded, and the app says so.

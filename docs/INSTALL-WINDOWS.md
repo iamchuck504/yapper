@@ -90,8 +90,9 @@ a paid API, or Ollama.
 ## 5. Record something
 
 Press **New meeting**, then record. Yapper captures **both** the system audio —
-what you hear: Meet, Zoom, Teams — and your microphone, mixed into one track.
-Nothing else to set up.
+what you hear: Meet, Zoom, Teams — and your microphone. A mixed recovery track
+drives the live transcript while aligned microphone/system tracks preserve
+which side spoke. Nothing else to set up.
 
 See [FEATURES.md](FEATURES.md) for what everything does.
 

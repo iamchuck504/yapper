@@ -4,12 +4,13 @@
 //
 //   node_modules\electron\dist\electron.exe build\shoot-manual.js
 //
-// The two model-written panels (This week, Ask) use whatever provider the
-// machine has — claude-cli here — so those shots show real output, not mockups.
+// The two provider-written panels use deterministic demo prose over the real
+// indexed meetings. Screenshots must be reproducible without an account or a
+// network; everything around that prose is still rendered by the production UI.
 const path = require('path');
 const fs = require('fs');
 const { app, BrowserWindow } = require('electron');
-const { sandbox, logger, mainWindow, within } = require('./harness');
+const { sandbox, logger, mainWindow } = require('./harness');
 
 const ROOT = sandbox('shoot-manual');
 const say = logger(ROOT);
@@ -126,7 +127,9 @@ app.whenReady().then(async () => {
   const $ = js => win.webContents.executeJavaScript(js, true);
   const wait = ms => new Promise(r => setTimeout(r, ms));
 
-  win.setBounds({ x: 40, y: 40, width: 1100, height: 780 });
+  // Match the real default window so the manual never advertises a layout the
+  // installed app does not open with.
+  win.setBounds({ x: 40, y: 40, width: 1100, height: 840 });
   await $('window.yapper.refreshLibrary()');
   await wait(400);
 
@@ -141,15 +144,31 @@ app.whenReady().then(async () => {
   await shot(win, '02-meeting-detected.png');
   await $(`document.getElementById('mp-dismiss').click()`);
 
-  // -- 3. This week (the model writes the review) --
+  // -- 3. This week --
   await $(`document.querySelector('#home-scope .seg-btn[data-scope="week"]').click()`);
-  await within($(`(async () => {
-    for (let i = 0; i < 240; i++) {
-      if (!document.getElementById('week-foot').classList.contains('hidden')) return true;
-      await new Promise(r => setTimeout(r, 500));
-    }
-    return false;
-  })()`), 'weekly', 3 * 60 * 1000);
+  await wait(500);
+  await $(`(async () => {
+    const w = await window.yapper.weeklySummary({});
+    const refs = {
+      q3: { title: 'Q3 Planning', folder: ${JSON.stringify(path.join(ROOT, 'Meetings', `${monday}_1000`))} },
+      standup: { title: 'Standup', folder: ${JSON.stringify(path.join(ROOT, 'Meetings', `${TODAY}_0900`))} },
+      design: { title: 'Design Review', folder: ${JSON.stringify(path.join(ROOT, 'Meetings', `${day(-1)}_1500`))} }
+    };
+    renderWeek({ ...w, reason: undefined, writing: false, cached: false,
+      fromMeetings: 3, dropped: 0, truncated: 0,
+      sections: [
+        { title: 'Threads', items: [
+          { text: 'Pricing and rollout timing stayed connected throughout the week.', cites: [refs.q3, refs.standup] }
+        ] },
+        { title: 'Shifts', items: [
+          { text: 'The rollout moved forward to August 1.', cites: [refs.q3, refs.standup] }
+        ] },
+        { title: 'Unresolved', items: [
+          { text: 'The migration runbook still needs a clear owner.', cites: [refs.q3, refs.design] }
+        ] }
+      ]
+    });
+  })()`);
   await wait(400);
   await shot(win, '03-week.png');
 
@@ -158,19 +177,17 @@ app.whenReady().then(async () => {
   await wait(700);
   await shot(win, '04-actions.png');
 
-  // -- 5. Search, with an answered question --
+  // -- 5. Search, with deterministic grounded prose over real search results --
   await $(`document.getElementById('btn-search-view').click()`);
   await wait(300);
-  await $(`(() => { const i = document.getElementById('search-q');
-    i.value = 'What did we decide about pricing?';
-    document.getElementById('btn-search').click(); })()`);
-  await within($(`(async () => {
-    for (let i = 0; i < 240; i++) {
-      if (!document.getElementById('search-answer').classList.contains('hidden')) return true;
-      await new Promise(r => setTimeout(r, 500));
-    }
-    return false;
-  })()`), 'ask', 3 * 60 * 1000);
+  await $(`(async () => {
+    const query = 'What did we decide about pricing?';
+    document.getElementById('search-q').value = query;
+    const res = await window.yapper.search(query, { limit: 20 });
+    renderSearchResults(res);
+    showSearchAnswer('The new price is $29 per month. [Q3 Planning]');
+    document.getElementById('search-status').classList.add('hidden');
+  })()`);
   await wait(300);
   await shot(win, '05-search.png');
 
@@ -185,7 +202,7 @@ app.whenReady().then(async () => {
   // -- 7. the record view, options on show --
   await $(`document.getElementById('btn-new').click()`);
   await wait(500);
-  win.setBounds({ x: 40, y: 40, width: 1100, height: 1050 });
+  win.setBounds({ x: 40, y: 40, width: 1100, height: 840 });
   await wait(400);
   await shot(win, '07-new-meeting.png');
 
@@ -207,7 +224,7 @@ app.whenReady().then(async () => {
   })()`);
   await $('startRecording()');
   await wait(2600);
-  win.setBounds({ x: 40, y: 40, width: 1100, height: 900 });
+  win.setBounds({ x: 40, y: 40, width: 1100, height: 840 });
   await wait(300);
   await shot(win, '08-recording.png');
 

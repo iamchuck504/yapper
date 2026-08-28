@@ -50,13 +50,21 @@ app.whenReady().then(async () => {
   const win = await mainWindow({ settleMs: 0 });
 
   const initialBounds = win.getBounds();
-  check('the main window opens taller without giving up horizontal space',
-    initialBounds.width === 1100 && initialBounds.height === 840,
-    JSON.stringify(initialBounds));
   const workArea = screen.getDisplayMatching(initialBounds).workArea;
+  // BrowserWindow asks for 1100x840, but Electron clamps an oversized window
+  // to the display's usable area. GitHub's macOS runner is only 1024x684; that
+  // is a valid small-screen result, not evidence that the desktop default
+  // regressed. Assert the requested size whenever it fits and the native clamp
+  // everywhere else.
+  const expectedWidth = Math.min(1100, workArea.width);
+  const expectedHeight = Math.min(840, workArea.height);
+  check('the main window opens taller without giving up horizontal space',
+    initialBounds.width === expectedWidth && initialBounds.height >= expectedHeight - 3
+      && initialBounds.height <= expectedHeight,
+    JSON.stringify({ window: initialBounds, expected: { width: expectedWidth, height: expectedHeight } }));
   check('the main window opens centered in the usable screen area',
-    Math.abs(initialBounds.x + initialBounds.width / 2 - (workArea.x + workArea.width / 2)) <= 1
-      && Math.abs(initialBounds.y + initialBounds.height / 2 - (workArea.y + workArea.height / 2)) <= 1,
+    Math.abs(initialBounds.x + initialBounds.width / 2 - (workArea.x + workArea.width / 2)) <= 2
+      && Math.abs(initialBounds.y + initialBounds.height / 2 - (workArea.y + workArea.height / 2)) <= 2,
     JSON.stringify({ window: initialBounds, workArea }));
 
   win.webContents.on('console-message', (_e, level, message, line, source) => {

@@ -296,7 +296,10 @@ Listed so no time is spent on them:
 
 ## 5. Releasing from Windows
 
-`npm run release` still works and is the normal path. Worth knowing:
+`npm run release` is the Windows path. It refuses to run off Windows, repeats
+the automated package and exact installer/update/uninstall gates, then either
+creates the version's release or replaces the carried Windows assets in a
+release the Mac already created.
 
 `mac/build-app.sh` now creates the release if it does not exist, and when it
 does, it carries the previous release's Windows assets forward — otherwise a
@@ -304,19 +307,12 @@ mac-only version would leave `latest.yml` off the newest release and Windows
 copies would stop seeing updates, silently. Cutting from Windows afterwards
 replaces those with real ones.
 
-The public feed has a macOS-first `v0.1.13`; its Windows files are carried over
-from the older public Windows build so existing copies do not lose their update
-feed. The private `0.1.13` Windows candidate completed the disposable
-install/update/uninstall lifecycle, but it was not published.
-
-The source-separation and local remote-speaker parity changes are kept in
-`0.1.13`: Windows retains aligned microphone and system tracks, then uses the
-pinned local sherpa-onnx worker to distinguish remote voices while preserving
-the mixed recovery/live stream. Before publication, run the private Windows
-release-candidate workflow, complete the manual gates in
-`.github/WINDOWS-RELEASE-CHECKLIST.md`, and upload the EXE, blockmap and
-`latest.yml` together. Do not publish from only one platform without preserving
-the other platform's updater files.
+Before publication, run the private Windows release-candidate workflow and
+complete the manual gates in `.github/WINDOWS-RELEASE-CHECKLIST.md`. Windows
+retains aligned microphone and system tracks, then optionally uses the pinned
+local sherpa-onnx worker to distinguish remote voices while preserving the
+mixed recovery/live stream. Do not publish from only one platform without
+preserving the other platform's updater files.
 
 ---
 
