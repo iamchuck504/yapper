@@ -134,12 +134,12 @@ try {
     while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 3
         $log = Get-Content $serverLog -Raw -ErrorAction SilentlyContinue
-        if ($log -match "served .*Yapper-Setup-$([regex]::Escape($targetVersion))\.exe") {
+        if ($log -match "completed .*Yapper-Setup-$([regex]::Escape($targetVersion))\.exe") {
             $downloaded = $true
             break
         }
     }
-    Confirm $downloaded "the updater requested the exact $targetVersion installer" ((Get-Content $serverLog -Raw -ErrorAction SilentlyContinue))
+    Confirm $downloaded "the updater finished downloading the exact $targetVersion installer" ((Get-Content $serverLog -Raw -ErrorAction SilentlyContinue))
     $settings = Get-Content -LiteralPath $settingsFile -Raw | ConvertFrom-Json
     Confirm ($settings.sentinel -eq $sentinel -and $settings.theme -eq 'light') 'application startup preserves existing settings'
     Confirm ($settings.openAtLogin -eq $true) 'Start with Windows defaults on for a fresh profile'

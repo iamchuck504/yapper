@@ -18,5 +18,6 @@ http.createServer((req, res) => {
   served.push(req.url);
   console.log(`served ${req.url}`);
   res.writeHead(200, { 'content-length': fs.statSync(file).size });
+  res.on('finish', () => console.log(`completed ${req.url}`));
   fs.createReadStream(file).pipe(res);
 }).listen(8123, '127.0.0.1', () => console.log(`feed on 8123 from ${dir}`));
