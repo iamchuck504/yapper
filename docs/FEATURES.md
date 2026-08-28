@@ -222,21 +222,25 @@ section at a time while the provider writes them; only the complete response is
 saved. A small timing line measured on the current computer shows transcription,
 time to first notes, and total note-writing time.
 
-On Windows and macOS 14 or newer, the final local pass also separates distinct
-voices on the remote/system track as **Speaker 1**, **Speaker 2**, and so on.
-Windows uses a pinned local multithreaded native model runner and macOS uses Core ML. The meeting
+On Windows and macOS 14 or newer, the optional **Identify speakers** toggle can
+add a local pass that separates distinct voices on the remote/system track as
+**Speaker 1**, **Speaker 2**, and so on. It is off by default so transcription
+completes as soon as Whisper finishes, without waiting for the extra voice
+analysis. The Windows path uses a pinned multithreaded native model runner and
+macOS uses Core ML. The meeting
 keeps the two optional people fields distinct: **Participants** records who
 attended for meeting context and search, but does not assign voices; the
-collapsed **Match voices to names** control records who said what. Open it only
-when you want to choose or type each detected speaker's name, then use
+collapsed **Match voices to names** control appears only when distinct voices
+were actually detected and records who said what. Open it only when you want
+to choose or type each detected speaker's name, then use
 **Regenerate** to update the notes with those names. Labels remain stable within
 that meeting; Yapper does not infer a person's identity from the attendee list.
 Those technical labels stay in the full transcript and matching panel, not the
 generated notes: notes use assigned names when known and otherwise summarize
 the discussion neutrally. A name stated in the conversation is preserved, and
-every explicitly named action owner remains attached to their task. If the
-local detector is unavailable, the transcript still completes with the
-reliable `Me`/`Them` side-of-call labels.
+every explicitly named action owner remains attached to their task. If
+identification is disabled or the local detector is unavailable, the
+transcript still completes with the reliable `Me`/`Them` side-of-call labels.
 
 ### Editing, regenerating, reading aloud
 
@@ -331,11 +335,15 @@ system trash — never an irreversible delete.
 
 ## Settings and behaviour
 
-**Settings** in the sidebar (or **⌘,** / Ctrl+,) opens every option on its own
-page — provider and key, note style and language, recording, bubble,
-auto-detection, theme, start at login — without starting a meeting. It is the
-same card the record view folds away under *Meeting options*, shown in one
-place rather than copied.
+**Settings** in the sidebar (or **⌘,** / Ctrl+,) opens every option without
+starting a meeting. Four tabs keep the full set manageable: **Notes** (style,
+detail, instructions, provider and keys), **Recording** (spoken language,
+noise reduction, participants, optional speaker identification and audio
+retention), **During meetings** (bubble, auto-detection, startup and starting
+corner), and **App** (theme). These are the same real controls the record view
+folds away under *Meeting options*, re-hosted rather than copied. The frequent
+**Spoken language** selector also appears beside the microphone on New meeting;
+both locations stay synchronized.
 
 ### Providers, keys and privacy
 
@@ -388,9 +396,9 @@ The rules around it:
 - **Theme** — **Auto**, **Light** or **Dark** under Meeting options → App. Auto
   follows the system setting and keeps following it while the app runs, so a
   machine that switches at sunset takes Yapper with it. Dark by default. The
-  button beside the title is the shortcut, and it commits to a side rather than
-  flipping Auto. Applies everywhere, including the capsule and the startup
-  splash.
+  **Appearance** button at the bottom of the sidebar is the shortcut, and it
+  commits to a side rather than flipping Auto. Applies everywhere, including
+  the capsule and the startup splash.
 - **Start at login** — on by default on Windows. On macOS it is off until it is
   switched on, it only works from an Applications folder on the startup disk
   (`/Applications` or `~/Applications`, checked by which mounted volume the app

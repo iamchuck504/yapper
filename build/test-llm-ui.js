@@ -26,13 +26,9 @@ app.whenReady().then(async () => {
 
   const $ = js => win.webContents.executeJavaScript(js);
 
-  // The provider rows live inside the record view, and the app opens on Today.
-  // Measuring them while their own section is display:none reports 0×0 for
-  // everything, so "is it actually on screen" could never pass — it was
-  // measuring the closed view, not the notice.
-  // And unfolded: these controls live inside the meeting options, which start
-  // folded. Measuring "is it on screen" with the fold closed reports 0×0 all
-  // over again, for a different reason.
+  // The provider rows live inside Meeting options, which start folded.
+  // Measuring "is it actually on screen" with the fold closed reports 0×0,
+  // so unfold the real record view before checking their geometry.
   await $(`showView('record'); setOptionsOpen(true)`);
   await new Promise(r => setTimeout(r, 300));
 

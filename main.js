@@ -278,6 +278,10 @@ function createBubble() {
     y,
     frame: false,
     transparent: true,
+    // The CSS card owns the capsule shape. macOS's shadow and rounded window
+    // chrome otherwise outline the transparent rectangle around it.
+    hasShadow: false,
+    roundedCorners: false,
     resizable: false,
     movable: true,
     skipTaskbar: true,
@@ -730,7 +734,7 @@ function createWindow() {
   const dark = darkNow();
   win = new BrowserWindow({
     width: 1100,
-    height: 760,
+    height: 840,
     minWidth: 820,
     minHeight: 560,
     backgroundColor: dark ? '#0C0D10' : '#FBFAF8',
@@ -746,6 +750,15 @@ function createWindow() {
       webSecurity: true
     }
   });
+  // Electron's native center() sits slightly high on macOS because it applies
+  // title-bar compensation. Center the actual outer bounds in the usable area
+  // so the visual weight is even above and below the window.
+  const area = screen.getDisplayMatching(win.getBounds()).workArea;
+  const [windowWidth, windowHeight] = win.getSize();
+  win.setPosition(
+    Math.round(area.x + (area.width - windowWidth) / 2),
+    Math.round(area.y + (area.height - windowHeight) / 2)
+  );
   lockWindowToPage(win, MAIN_PAGE_URL);
 
   // Whether this window is actually on screen. The page cannot answer that
@@ -1510,6 +1523,14 @@ function readSpeakerMap(folder) {
   try { return speakerDiarizer.normalizeSpeakerMap(JSON.parse(text)); } catch { return {}; }
 }
 
+// Me/Them comes for free from the two physical tracks; it is not evidence that
+// the optional voice-identification pass ran. Only expose name matching when
+// at least one distinct remote Speaker N label was actually produced.
+function identifiedSpeakerState(rawTranscript, map = {}) {
+  const state = speakerDiarizer.speakerState(rawTranscript, map);
+  return state.some(row => /^Speaker [1-9]\d*$/.test(row.label)) ? state : [];
+}
+
 function rawMeetingTranscript(folder) {
   const name = meetingFileExists(folder, 'transcript.raw.txt') ? 'transcript.raw.txt' : 'transcript.txt';
   return readMeetingText(folder, name, { maxBytes: 64 * 1024 * 1024 });
@@ -2131,8 +2152,9 @@ function humanTranscribeError(err) {
   return m;
 }
 
-ipcMain.handle('transcribe', async (_e, folder) => {
+ipcMain.handle('transcribe', async (_e, folder, identifySpeakers = false) => {
   folder = requireMeetingFolder(folder);
+  identifySpeakers = identifySpeakers === true;
   const wav = resolveDirectFileForWrite(folder, path.join(folder, 'recording.wav'));
   if (!meetingFileExists(folder, 'recording.wav')) {
     // Two transcriptions of the same meeting can be in flight at once — the
@@ -2196,6 +2218,7 @@ ipcMain.handle('transcribe', async (_e, folder) => {
 
   let lines;
   let diarization = null;
+  let diarizationRaw = null;
   try {
     if (twoTrack) {
       // Speaker detection runs beside transcription: Core ML on macOS and a
@@ -2203,14 +2226,23 @@ ipcMain.handle('transcribe', async (_e, folder) => {
       // its failure never costs the transcript.
       let waitingForSpeakers = false;
       let diarizationDone = false;
-      const diarizationRaw = speakerDiarizer.diarizeFile(helperPath('speaker-diarize'), sysWav, {
-        onProgress: (done, total) => {
-          if (waitingForSpeakers && total > 0) {
-            send(`\rIdentifying remote speakers locally… ${Math.round(done / total * 100)}%`);
+      if (identifySpeakers) {
+        // The platform-specific local diarizer runs beside Whisper where
+        // possible. It is off by default: without it the meeting finishes as
+        // soon as the two Whisper tracks do and retains the reliable Me/Them
+        // labels.
+        diarizationRaw = speakerDiarizer.diarizeFile(helperPath('speaker-diarize'), sysWav, {
+          onProgress: (done, total) => {
+            if (waitingForSpeakers && total > 0) {
+              send(`\rIdentifying remote speakers locally… ${Math.round(done / total * 100)}%`);
+            }
           }
-        }
+        });
+      }
+      const diarizationRun = diarizationRaw && diarizationRaw.then(result => {
+        diarizationDone = true;
+        return result;
       });
-      const diarizationRun = diarizationRaw.then(result => { diarizationDone = true; return result; });
       const micLines = await engine.transcribeFile(micWav,
         { ...opts, from: head && head.mic, onProgress: progress(0, 50) });
       const sysLines = await engine.transcribeFile(sysWav,
@@ -2221,20 +2253,23 @@ ipcMain.handle('transcribe', async (_e, folder) => {
         // gives back an empty list, whatever the helper finds. It is still
         // chewing the whole file on the Neural Engine; waiting on it would be a
         // progress bar for nothing.
-        diarizationRaw.cancel();
+        if (diarizationRaw) diarizationRaw.cancel();
         lines = micLines;
-      } else {
+      } else if (diarizationRun) {
         waitingForSpeakers = true;
         if (!diarizationDone) send('\rIdentifying remote speakers locally…');
         diarization = await diarizationRun;
         const remote = speakerDiarizer.labelRemoteLines(sysLines, diarization.segments);
         lines = engine.mergeSpeakerTracks(micLines, remote.lines);
+      } else {
+        lines = engine.mergeSpeakerTracks(micLines, sysLines);
       }
     } else {
       lines = await engine.transcribeFile(wav,
         { ...opts, from: head && head.mixed, onProgress: progress(0, 100) });
     }
   } catch (err) {
+    if (diarizationRaw) diarizationRaw.cancel();
     if (!liveOn) await engine.stop();
     // The same race as above, but lost later: both callers found the wav, the
     // winner finished and released the audio, and this one was mid-read when
@@ -3068,9 +3103,9 @@ ipcMain.handle('load-meeting', async (_e, folder) => {
     summary: readMeetingText(folder, 'notes.md', { maxBytes: 5 * 1024 * 1024 }),
     title: readMeetingText(folder, 'title.txt', { maxBytes: 1000 }).trim(),
     participants: readMeetingText(folder, 'participants.txt', { maxBytes: 10000 }).trim(),
-    // Older transcripts predate the immutable label source. Do not show a
-    // mapping panel that cannot safely be reapplied from those files.
-    speakers: hasSpeakerSource ? speakerDiarizer.speakerState(rawTranscript, readSpeakerMap(folder)) : [],
+    // Older transcripts predate the immutable label source, while the fast
+    // path has only Me/Them. Neither should show a voice-matching panel.
+    speakers: hasSpeakerSource ? identifiedSpeakerState(rawTranscript, readSpeakerMap(folder)) : [],
     hasRecording: fs.readdirSync(folder).some(f => {
       if (!f.startsWith('recording.')) return false;
       try { resolveDirectFile(folder, path.join(folder, f)); return true; } catch { return false; }
@@ -3101,11 +3136,15 @@ ipcMain.handle('set-speaker-map', async (_e, folder, nextMap) => {
   }
   const rawTranscript = rawMeetingTranscript(folder);
   const map = speakerDiarizer.normalizeSpeakerMap(nextMap);
+  const speakers = identifiedSpeakerState(rawTranscript, map);
+  if (!speakers.length) {
+    throw new Error('This meeting does not have identified speakers to match.');
+  }
   const transcript = speakerDiarizer.applySpeakerMap(rawTranscript, map);
   writeMeetingText(folder, 'speaker-map.json', JSON.stringify(map, null, 2), { maxBytes: 64 * 1024 });
   writeMeetingText(folder, 'transcript.txt', transcript, { maxBytes: 64 * 1024 * 1024 });
   refreshLibrary();
-  return { transcript, speakers: speakerDiarizer.speakerState(rawTranscript, map) };
+  return { transcript, speakers };
 });
 
 ipcMain.handle('open-folder', async (_e, folder) => {
@@ -4011,8 +4050,12 @@ ipcMain.handle('export-pdf', async (_e, html, suggestedName) => {
     // document CSS also avoids Chromium shifting a continued list horizontally.
     const data = await pdfWin.webContents.printToPDF({
       printBackground: true,
-      margins: { marginType: 'custom', top: 0.55, bottom: 0.55, left: 0.65, right: 0.65 },
-      pageSize: 'Letter'
+      // CSS owns the repeated reading margin and paints the complete page box.
+      // Native margins live outside the HTML canvas and show as white edges on
+      // a dark export.
+      margins: { marginType: 'none' },
+      pageSize: 'Letter',
+      preferCSSPageSize: true
     });
     fs.writeFileSync(res.filePath, data);
     return res.filePath;

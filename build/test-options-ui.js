@@ -32,6 +32,65 @@ app.whenReady().then(async () => {
   const regenStyles = await $(`[...document.getElementById('regen-style').options].map(o => o.value)`);
   check('Memo on regenerate too', regenStyles.includes('memo'), regenStyles.join(', '));
 
+  // The redesign exposes the frequent spoken-language choice beside the mic,
+  // while Settings keeps the canonical control. They must remain one setting,
+  // whichever doorway is used.
+  await $(`document.getElementById('btn-new').click()`);
+  check('the quick spoken-language control starts in sync',
+    await $(`document.getElementById('quick-spoken-lang').value === document.getElementById('spoken-lang').value`),
+    await $(`document.getElementById('quick-spoken-lang').value + ' / ' + document.getElementById('spoken-lang').value`));
+  await $(`(() => { const q = document.getElementById('quick-spoken-lang');
+    q.value = 'es'; q.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  check('changing the quick language updates the full setting',
+    await $(`document.getElementById('spoken-lang').value === 'es'
+      && localStorage.getItem('yapper-spoken-lang') === 'es'`),
+    await $(`document.getElementById('spoken-lang').value + ' / ' + localStorage.getItem('yapper-spoken-lang')`));
+  await $(`(() => { const full = document.getElementById('spoken-lang');
+    full.value = 'auto'; full.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  check('changing the full setting updates the quick language',
+    await $(`document.getElementById('quick-spoken-lang').value === 'auto'`),
+    await $(`document.getElementById('quick-spoken-lang').value`));
+
+  // Settings is shorter because it shows one category at a time, not because
+  // controls were removed. Every old option remains in its intended section.
+  const sections = {
+    notes: ['style-pills', 'detail-seg', 'lang-seg', 'custom-instructions', 'llm-provider'],
+    recording: ['noise-seg', 'spoken-lang', 'participants-rec', 'opt-identify-speakers', 'opt-keep-audio'],
+    during: ['opt-bubble', 'opt-autodetect', 'opt-startup', 'corner-seg'],
+    app: ['theme-seg']
+  };
+  await $(`document.getElementById('btn-settings').click()`);
+  for (const [section, ids] of Object.entries(sections)) {
+    await $(`document.querySelector('[data-settings-section="${section}"]').click()`);
+    const visible = await $(`[...document.querySelectorAll('[data-option-section]')]
+      .filter(el => getComputedStyle(el).display !== 'none').map(el => el.dataset.optionSection)`);
+    check(`Settings opens only ${section}`, visible.length === 1 && visible[0] === section,
+      visible.join(', '));
+    const missing = await $(`${JSON.stringify(ids)}.filter(id => {
+      const el = document.getElementById(id); return !el || el.closest('[data-option-section]')?.dataset.optionSection !== '${section}';
+    })`);
+    check(`${section} keeps every existing control`, missing.length === 0, missing.join(', '));
+  }
+  await $(`document.getElementById('btn-new').click()`);
+
+  // Speaker diarization is an extra local pass, so the fast path must be the
+  // default rather than something a new user has to discover and turn off.
+  check('speaker identification is visibly optional',
+    /Identify speakers/i.test(await $(`document.querySelector('label[for="opt-identify-speakers"], #opt-identify-speakers').parentElement.textContent`))
+      && /Optional/i.test(await $(`document.getElementById('opt-identify-speakers').closest('.opt-row').textContent`))
+      && /off by default/i.test(await $(`document.getElementById('opt-identify-speakers').closest('.opt-row').textContent`)),
+    await $(`document.getElementById('opt-identify-speakers').closest('.opt-row').textContent`));
+  check('speaker identification starts off',
+    !(await $(`document.getElementById('opt-identify-speakers').checked`)), 'toggle is on');
+  await $(`(() => {
+    const toggle = document.getElementById('opt-identify-speakers');
+    toggle.checked = true;
+    toggle.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  check('enabling speaker identification is remembered',
+    (await $(`localStorage.getItem('yapper-identify-speakers')`)) === 'on',
+    await $(`localStorage.getItem('yapper-identify-speakers')`));
+
   // --- attendees are per meeting, not a preference ---
   await $(`(() => {
     document.querySelector('#style-pills .seg-btn[data-style="memo"]').click();
@@ -71,11 +130,23 @@ app.whenReady().then(async () => {
   // And the folded line says what is underneath it. It was painted only when
   // the fold opened or closed, so it started blank, or on last time's answer.
   check('and the folded line summarises what was remembered',
-    /Memo/.test(await $(`document.getElementById('opts-sum').textContent`)),
+    /Memo/.test(await $(`document.getElementById('opts-sum').textContent`))
+      && /Speakers on/.test(await $(`document.getElementById('opts-sum').textContent`)),
     await $(`document.getElementById('opts-sum').textContent`));
   check('on reopen, the instructions are remembered',
     (await $(`document.getElementById('custom-instructions').value`)) === 'focus on the launch',
     await $(`document.getElementById('custom-instructions').value`));
+  check('on reopen, the speaker choice is remembered',
+    await $(`document.getElementById('opt-identify-speakers').checked`), 'toggle returned to off');
+
+  await $(`(() => {
+    const toggle = document.getElementById('opt-identify-speakers');
+    toggle.checked = false;
+    toggle.dispatchEvent(new Event('change', { bubbles: true }));
+  })()`);
+  check('speaker identification can be switched back off',
+    (await $(`localStorage.getItem('yapper-identify-speakers')`)) === 'off',
+    await $(`localStorage.getItem('yapper-identify-speakers')`));
 
   // "New meeting" must clear them too, without a reload
   await $(`(() => {

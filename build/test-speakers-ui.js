@@ -27,6 +27,12 @@ fs.mkdirSync(legacyFolder, { recursive: true });
 fs.writeFileSync(path.join(legacyFolder, 'transcript.txt'),
   '[00:00:01] Me: Hello.\n[00:00:03] Them: Hi.', 'utf8');
 fs.writeFileSync(path.join(legacyFolder, 'title.txt'), 'Older Meeting', 'utf8');
+const fastFolder = path.join(ROOT, 'Meetings', '2026-08-20_0930');
+fs.mkdirSync(fastFolder, { recursive: true });
+const fastRaw = '[00:00:01] Me: Hello.\n[00:00:03] Them: Hi.';
+fs.writeFileSync(path.join(fastFolder, 'transcript.raw.txt'), fastRaw, 'utf8');
+fs.writeFileSync(path.join(fastFolder, 'transcript.txt'), fastRaw, 'utf8');
+fs.writeFileSync(path.join(fastFolder, 'title.txt'), 'Fast Transcript', 'utf8');
 
 let fails = 0;
 function check(name, ok, detail) {
@@ -100,6 +106,14 @@ app.whenReady().then(async () => {
   ];
   check('speaker names survive reopening',
     JSON.stringify(reopened.speakers) === JSON.stringify(expectedSpeakers), JSON.stringify(reopened.speakers));
+  await $(`openMeetingByFolder(${JSON.stringify(fastFolder)})`);
+  await new Promise(r => setTimeout(r, 250));
+  check('Me/Them fast-path labels do not show Match voices to names',
+    await $(`document.getElementById('speaker-map').classList.contains('hidden')`), 'panel is visible');
+  const rejectedMap = await $(`window.yapper.setSpeakerMap(${JSON.stringify(fastFolder)}, { Them: 'Maya' })
+    .then(() => '', error => error.message)`);
+  check('the IPC also refuses name matching without identified voices',
+    /does not have identified speakers/i.test(rejectedMap), rejectedMap);
   await $(`openMeetingByFolder(${JSON.stringify(legacyFolder)})`);
   await new Promise(r => setTimeout(r, 250));
   check('an older transcript without immutable labels offers no unsafe mapping',

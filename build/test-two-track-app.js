@@ -13,6 +13,16 @@ const { app } = require('electron');
 
 const { sandbox, logger, mainWindow, watchdog } = require('./harness');
 const engine = require('../engine');
+const speakerDiarizer = require('../speaker-diarizer');
+
+// Main receives this same cached module. Count before requiring main so the
+// default call below proves the expensive helper is never even constructed.
+let diarizeCalls = 0;
+const realDiarizeFile = speakerDiarizer.diarizeFile;
+speakerDiarizer.diarizeFile = (...args) => {
+  diarizeCalls++;
+  return realDiarizeFile(...args);
+};
 
 const root = sandbox('two-track-app');
 const say = logger(root);
@@ -51,6 +61,9 @@ app.whenReady().then(async () => {
 
     const transcript = await $(`window.yapper.transcribe(${JSON.stringify(folder)})`);
     say('--- transcript ---\n' + transcript + '\n------------------');
+
+    check('default transcription never starts speaker identification', diarizeCalls === 0,
+      `${diarizeCalls} diarizer calls`);
 
     const lines = transcript.split('\n');
     const labelled = lines.filter(l => / (?:Me|Them|Speaker [1-9]\d*): /.test(l));

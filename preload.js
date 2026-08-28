@@ -34,7 +34,7 @@ contextBridge.exposeInMainWorld('yapper', {
   legacyAudio: folder => invoke('legacy-audio', folder),
   importOpen: folder => invoke('import-open', folder),
   importClose: () => invoke('import-close'),
-  transcribe: folder => invoke('transcribe', folder),
+  transcribe: (folder, identifySpeakers = false) => invoke('transcribe', folder, identifySpeakers === true),
   summarize: (folder, transcript, options) => invoke('summarize', folder, transcript, options),
   generateNotes: (folder, options, includeTitle) => invoke('generate-notes', folder, options, includeTitle),
   onNotesProgress: cb => ipcRenderer.on('notes-progress', (_e, progress) => cb(progress)),

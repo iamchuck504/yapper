@@ -256,13 +256,15 @@ On both platforms a call is transcribed as two source files instead of only the
 mix: the microphone track and the system-audio track each get their own
 `transcribeFile()` pass (and their own head start), and the lines are interleaved
 by timestamp with `Me:` plus remote labels. On Windows the renderer's
-audio-thread tap sends aligned source blocks alongside the mix, and the local
-sherpa-onnx native process diarizes the system track. On macOS 14+, FluidAudio does the
-same on the Neural Engine. Each runs in parallel with Whisper, and
-`speaker-diarizer.js` aligns its time ranges to Whisper's lines as stable
-`Speaker 1`, `Speaker 2`, etc. A failure is non-fatal and falls back to `Them:`.
-Which side of the call spoke is still a fact of which stream carried the words,
-not an inference. Windows whose PCM is digital silence are
+audio-thread tap sends aligned source blocks alongside the mix. The **Identify
+speakers** preference is off by default, so the normal path stops there without
+creating a diarizer process. When explicitly enabled, a pinned local
+sherpa-onnx native process diarizes the Windows system track; on macOS 14+,
+FluidAudio does the same on the Neural Engine. Each runs in parallel with
+Whisper, and `speaker-diarizer.js` aligns its time ranges to Whisper's lines as
+stable `Speaker 1`, `Speaker 2`, etc. A disabled or failed run is non-fatal and
+falls back to `Them:`. Which side of the call spoke is still a fact of which
+stream carried the words, not an inference. Windows whose PCM is digital silence are
 skipped before reaching the server, a window's leading silence is trimmed (and
 its stamps corrected back) because Whisper stamps sloppily across it, and a
 segment whose claimed audio region is silence is dropped as a hallucination —

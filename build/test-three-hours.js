@@ -475,7 +475,7 @@ app.whenReady().then(async () => {
     const tFinal = Date.now();
     const ticker = setInterval(() => say(`  final pass still running (${Math.round((Date.now() - tFinal) / 1000)} s)`), 30_000);
     const transcript = await within(
-      $(`window.yapper.transcribe(${JSON.stringify(folder)})`),
+      $(`window.yapper.transcribe(${JSON.stringify(folder)}, true)`),
       'three-hour final transcription and speaker detection', 65 * 60 * 1000
     ).finally(() => clearInterval(ticker));
     const finalSeconds = (Date.now() - tFinal) / 1000;

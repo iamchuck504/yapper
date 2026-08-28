@@ -119,6 +119,17 @@ if (process.platform === 'darwin' && fs.existsSync(helper)) {
 // Normalised: git checks main.js out with CRLF on Windows, and the bounded
 // gaps below count those extra characters.
 const mainSource = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8').replace(/\r\n/g, '\n');
+const preloadSource = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8').replace(/\r\n/g, '\n');
+const rendererSource = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'app.js'), 'utf8').replace(/\r\n/g, '\n');
+check('speaker identification is false unless the renderer explicitly enables it',
+  /transcribe:\s*\(folder, identifySpeakers = false\)[\s\S]{0,120}identifySpeakers === true/.test(preloadSource), true);
+check('every app transcription sends the optional speaker choice',
+  (rendererSource.match(/window\.yapper\.transcribe\([^\n]+identifySpeakersEnabled\)/g) || []).length === 3, true);
+const diarizationGate = mainSource.slice(mainSource.indexOf('if (identifySpeakers) {'),
+  mainSource.indexOf('const micLines', mainSource.indexOf('if (identifySpeakers) {')));
+check('the expensive diarizer is only created inside the enabled branch',
+  /diarizeFile\(/.test(diarizationGate)
+    && (mainSource.match(/speakerDiarizer\.diarizeFile\(/g) || []).length === 1, true);
 check('the notes prompt uses identities as evidence but never prints numbered labels',
   /Use these labels only as structural evidence[\s\S]*Never write technical labels such as "Speaker 1"[\s\S]*one participant[\s\S]*another participant/i.test(mainSource), true);
 check('the notes prompt requires every explicitly named action owner',

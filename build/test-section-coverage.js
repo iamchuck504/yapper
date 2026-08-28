@@ -54,5 +54,45 @@ check('no defined style is left without a button',
   promptStyles.every(s => pillStyles.includes(s)),
   `no button: ${promptStyles.filter(s => !pillStyles.includes(s)).join(', ')}`);
 
+// --- UI redesign contract -------------------------------------------------
+// These are the durable, interactive doors that existed before the visual
+// reorganization. A prettier shell is not allowed to quietly remove one. The
+// quick language selector is the one new proxy; its synchronization is driven
+// against the real window in test-options-ui.js.
+const requiredControls = `
+btn-new btn-home btn-search-view btn-reminders btn-settings search btn-update btn-theme
+mp-start mp-dismiss sp-settings sp-relaunch sp-dismiss action-summary btn-record btn-import
+mic-select quick-spoken-lang gain-sys gain-mic btn-mark btn-pause btn-stop ep-keep ep-stop live-head
+meeting-title opts-toggle custom-instructions llm-provider llm-baseurl llm-key llm-model btn-llm-test
+spoken-lang participants-rec opt-identify-speakers opt-keep-audio btn-free-audio opt-bubble
+opt-autodetect opt-startup btn-rename regen-style regen-detail regen-lang btn-regen btn-speak
+voice-select btn-edit btn-copy btn-export btn-open-folder participants-meet speaker-map notes-textarea
+btn-save-notes btn-cancel-notes home-setup-open btn-week-refresh search-q btn-search new-reminder
+btn-add-reminder btn-select-actions select-all-actions btn-bulk-done btn-bulk-cancel
+`.trim().split(/\s+/);
+const interactiveIds = [...html.matchAll(/<(?:button|input|select|textarea|details)\b[^>]*\bid="([^"]+)"/g)]
+  .map(match => match[1]);
+const duplicateControls = interactiveIds.filter((id, index) => interactiveIds.indexOf(id) !== index);
+const missingControls = requiredControls.filter(id => !interactiveIds.includes(id));
+check('every pre-redesign UI control still exists', missingControls.length === 0,
+  `missing: ${missingControls.join(', ')}`);
+check('interactive IDs remain unique', duplicateControls.length === 0,
+  `duplicates: ${[...new Set(duplicateControls)].join(', ')}`);
+
+const requiredControlGroups = [
+  'style-pills', 'detail-seg', 'lang-seg', 'noise-seg', 'corner-seg',
+  'theme-seg', 'action-filter', 'home-scope', 'settings-tabs'
+];
+const allIds = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+const missingGroups = requiredControlGroups.filter(id => !allIds.includes(id));
+check('every segmented control group remains reachable', missingGroups.length === 0,
+  `missing: ${missingGroups.join(', ')}`);
+
+const optionSections = [...html.matchAll(/data-option-section="([^"]+)"/g)].map(match => match[1]);
+check('Settings exposes every option category exactly once',
+  ['notes', 'recording', 'during', 'app'].every(section => optionSections.filter(x => x === section).length === 1)
+    && optionSections.length === 4,
+  optionSections.join(', '));
+
 console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

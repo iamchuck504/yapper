@@ -44,7 +44,11 @@ app.whenReady().then(async () => {
   say(`meetings on disk: ${fs.readdirSync(path.join(ROOT, 'Meetings')).length}`);
 
   await show('Sidebar', '#sidebar');
-  await show('Today (the view it opens on)', '#view-home');
+  await show('New meeting (the view it opens on)', '#view-record');
+
+  await $(`document.getElementById('btn-home').click()`);
+  await new Promise(r => setTimeout(r, 400));
+  await show('Today', '#view-home');
 
   await $(`document.querySelector('#home-scope .seg-btn[data-scope="week"]').click()`);
   await new Promise(r => setTimeout(r, 2500));

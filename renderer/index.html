@@ -21,6 +21,7 @@
       <span id="btn-new-label">New meeting</span>
     </button>
 
+    <nav class="sidebar-nav" aria-label="Main navigation">
     <button id="btn-home" class="nav-btn">
       <svg viewBox="0 0 16 16" width="14" height="14"><path d="M2.5 5.5h11M2.5 5.5v8h11v-8M2.5 5.5L8 2l5.5 3.5M6 13.5v-4h4v4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
       Today
@@ -41,6 +42,7 @@
       <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6.9 1.8h2.2l.4 1.7 1.3.6 1.5-.9 1.5 1.5-.9 1.5.6 1.3 1.7.4v2.2l-1.7.4-.6 1.3.9 1.5-1.5 1.5-1.5-.9-1.3.6-.4 1.7H6.9l-.4-1.7-1.3-.6-1.5.9-1.5-1.5.9-1.5-.6-1.3-1.7-.4V6.9l1.7-.4.6-1.3-.9-1.5 1.5-1.5 1.5.9 1.3-.6z" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><circle cx="8" cy="8" r="2.1" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
       Settings
     </button>
+    </nav>
 
     <div class="search-wrap">
       <svg viewBox="0 0 16 16" width="14" height="14"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 10.5L14 14" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
@@ -49,13 +51,15 @@
 
     <ul id="meeting-list"></ul>
 
-    <button id="btn-update" class="update-pill hidden">Update ready — restart</button>
+    <div class="sidebar-foot">
+      <button id="btn-update" class="update-pill hidden">Update ready — restart</button>
+      <button id="btn-theme" title="Toggle light/dark mode">
+        <svg class="icon-sun" viewBox="0 0 16 16" width="15" height="15"><circle cx="8" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.2v1.8M8 13v1.8M1.2 8H3M13 8h1.8M3.2 3.2l1.3 1.3M11.5 11.5l1.3 1.3M12.8 3.2l-1.3 1.3M4.5 11.5l-1.3 1.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <svg class="icon-moon" viewBox="0 0 16 16" width="15" height="15"><path d="M13.4 9.6A5.8 5.8 0 0 1 6.4 2.6a5.8 5.8 0 1 0 7 7z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        <span>Appearance</span>
+      </button>
+    </div>
   </aside>
-
-  <button id="btn-theme" title="Toggle light/dark mode">
-    <svg class="icon-sun" viewBox="0 0 16 16" width="15" height="15"><circle cx="8" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.2v1.8M8 13v1.8M1.2 8H3M13 8h1.8M3.2 3.2l1.3 1.3M11.5 11.5l1.3 1.3M12.8 3.2l-1.3 1.3M4.5 11.5l-1.3 1.3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-    <svg class="icon-moon" viewBox="0 0 16 16" width="15" height="15"><path d="M13.4 9.6A5.8 5.8 0 0 1 6.4 2.6a5.8 5.8 0 1 0 7 7z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
-  </button>
 
   <!-- Meeting detected. It sits outside the views on purpose: it can arrive
        while any of them is open, and it must neither hide nor steal the one
@@ -89,7 +93,7 @@
     <section id="view-record">
       <div class="view-head">
         <button id="action-summary" class="action-summary hidden" title="Open your action items"></button>
-        <h1 class="page-title">New meeting</h1>
+        <h1 id="record-view-title" class="page-title">New meeting</h1>
         <p class="view-sub">Record live or import audio — transcribed on your machine, summarized by AI.</p>
       </div>
 
@@ -105,13 +109,31 @@
           </button>
         </div>
 
-        <div class="mic-row">
-          <label for="mic-select">
-            <svg viewBox="0 0 16 16" width="13" height="13"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5M5.5 14.5h5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg>
-            Microphone
-          </label>
-          <select id="mic-select"></select>
-          <span class="mic-hint">switchable while recording</span>
+        <div class="quick-setup">
+          <div class="quick-field quick-microphone">
+            <label for="mic-select">
+              <svg viewBox="0 0 16 16" width="13" height="13"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5M5.5 14.5h5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg>
+              Microphone
+            </label>
+            <select id="mic-select"></select>
+            <span class="mic-hint">switchable while recording</span>
+          </div>
+          <div class="quick-field quick-language">
+            <label for="quick-spoken-lang">
+              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M2.5 8h11M8 2c1.7 1.6 2.6 3.6 2.6 6S9.7 12.4 8 14M8 2C6.3 3.6 5.4 5.6 5.4 8s.9 4.4 2.6 6" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              Spoken language
+            </label>
+            <select id="quick-spoken-lang" aria-describedby="quick-spoken-hint">
+              <option value="auto">Detect automatically</option>
+              <option value="en">English</option>
+              <option value="es">Español</option>
+              <option value="pt">Português</option>
+              <option value="fr">Français</option>
+              <option value="de">Deutsch</option>
+              <option value="it">Italiano</option>
+            </select>
+            <span id="quick-spoken-hint" class="mic-hint">a fixed language starts faster</span>
+          </div>
         </div>
 
         <div id="rec-live" class="hidden">
@@ -165,7 +187,8 @@
         </div>
       </div>
 
-      <input id="meeting-title" type="text" placeholder="Meeting title (optional)" autocomplete="off" spellcheck="false" />
+      <label class="meeting-title-label" for="meeting-title">Meeting title <span>(optional)</span></label>
+      <input id="meeting-title" type="text" placeholder="e.g. Product review" autocomplete="off" spellcheck="false" />
 
       <!-- The settings live behind this. They were a page between the reader
            and the button they came for, and mid-meeting they are a page nobody
@@ -192,7 +215,7 @@
            to the notes, what belongs to the recording, and what happens while
            it runs are three different questions. -->
       <div id="options-card" class="options-card">
-       <div class="opt-group">
+       <div class="opt-group" data-option-section="notes">
         <div class="opt-group-title">Notes</div>
         <div class="opt-row">
           <span class="opt-label">Note style</span>
@@ -257,7 +280,7 @@
         </div>
        </div>
 
-       <div class="opt-group">
+       <div class="opt-group" data-option-section="recording">
         <div class="opt-group-title">Recording</div>
         <div class="opt-row">
           <span class="opt-label">Noise reduction</span>
@@ -286,6 +309,12 @@
           <input id="participants-rec" class="text-input" type="text" placeholder="Attendee names, comma-separated — improves name spelling &amp; attribution" autocomplete="off" spellcheck="false" />
         </div>
         <div class="opt-row">
+          <span class="opt-label">Speakers</span>
+          <label class="switch"><input type="checkbox" id="opt-identify-speakers" /><span class="track"></span>Identify speakers</label>
+          <span class="optional-badge">Optional</span>
+          <span class="mic-hint">off by default — skips the extra local voice analysis so transcription finishes faster</span>
+        </div>
+        <div class="opt-row">
           <span class="opt-label">Audio</span>
           <label class="switch"><input type="checkbox" id="opt-keep-audio" /><span class="track"></span>Keep this meeting's audio</label>
           <span class="mic-hint">off by default — the transcript is what gets kept</span>
@@ -298,7 +327,7 @@
         </div>
        </div>
 
-       <div class="opt-group">
+       <div class="opt-group" data-option-section="during">
         <div class="opt-group-title">While it runs</div>
         <div class="opt-row">
           <span class="opt-label">Live</span>
@@ -319,7 +348,7 @@
         </div>
        </div>
 
-       <div class="opt-group">
+       <div class="opt-group" data-option-section="app">
         <div class="opt-group-title">App</div>
         <div class="opt-row">
           <span class="opt-label">Theme</span>
@@ -398,7 +427,6 @@
               <svg viewBox="0 0 16 16" width="11" height="11"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
             </button>
             <div id="export-menu" class="menu hidden">
-              <button data-export="pdf">Notes as PDF</button>
               <div class="menu-sub">
                 <span>PDF style</span>
                 <div class="seg" id="pdf-theme-seg">
@@ -406,6 +434,7 @@
                   <button type="button" class="seg-btn" data-pdf-theme="dark">Dark</button>
                 </div>
               </div>
+              <button data-export="pdf">Notes as PDF</button>
               <button data-export="md">Notes as Markdown</button>
               <button data-export="transcript-md">Full transcript as Markdown</button>
               <button data-export="txt">Full transcript (.txt)</button>
@@ -556,6 +585,12 @@
         <h1 class="page-title">Settings</h1>
         <p class="view-sub">The same options the record view folds away, reachable without starting a
           meeting. Notes and recording choices apply to the next meeting; the rest applies now.</p>
+      </div>
+      <div id="settings-tabs" class="settings-tabs" role="tablist" aria-label="Settings categories">
+        <button class="settings-tab active" type="button" role="tab" aria-selected="true" data-settings-section="notes">Notes</button>
+        <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-section="recording">Recording</button>
+        <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-section="during">During meetings</button>
+        <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-section="app">App</button>
       </div>
       <!-- #options-card is moved in here while this view is open, and back
            into the record view, folded, when it closes: one set of controls. -->

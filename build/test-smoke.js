@@ -4,7 +4,7 @@
 // every control and running every export.
 const path = require('path');
 const fs = require('fs');
-const { app, dialog } = require('electron');
+const { app, dialog, screen } = require('electron');
 const { mainWindow } = require('./harness');
 
 const BASE = path.join(app.getPath('temp'), 'yapper-smoke-test');
@@ -49,6 +49,16 @@ app.whenReady().then(async () => {
   // interesting happens on the page
   const win = await mainWindow({ settleMs: 0 });
 
+  const initialBounds = win.getBounds();
+  check('the main window opens taller without giving up horizontal space',
+    initialBounds.width === 1100 && initialBounds.height === 840,
+    JSON.stringify(initialBounds));
+  const workArea = screen.getDisplayMatching(initialBounds).workArea;
+  check('the main window opens centered in the usable screen area',
+    Math.abs(initialBounds.x + initialBounds.width / 2 - (workArea.x + workArea.width / 2)) <= 1
+      && Math.abs(initialBounds.y + initialBounds.height / 2 - (workArea.y + workArea.height / 2)) <= 1,
+    JSON.stringify({ window: initialBounds, workArea }));
+
   win.webContents.on('console-message', (_e, level, message, line, source) => {
     if (level >= 2) problems.push(`${message}  (${path.basename(source || '')}:${line})`);
   });
@@ -64,9 +74,9 @@ app.whenReady().then(async () => {
     await new Promise(r => setTimeout(r, 250));
   };
 
-  // ---- it opens on the day, and the detected-meeting card floats above it ----
-  check('opens on Today',
-    !(await $("document.getElementById('view-home').classList.contains('hidden')")), 'did not open there');
+  // ---- it opens ready to record, and the detected-meeting card floats above it ----
+  check('opens on New meeting',
+    !(await $("document.getElementById('view-record').classList.contains('hidden')")), 'did not open there');
 
   // Hosted Windows runners can leave CSS animation clocks suspended even
   // while the window is otherwise interactive. Remove only the entrance
@@ -85,7 +95,7 @@ app.whenReady().then(async () => {
         && r.bottom <= innerHeight && r.right <= innerWidth,
       shown: css.display !== 'none' && css.visibility !== 'hidden' && +css.opacity > 0,
       text: el.textContent }; })()`);
-  check('the detected-meeting prompt shows while on Today',
+  check('the detected-meeting prompt shows over New meeting',
     !prompt.hidden && prompt.shown && prompt.onScreen && !prompt.inRecordView, JSON.stringify(prompt));
   check('and it says what triggered it', /Zoom/.test(prompt.text), prompt.text);
   await click('#mp-dismiss');

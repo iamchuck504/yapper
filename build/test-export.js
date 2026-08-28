@@ -72,8 +72,17 @@ app.whenReady().then(async () => {
   const $ = js => win.webContents.executeJavaScript(js);
 
   // the menu has to offer it in the first place
-  const kinds = await $(`[...document.querySelectorAll('#export-menu button')].map(b => b.dataset.export)`);
+  const kinds = await $(`[...document.querySelectorAll('#export-menu > [data-export]')].map(b => b.dataset.export)`);
   check('the menu offers the transcript as Markdown', kinds.includes('transcript-md'), kinds.join(', '));
+  check('PDF style comes before the formats, with Notes as PDF first',
+    await $(`document.querySelector('#export-menu > :first-child').classList.contains('menu-sub')`)
+      && kinds[0] === 'pdf',
+    kinds.join(', '));
+  await $(`document.getElementById('btn-export').click();
+    document.querySelector('[data-pdf-theme="light"]').click()`);
+  check('choosing PDF style does not close or trigger an export',
+    !(await $(`document.getElementById('export-menu').classList.contains('hidden')`)),
+    'the menu closed before a format was chosen');
 
   await $(`(async () => {
     currentFolder = ${JSON.stringify(folder)};
@@ -111,13 +120,16 @@ app.whenReady().then(async () => {
   // The exact HTML sent to Chromium is the pagination contract. A title/date
   // masthead should be visible, while only small reading units — not an entire
   // notes section — are kept together at a page boundary.
-  const pdfHtml = await $(`buildPdfHtml('Launch Sync', 'light')`);
+  const pdfHtml = await $(`buildPdfHtml('Launch Sync', 'dark')`);
   check('the PDF has a document header',
     /<header class="pdf-header">/.test(pdfHtml), pdfHtml.slice(0, 500));
-  check('a light PDF keeps light paper through the end of its final page',
-    /html \{ background: #FBFAF8; \}/.test(pdfHtml), 'the html canvas uses the dark root theme');
-  check('the header carries the meeting title and date',
-    /<h1 class="pdf-title">Launch Sync<\/h1>/.test(pdfHtml)
+  check('a dark PDF paints the complete page and content canvas',
+    /@page \{[^}]*background: #0C0D10;/.test(pdfHtml)
+      && /html, body \{ background: #0C0D10 !important; \}/.test(pdfHtml),
+    'the complete page is not explicitly dark');
+  check('the header carries Yapper Notes, the meeting title and date',
+    /<span>Yapper Notes<\/span>/.test(pdfHtml)
+      && /<h1 class="pdf-title">Launch Sync<\/h1>/.test(pdfHtml)
       && /<div class="pdf-date">29\/07\/2026 · 14:00<\/div>/.test(pdfHtml),
     pdfHtml.slice(0, 900));
   check('whole note sections may flow across pages',
@@ -138,7 +150,7 @@ app.whenReady().then(async () => {
     return `## Topic ${section + 1} [${String(section * 3).padStart(2, '0')}:00]\n${bullets.join('\n')}`;
   }).join('\n\n');
   await $(`renderNotes(${JSON.stringify(longPdfNotes)})`);
-  await $(`pdfTheme = 'light'`);
+  await $(`pdfTheme = 'dark'`);
   const pdf = await $(`runExport('pdf')`);
   await new Promise(r => setTimeout(r, 400));
   check('writes a readable PDF document',

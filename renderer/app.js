@@ -28,6 +28,8 @@ const btnNewLabel = $('btn-new-label');
 const viewRecordEl = $('view-record');
 const optionsCardEl = $('options-card');
 const optsToggleEl = $('opts-toggle');
+const settingsTabsEl = $('settings-tabs');
+let settingsSection = 'notes';
 
 /** "General · Concise" — what the folded card is currently set to. */
 function chosenOptions() {
@@ -40,8 +42,31 @@ function chosenOptions() {
   // that object exists.
   const langBtn = document.querySelector('#lang-seg .seg-btn.active');
   const lang = langBtn && langBtn.dataset.lang !== 'en' ? langBtn.textContent.trim() : null;
-  return [picked('#style-pills'), picked('#detail-seg'), lang].filter(Boolean).join(' · ');
+  const noise = picked('#noise-seg');
+  const speakers = document.getElementById('opt-identify-speakers')?.checked ? 'Speakers on' : 'Speakers off';
+  return [picked('#style-pills'), picked('#detail-seg'), lang,
+    noise ? `${noise} noise` : null, speakers].filter(Boolean).join(' · ');
 }
+
+/** Settings shows one category at a time; the recording fold still shows all. */
+function selectSettingsSection(next) {
+  const sections = [...optionsCardEl.querySelectorAll('[data-option-section]')];
+  if (!sections.some(section => section.dataset.optionSection === next)) next = 'notes';
+  settingsSection = next;
+  settingsTabsEl.querySelectorAll('[data-settings-section]').forEach(tab => {
+    const active = tab.dataset.settingsSection === settingsSection;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-selected', String(active));
+  });
+  sections.forEach(section =>
+    section.classList.toggle('settings-section-active', section.dataset.optionSection === settingsSection));
+}
+
+settingsTabsEl.addEventListener('click', event => {
+  const tab = event.target.closest('[data-settings-section]');
+  if (tab) selectSettingsSection(tab.dataset.settingsSection);
+});
+selectSettingsSection(settingsSection);
 
 function paintOptsToggle() {
   const open = !optionsCardEl.classList.contains('collapsed');
@@ -87,6 +112,7 @@ function markRecordingInSidebar(on) {
   layoutForRecording(on);
   btnNew.classList.toggle('recording', on);
   btnNew.title = on ? 'Recording — click to go back to the controls' : '';
+  $('record-view-title').textContent = on ? 'Recording' : 'New meeting';
   if (!on) btnNewLabel.textContent = 'New meeting';
 }
 const btnRegen = $('btn-regen');
@@ -408,19 +434,22 @@ document.querySelectorAll('#lang-seg .seg-btn').forEach(b =>
 customInput.addEventListener('change', saveOptions);
 
 
-// ---------- live behaviour toggles (persisted) ----------
+// ---------- persisted toggles ----------
 
 const bubbleToggle = $('opt-bubble');
 const autoDetectToggle = $('opt-autodetect');
 const startupToggle = $('opt-startup');
+const identifySpeakersToggle = $('opt-identify-speakers');
 // The switch does the same thing on both platforms, but "Start with Windows"
 // on a Mac reads like a setting that belongs to some other computer.
 if (window.yapper.platform === 'darwin') $('startup-label').textContent = 'Start at login';
 let bubbleEnabled = localStorage.getItem('yapper-bubble') !== 'off';
 let autoDetectEnabled = localStorage.getItem('yapper-autodetect') !== 'off';   // on by default
+let identifySpeakersEnabled = localStorage.getItem('yapper-identify-speakers') === 'on';
 
 bubbleToggle.checked = bubbleEnabled;
 autoDetectToggle.checked = autoDetectEnabled;
+identifySpeakersToggle.checked = identifySpeakersEnabled;
 window.yapper.setAutoDetect(autoDetectEnabled);
 
 // "start with Windows" lives in the main process (it writes the login item),
@@ -467,18 +496,29 @@ autoDetectToggle.addEventListener('change', () => {
   window.yapper.setAutoDetect(autoDetectEnabled);
 });
 
+identifySpeakersToggle.addEventListener('change', () => {
+  identifySpeakersEnabled = identifySpeakersToggle.checked;
+  localStorage.setItem('yapper-identify-speakers', identifySpeakersEnabled ? 'on' : 'off');
+  paintOptsToggle();
+});
+
 // The language Whisper is told to expect. Lives in the main process (it is
 // the transcriber's setting) and is pushed there the same way auto-detect is.
 const spokenLangSelect = $('spoken-lang');
+const quickSpokenLangSelect = $('quick-spoken-lang');
 let spokenLang = localStorage.getItem('yapper-spoken-lang') || 'auto';
 if (![...spokenLangSelect.options].some(o => o.value === spokenLang)) spokenLang = 'auto';
-spokenLangSelect.value = spokenLang;
-window.yapper.setSpokenLanguage(spokenLang);
-spokenLangSelect.addEventListener('change', () => {
-  spokenLang = spokenLangSelect.value;
+function setSpokenLanguage(next) {
+  if (![...spokenLangSelect.options].some(o => o.value === next)) next = 'auto';
+  spokenLang = next;
+  spokenLangSelect.value = spokenLang;
+  quickSpokenLangSelect.value = spokenLang;
   localStorage.setItem('yapper-spoken-lang', spokenLang);
   window.yapper.setSpokenLanguage(spokenLang);
-});
+}
+setSpokenLanguage(spokenLang);
+spokenLangSelect.addEventListener('change', () => setSpokenLanguage(spokenLangSelect.value));
+quickSpokenLangSelect.addEventListener('change', () => setSpokenLanguage(quickSpokenLangSelect.value));
 
 // ---------- what happens to the audio ----------
 // The transcript is the record. The audio exists to produce it and to survive a
@@ -785,7 +825,10 @@ function hostOptionsCard(inSettings) {
   if (inSettings) {
     $('settings-host').appendChild(optionsCardEl);
     optionsCardEl.classList.remove('collapsed');
+    optionsCardEl.classList.add('settings-mode');
+    selectSettingsSection(settingsSection);
   } else if (optionsCardEl.parentElement !== viewRecordEl) {
+    optionsCardEl.classList.remove('settings-mode');
     optsToggleEl.insertAdjacentElement('afterend', optionsCardEl);
     setOptionsOpen(false);
   }
@@ -812,10 +855,10 @@ $('btn-settings').addEventListener('click', () => {
   showView('settings');
 });
 
-// ---------- "notes need a provider", on the first screen ----------
-// The record view has always reported a provider that cannot work, but a new
-// install opens on Today, where nobody saw it until the end of the first
-// meeting. Same check, shown where the eyes are; gone the moment it is fixed.
+// ---------- "notes need a provider", on Today ----------
+// New meeting reports a provider that cannot work in its options summary;
+// Today repeats the same check so the problem stays visible after navigating
+// away. The banner disappears the moment the provider is fixed.
 const homeSetupEl = $('home-setup');
 
 async function refreshSetupBanner(notes) {
@@ -830,6 +873,7 @@ async function refreshSetupBanner(notes) {
 $('home-setup-open').addEventListener('click', () => {
   stopSpeak();
   showView('settings');
+  selectSettingsSection('notes');
   const provider = $('llm-provider');
   provider.scrollIntoView({ block: 'center' });
   provider.focus();
@@ -2177,7 +2221,7 @@ async function stopAndProcess() {
     setStep('transcribe', 'active');
     setStatus(statusEl, 'Transcribing locally with Whisper…\n');
     const transcribeStarted = performance.now();
-    const transcript = await window.yapper.transcribe(folder);
+    const transcript = await window.yapper.transcribe(folder, identifySpeakersEnabled);
     const transcribeMs = performance.now() - transcribeStarted;
     setStep('transcribe', 'done');
 
@@ -2270,7 +2314,7 @@ async function retryTranscribe() {
         setStatus(regenStatusEl, `Converting the old recording… ${Math.round(p * 100)}%`));
     }
     setStatus(regenStatusEl, 'Transcribing with Whisper…\n');
-    await window.yapper.transcribe(currentFolder);
+    await window.yapper.transcribe(currentFolder, identifySpeakersEnabled);
     const data = await window.yapper.loadMeeting(currentFolder);
     regenStatusEl.classList.add('hidden');
     openMeetingView(resultTitle.textContent, data.summary, data.transcript, data.hasRecording, data.participants, null, data.speakers);
@@ -3061,7 +3105,7 @@ btnImport.addEventListener('click', async () => {
     setStep('transcribe', 'active');
     setStatus(statusEl, 'Transcribing the voice note…\n');
     const transcribeStarted = performance.now();
-    const transcript = await window.yapper.transcribe(picked.folder);
+    const transcript = await window.yapper.transcribe(picked.folder, identifySpeakersEnabled);
     const transcribeMs = performance.now() - transcribeStarted;
     setStep('transcribe', 'done');
 
@@ -3271,8 +3315,9 @@ function buildPdfHtml(title, mode) {
     body += clone.outerHTML;
   }
   // Theme variables live on body.light in the app stylesheet and therefore do
-  // not travel upward to the html canvas. Give that canvas the matching paper
-  // colour explicitly, or the unused half of a light final page turns dark.
+  // not travel upward to the html canvas. Paint both the page box and its
+  // content canvas explicitly: printToPDF's native margins sit outside the
+  // document background and otherwise become white around a dark export.
   const paper = mode === 'light' ? '#FBFAF8' : '#0C0D10';
   // Electron supplies an equal margin on every sheet, including one that begins
   // halfway through a long section. Sections are deliberately allowed to flow
@@ -3280,23 +3325,34 @@ function buildPdfHtml(title, mode) {
   // one page per section. Only a heading and each individual paragraph/list
   // item stay together, avoiding both wasteful blank space and stranded titles.
   const print = `
-    html { background: ${paper}; }
+    @page { size: Letter; margin: 0.55in 0.65in; background: ${paper}; }
+    html, body { background: ${paper} !important; }
     body {
       display: block; height: auto; overflow: visible;
       padding: 0;
       -webkit-print-color-adjust: exact; print-color-adjust: exact;
     }
     .pdf-header {
-      display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;
-      padding-bottom: 13px; border-bottom: 1px solid var(--rule);
+      display: block; padding: 0 0 18px; border-bottom: 1px solid var(--rule);
+    }
+    .pdf-kicker {
+      display: flex; align-items: center; justify-content: space-between; gap: 24px;
+    }
+    .pdf-brand {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-size: 10.5px; line-height: 1; font-weight: 700;
+      letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent-text);
+    }
+    .pdf-brand-mark {
+      width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
     }
     .pdf-title {
-      min-width: 0; font-size: 22px; line-height: 1.2; font-weight: 600;
-      letter-spacing: -0.2px; color: var(--text); margin: 0;
+      min-width: 0; margin: 15px 0 0; font-size: 28px; line-height: 1.15;
+      font-weight: 600; letter-spacing: -0.45px; color: var(--text);
     }
     .pdf-date {
-      flex: none; padding-bottom: 2px; font-size: 11px; line-height: 1.3;
-      white-space: nowrap; color: var(--text-3);
+      flex: none; font-size: 10.5px; line-height: 1.3;
+      letter-spacing: 0.025em; white-space: nowrap; color: var(--text-3);
     }
     .note-sec {
       break-inside: auto; page-break-inside: auto;
@@ -3324,8 +3380,10 @@ function buildPdfHtml(title, mode) {
     + `<link rel="stylesheet" href="style.css"><style>${print}</style></head>`
     + `<body${mode === 'light' ? ' class="light"' : ''}>`
     + '<header class="pdf-header">'
+    + '<div class="pdf-kicker"><div class="pdf-brand">'
+    + '<span class="pdf-brand-mark"></span><span>Yapper Notes</span></div>'
+    + `<div class="pdf-date">${escapeHtml(resultDateStr)}</div></div>`
     + `<h1 class="pdf-title">${escapeHtml(title)}</h1>`
-    + `<div class="pdf-date">${escapeHtml(resultDateStr)}</div>`
     + '</header>'
     + body
     + '<div class="pdf-foot">Generated with Yapper</div></body></html>';
@@ -3455,7 +3513,7 @@ async function runExport(kind) {
   }
 }
 
-exportMenu.querySelectorAll('button').forEach(b => {
+exportMenu.querySelectorAll('[data-export]').forEach(b => {
   b.addEventListener('click', async () => {
     btnExport.disabled = true;
     const saved = await runExport(b.dataset.export);
@@ -3870,7 +3928,9 @@ syncOptionControls();
 // The app opens on the day rather than on the record view: the first question on
 // launch is usually "what happened / what do I owe", not "record something".
 // Every path that starts a recording switches to the record view itself.
-showView('home');
+// A recording is the primary action, so every launch begins ready to capture.
+// Today remains one click away in the sidebar and through Cmd/Ctrl+1.
+showView('record');
 loadHome();
 refreshMeetingList();
 refreshReminders();

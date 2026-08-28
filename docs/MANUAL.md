@@ -106,16 +106,17 @@ Windows, Keychain on macOS) — the settings file never contains a readable key.
 
 ## 2. Using Yapper
 
-### The day starts on Today
+### Start ready to record
 
 ![Today](img/01-today.png)
 
-The app opens on **Today**: the meetings recorded today, what they decided, the
-action items they produced, and what needs attention — a meeting that was
-transcribed but never summarized, an overdue task, something marked urgent.
-Every line on this screen is a copy of something written in a note file, with a
-link back to the meeting it came from. No model is involved; it is instant and
-it cannot say anything that is not on disk.
+The app opens on **New meeting**, ready to record or import audio. **Today**
+remains in the sidebar: it collects the meetings recorded today, what they
+decided, the action items they produced, and what needs attention — a meeting
+that was transcribed but never summarized, an overdue task, something marked
+urgent. Every line on Today is a copy of something written in a note file, with
+a link back to the meeting it came from. No model is involved; it is instant
+and it cannot say anything that is not on disk.
 
 ### Recording a meeting
 
@@ -288,9 +289,11 @@ UI; several are deliberate trade-offs, marked as such.
    so. A publish remains an explicit, audited release action: local builds are
    not silently uploaded.
 3. **Speaker detection has a platform-specific engine.** Both platforms keep
-   microphone and system tracks apart. Windows uses a pinned local sherpa-onnx
-   native process; macOS 14+ uses Core ML. Each separates the remote side
-   into `Speaker 1`, `Speaker 2`, and so on, and the user can map those labels
+   microphone and system tracks apart. The optional **Identify speakers**
+   toggle starts off so ordinary transcription finishes faster. When enabled,
+   Windows uses a pinned local sherpa-onnx native process and macOS 14+ uses
+   Core ML to separate the remote side into `Speaker 1`, `Speaker 2`, and so on.
+   The user can map those labels
    to attendee names. They remain useful in the full transcript, but generated
    notes preserve real spoken or assigned names — including every explicitly
    named action owner — and use neutral prose only for unknown voices rather

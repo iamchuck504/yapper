@@ -68,8 +68,8 @@ app.whenReady().then(async () => {
 
   const before = await state();
   check('starts without recording', before.recording === false, JSON.stringify(before));
-  check('starts on Today, not on the record view',
-    before.onHome && !before.onRecord, JSON.stringify(before));
+  check('starts on New meeting, ready to record',
+    !before.onHome && before.onRecord, JSON.stringify(before));
 
   // --- 1. screen capture refused ---
   // The two platforms owe the user opposite things here. Windows takes system

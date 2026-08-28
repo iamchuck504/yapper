@@ -26,14 +26,14 @@ app.whenReady().then(async () => {
     console.log(`${name}.png`);
   };
 
-  // 1. first launch: what does it say about notes? The app opens on Today, so
-  // the banner there is what the friend actually sees; the record view's
-  // status line is the older report of the same check.
+  // 1. first launch: what does it say about notes? The app opens on New meeting,
+  // where the options summary/status line reports the provider state. Today
+  // keeps a second banner ready for when the friend navigates there.
   const banner = async () => $(`(() => { const b = document.getElementById('home-setup');
     return { shown: !b.classList.contains('hidden'),
       reason: document.getElementById('home-setup-reason').textContent.trim() }; })()`);
   const first = await banner();
-  console.log(`\nToday banner on first launch: ${first.shown ? 'SHOWN' : 'MISSING'}\n  "${first.reason}"`);
+  console.log(`\nToday banner prepared on first launch: ${first.shown ? 'SHOWN' : 'MISSING'}\n  "${first.reason}"`);
   if (!first.shown) throw new Error('the Today banner did not appear on a fresh install without a provider');
   const warning = await $(`document.getElementById('status').textContent`);
   console.log(`startup warning (record view):\n  "${warning.trim()}"\n`);

@@ -29,7 +29,7 @@ Runs on **Windows** and **macOS (Apple Silicon)**. Both record both sides of a c
 - **Floating bubble.** At rest it is a **capsule** the size of its own clock: real audio level (the bars follow the captured signal, it is not an animation) plus a timer. Hovering opens it into the live transcript with controls; leaving turns it back into a capsule, with a pin to keep it open. Draggable, follows the light/dark theme. "Floating bubble" toggle, and **Bubble starts** picks which of the four corners it appears in — it does not remember being dragged, so that corner is where it lives for the meeting. Bottom left by default: the bottom right is the strip a video call fills with its own controls, and on a MacBook with a notch the top corners stay clear of it.
 - **Knowing it is recording, and getting back.** The sidebar's *New meeting* button becomes *Recording — 12:34* with a pip while one is running, and it is also the route back to the stop control from Action items or Search. Nothing else on screen used to say a recording was in progress.
 - **Meeting auto-detection.** Detects which app is holding the microphone (Zoom, Teams, Slack, Discord, Webex, and browser calls: Meet/Hangouts) and **sends a system notification**: one click starts recording, with no window to go hunting for. When Yapper is already in front of you, the prompt appears inside the app instead. "Auto-detect meetings" toggle. Works on both platforms — Windows reads the registry's consent store, macOS asks CoreAudio.
-- **Local speaker detection on Windows and macOS 14+.** The full transcript keeps stable local voice labels so different viewpoints are not mixed. Windows uses a pinned multithreaded sherpa-onnx executable; macOS uses Core ML. Both run entirely on the machine. Two clearly optional fields stay separate: Participants records who attended without assigning voices; Match voices to names records who said what. Generated notes preserve real names and every explicitly named action owner; only unknown voices become neutral prose, so they never read like “Speaker 1 said…” or “Speaker 2 decided…”. Failure falls back to the reliable two-track transcript without blocking the meeting.
+- **Optional local speaker detection on Windows and macOS 14+.** **Identify speakers** is off by default so the transcript finishes without waiting for the extra voice-analysis pass. Turn it on when stable local voice labels matter. Windows uses a pinned multithreaded sherpa-onnx executable; macOS uses Core ML, and both stay entirely on the machine. Two clearly optional fields stay separate: Participants records who attended without assigning voices; Match voices to names appears only after distinct voices were detected and records who said what. Generated notes preserve real names and every explicitly named action owner; only unknown voices become neutral prose, so they never read like “Speaker 1 said…” or “Speaker 2 decided…”. Disabled or unavailable detection falls back to the reliable `Me`/`Them` two-track transcript without showing an irrelevant matching panel.
 
 The live preview is *only a preview*: on stop, the final transcript is redone with a full higher-quality pass, and the notes come from that.
 
@@ -120,7 +120,7 @@ Everything above works on both. These are the differences that remain:
 |---|---|---|
 | System audio | Electron loopback | Core Audio process tap; ScreenCaptureKit fallback on macOS 13 |
 | Meeting detection | registry consent store | CoreAudio process list |
-| Speaker labels | `Me` + locally separated remote voices; `Me`/`Them` fallback | `Me` + locally separated remote voices on macOS 14+; `Me`/`Them` fallback on macOS 13 |
+| Speaker labels | `Me` + optional locally separated remote voices; `Me`/`Them` by default | `Me` + optional locally separated remote voices on macOS 14+; `Me`/`Them` by default |
 | Updates | downloads and installs itself | downloads and installs itself |
 | Install | signed-by-nobody NSIS installer | Developer ID signed + Apple-notarized `.dmg` |
 | Hardware | x64 | Apple Silicon only |
@@ -168,6 +168,8 @@ or the **Yapper** shortcut on the desktop (Windows) / in Applications (macOS).
 ## Note options
 
 - **Note style**: General, Minutes, **Memo**, Stand-up, 1:1, Client call, Brainstorm — changes the sections of the minutes. *Memo* is meant for forwarding to someone who was not there: prose instead of bullets, neutral language, and it says explicitly when something was discussed but not decided.
+- **Settings categories**: Notes, Recording, During meetings and App split the full option set into four tabs without duplicating or removing controls. The same groups remain available under **Meeting options** on New meeting.
+- **Spoken language**: the frequent selector sits beside the microphone on New meeting and is synchronized with its canonical control under Settings → Recording.
 - **Detail**: Concise (short bullets) or Detailed (exhaustive).
 - **Extra instructions**: free-form context for Claude (attendees, project, what to focus on).
 - **Participants**: the names are passed to Whisper as an initial prompt, so it can preserve names such as "Maya" accurately. It belongs to **that meeting**, not to your preferences: the field starts empty every time, so last week's names cannot leak into today's minutes.

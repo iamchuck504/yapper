@@ -81,7 +81,7 @@ ones that cover what changed since this list was written and are not macOS-only:
 ```
 test-theme          Auto/Light/Dark, the default, and that the choice sticks
 test-options-ui     the fold: closed on every launch, and the summary under it
-test-actions-ui     …including the theme button clearing the content column
+test-actions-ui     …including action-item layout beside the content gutter
 test-smoke          every view, control and export, listening for renderer errors
 test-recording-signpost  the sidebar indicator and the way back
 test-record-cycle   record → transcribe → notes, end to end
@@ -223,19 +223,19 @@ which is where a layout tuned on a Retina Mac usually first shows a seam.
   Folded on every launch, deliberately — it does not remember being open.
 - **The options are grouped**, not one stack of fourteen rows: **Notes**
   (style, detail, instructions, provider and its key/model/endpoint rows),
-  **Recording** (noise reduction, participants, keep audio), **While it runs**
-  (bubble, auto-detect, start at login, starting corner) and **App** (theme).
-  Check the group captions and the hairlines survive at 125 % scaling, and that
-  the label column (110 px) still holds "Noise reduction" on one line.
+  **Recording** (spoken language, noise reduction, participants, optional
+  speaker identification, keep audio), **During meetings** (bubble,
+  auto-detect, start at login, starting corner) and **App** (theme). The
+  Settings page exposes these as four tabs; the record-view fold still exposes
+  every group. Check the tab labels and group hairlines survive at 125 %
+  scaling, and that "Noise reduction" still fits cleanly.
 - **Recording state.** Start and Import disappear (they cannot be used
   mid-meeting), the microphone picker stays, and the meters take a full-width
   row of their own instead of sharing one with the clock and three buttons.
-- **The theme button clears the content column.** It is fixed to the window and
-  floats over whatever is under it; on a narrow window the action-items bar ran
-  underneath it. The right gutter now clears its 16 + 32 px.
-  `build/test-actions-ui.js` measures the two rectangles at 1000 px wide and
-  runs on Windows — **the Windows scrollbar takes width from the same gutter**,
-  so this is the check most likely to come back different.
+- **The Appearance shortcut lives in the sidebar footer.** It no longer floats
+  over the content column, but keeps the same theme action. Confirm the footer
+  remains visible and the main content does not overlap the sidebar at 125 %
+  and 150 % scaling.
 - **"Start at login"** reads *Start with Windows* there, from `#startup-label`.
   Worth an eye now that it sits inside a group.
 
@@ -253,8 +253,8 @@ New, cross-platform, and the part with the most machinery behind it.
   exists. **If those two disagree, the app opens on a flash of the wrong
   theme**, which is exactly the bug this shape invites. On Windows, check the
   first frame after a cold start under each of the three settings.
-- The button beside the title is still the shortcut and commits to a side
-  rather than flipping Auto.
+- The **Appearance** button at the bottom of the sidebar is still the shortcut
+  and commits to a side rather than flipping Auto.
 - `build/test-theme.js` covers all of it and runs on Windows.
 
 ---

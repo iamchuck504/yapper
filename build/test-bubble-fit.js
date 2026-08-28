@@ -26,6 +26,7 @@ app.whenReady().then(async () => {
 
   const w = new BrowserWindow({
     width: 470, height: 280, show: false, frame: false, transparent: true,
+    hasShadow: false, roundedCorners: false,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload.js'),
       contextIsolation: true, nodeIntegration: false
@@ -62,6 +63,8 @@ app.whenReady().then(async () => {
       pause: document.getElementById('btn-pause').textContent,
       pinOn: document.getElementById('btn-pin').classList.contains('on'),
       radius: getComputedStyle(card).borderRadius,
+      card: { left: c.left, top: c.top, right: c.right, bottom: c.bottom },
+      viewport: { width: innerWidth, height: innerHeight },
       bars: [...document.querySelectorAll('.eq i')].map(b => b.style.transform)
     };
   })()`);
@@ -80,6 +83,10 @@ app.whenReady().then(async () => {
   let m = await state();
   console.log(`\n[capsule] window ${size.w}x${size.h}  timer "${m.timer}"`);
   check('at rest it is a capsule', m.pill && m.radius === '999px', JSON.stringify({ pill: m.pill, radius: m.radius }));
+  check('the capsule fills its window with no transparent outline or clipped edge',
+    m.card.left === 0 && m.card.top === 0
+      && m.card.right === m.viewport.width && m.card.bottom === m.viewport.height,
+    JSON.stringify({ card: m.card, viewport: m.viewport }));
   check('genuinely tiny', size.w < 200 && size.h < 60, `${size.w}x${size.h}`);
   check('no buttons in sight', !m.stopShown, 'Stop is visible on the capsule');
   check('and still nothing overflows', m.headerScroll <= m.headerClient,
@@ -102,6 +109,10 @@ app.whenReady().then(async () => {
   console.log(`[hover] window ${size.w}x${size.h}  button "${m.pause}"`);
   check('hovering opens the card', !m.pill && size.w === 470 && size.h === 280,
     JSON.stringify({ pill: m.pill, size }));
+  check('the expanded card keeps all four rounded edges inside the window',
+    m.card.left === 6 && m.card.top === 6
+      && m.card.right === m.viewport.width - 6 && m.card.bottom === m.viewport.height - 6,
+    JSON.stringify({ card: m.card, viewport: m.viewport }));
   check('with the transcript in view', await w.webContents.executeJavaScript(
     "getComputedStyle(document.getElementById('text')).display !== 'none'"), 'is still hidden');
   check('the row fits in the header', m.headerScroll <= m.headerClient,
