@@ -35,6 +35,9 @@ $desktop = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Yapper.lnk'
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $startupApprovedKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
 $loginValueName = 'com.yapper.meetingnotes'
+$updaterDir = Join-Path $env:LOCALAPPDATA 'yapper-updater'
+$updaterPendingDir = Join-Path $updaterDir 'pending'
+$updaterInfoFile = Join-Path $updaterPendingDir 'update-info.json'
 $serverLog = Join-Path $env:TEMP "yapper-update-feed-$PID.log"
 $serverErr = Join-Path $env:TEMP "yapper-update-feed-$PID.err.log"
 $server = $null
@@ -51,12 +54,15 @@ function Confirm([bool]$Condition, [string]$Message, [string]$Detail = '') {
     Write-Host "ok    $Message" -ForegroundColor Green
 }
 
-function Stop-Yapper {
+function Stop-Yapper([int]$GraceSeconds = 30) {
     $running = @(Get-Process Yapper -ErrorAction SilentlyContinue)
     foreach ($process in $running) {
         try { $process.CloseMainWindow() | Out-Null } catch {}
     }
-    if ($running.Count) { Start-Sleep -Seconds 4 }
+    $deadline = (Get-Date).AddSeconds($GraceSeconds)
+    while ((Get-Date) -lt $deadline -and @(Get-Process Yapper -ErrorAction SilentlyContinue).Count) {
+        Start-Sleep -Seconds 1
+    }
     Get-Process Yapper -ErrorAction SilentlyContinue |
         Stop-Process -Force -ErrorAction SilentlyContinue
 }
@@ -87,6 +93,8 @@ try {
     Confirm (Test-Path -LiteralPath $setup) 'release-candidate installer exists' $setup
     Confirm (-not (Test-Path -LiteralPath $exe)) 'runner starts without an installed Yapper'
     Confirm ((Get-Item -LiteralPath $setup).Length -gt 50MB) 'candidate has a plausible installer size'
+    Remove-Item -LiteralPath $updaterDir -Recurse -Force -ErrorAction SilentlyContinue
+    Confirm (-not (Test-Path -LiteralPath $updaterDir)) 'runner starts without a cached Yapper update'
 
     Step "Build local-feed baseline $BaselineVersion"
     $env:UP_VERSION = $BaselineVersion
@@ -139,14 +147,39 @@ try {
             break
         }
     }
-    Confirm $downloaded "the updater finished downloading the exact $targetVersion installer" ((Get-Content $serverLog -Raw -ErrorAction SilentlyContinue))
+    Confirm $downloaded "the update server finished sending the exact $targetVersion installer" ((Get-Content $serverLog -Raw -ErrorAction SilentlyContinue))
+
+    # A completed HTTP response is not yet an updater-ready signal. On a busy
+    # runner electron-updater can still be hashing and renaming the temporary
+    # installer. Wait for its own pending metadata and the final cached file so
+    # quitting the app cannot race the update-downloaded event.
+    $deadline = (Get-Date).AddSeconds(180)
+    $staged = $false
+    $stagedDetail = ''
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 2
+        if (-not (Test-Path -LiteralPath $updaterInfoFile)) { continue }
+        try {
+            $pending = Get-Content -LiteralPath $updaterInfoFile -Raw | ConvertFrom-Json
+            $pendingInstaller = Join-Path $updaterPendingDir ([string]$pending.fileName)
+            $stagedDetail = $pendingInstaller
+            if ($pending.fileName -eq "Yapper-Setup-$targetVersion.exe" -and
+                (Test-Path -LiteralPath $pendingInstaller) -and
+                (Get-Item -LiteralPath $pendingInstaller).Length -gt 50MB) {
+                $staged = $true
+                break
+            }
+        } catch {
+            $stagedDetail = $_.Exception.Message
+        }
+    }
+    Confirm $staged "electron-updater staged the exact $targetVersion installer" $stagedDetail
     $settings = Get-Content -LiteralPath $settingsFile -Raw | ConvertFrom-Json
     Confirm ($settings.sentinel -eq $sentinel -and $settings.theme -eq 'light') 'application startup preserves existing settings'
     Confirm ($settings.openAtLogin -eq $true) 'Start with Windows defaults on for a fresh profile'
     Confirm (Registry-ValueExists $runKey $loginValueName) 'the app ID is registered in the current-user Run key'
     Confirm ([string](Registry-Value $runKey $loginValueName) -match [regex]::Escape($exe)) 'the Run value targets the installed executable'
 
-    Start-Sleep -Seconds 10
     Step "Quit and apply $targetVersion"
     Stop-Yapper
     $deadline = (Get-Date).AddSeconds(180)
