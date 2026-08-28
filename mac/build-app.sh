@@ -87,6 +87,9 @@ DMG="dist/Yapper-$VERSION-arm64.dmg"
 test -f "$DMG" || DMG="$(ls dist/*.dmg | head -1)"
 APP="dist/mac-arm64/Yapper.app"
 test -d "$APP" || { echo "missing unpacked app: $APP" >&2; exit 1; }
+FEED="dist/latest-mac.yml"
+ZIP="dist/Yapper-$VERSION-arm64-mac.zip"
+ZIP_BLOCKMAP="$ZIP.blockmap"
 
 # electron-builder notarizes and staples the .app before creating the zip and
 # dmg. The zip therefore carries the ticket used by automatic updates. Submit
@@ -104,6 +107,29 @@ echo "== notarizing final dmg"
 xcrun notarytool submit "$DMG" --keychain-profile "$APPLE_KEYCHAIN_PROFILE" --wait
 xcrun stapler staple "$DMG"
 
+# Signing and stapling happen after electron-builder writes latest-mac.yml, and
+# both operations change the DMG bytes. Refresh that one entry before upload so
+# a downloaded image agrees with the manifest. The ZIP is already final because
+# it was created from the notarized/stapled app.
+echo "== refreshing signed dmg metadata"
+node - "$FEED" "$DMG" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+const [feedFile, dmgFile] = process.argv.slice(2);
+let feed = fs.readFileSync(feedFile, 'utf8');
+const dmg = fs.readFileSync(dmgFile);
+const name = path.basename(dmgFile);
+const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const entry = new RegExp(`(- url: ${escaped}\\n\\s+sha512: )[^\\n]+(\\n\\s+size: )\\d+`);
+if (!entry.test(feed)) throw new Error(`DMG entry missing from ${feedFile}: ${name}`);
+const sha512 = crypto.createHash('sha512').update(dmg).digest('base64');
+feed = feed.replace(entry, `$1${sha512}$2${dmg.length}`);
+fs.writeFileSync(feedFile, feed);
+console.log(`   ${name}: ${dmg.length} bytes`);
+NODE
+
 echo "== release gates"
 node build/verify-package.js "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
@@ -117,8 +143,6 @@ spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG
 echo "== uploading to release v$VERSION"
 # latest-mac.yml and the signed zip are what electron-updater uses to apply a
 # Mac update; the dmg is the ordinary first install.
-FEED="dist/latest-mac.yml"
-ZIP="dist/Yapper-$VERSION-arm64-mac.zip"
 
 # This script used to require that Windows had published the release first,
 # which left the Mac unable to cut a version on its own. It creates one if it is
@@ -141,6 +165,7 @@ fi
 
 gh release upload "v$VERSION" "$DMG" --repo "$REPO" --clobber
 test -f "$ZIP"  && gh release upload "v$VERSION" "$ZIP"  --repo "$REPO" --clobber
+test -f "$ZIP_BLOCKMAP" && gh release upload "v$VERSION" "$ZIP_BLOCKMAP" --repo "$REPO" --clobber
 test -f "$FEED" && gh release upload "v$VERSION" "$FEED" --repo "$REPO" --clobber
 # the installer is cut with the build it installs, rather than living on a branch
 gh release upload "v$VERSION" mac/install.sh --repo "$REPO" --clobber
