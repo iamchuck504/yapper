@@ -2199,7 +2199,7 @@ ipcMain.handle('transcribe', async (_e, folder) => {
   try {
     if (twoTrack) {
       // Speaker detection runs beside transcription: Core ML on macOS and a
-      // pinned local WebAssembly worker on Windows. The helper is optional and
+      // pinned local native process on Windows. The helper is optional and
       // its failure never costs the transcript.
       let waitingForSpeakers = false;
       let diarizationDone = false;

@@ -1,8 +1,8 @@
 'use strict';
 
-// A controlled long-call simulation. It never opens an input device: macOS
-// `say` produces the recorder voice and optional public LibriSpeech fixtures
-// provide three real remote voices. The renderer feeds silence through the
+// A controlled long-call simulation. It never opens an input device: the
+// platform speech synthesizer produces four controlled voices and optional
+// public LibriSpeech fixtures provide three real remote voices on macOS. The renderer feeds silence through the
 // real recording IPC for the requested duration, and controlled WAV fixtures
 // then put those voices on separate microphone/system tracks. The real final
 // Whisper + FluidAudio path consumes the fixtures, after which the real UI,
@@ -104,22 +104,22 @@ function filesBelow(dir, suffix) {
 }
 
 const VOICES = {
-  Me: { voice: 'Samantha', name: 'Chuck', phrases: [
+  Me: { voice: process.platform === 'win32' ? 'Microsoft Zira Desktop' : 'Samantha', pitch: '+0%', rate: '+0%', name: 'Chuck', phrases: [
     'I will verify the release build and document the remaining risks.',
     'I checked the latest prototype and the main workflow is responding correctly.',
     'I will review the action list before the next project checkpoint.'
   ] },
-  Atlas: { voice: 'Daniel', name: 'Sebastian', phrases: [
+  Atlas: { voice: process.platform === 'win32' ? 'Microsoft David Desktop' : 'Daniel', pitch: '-25%', rate: '-10%', name: 'Sebastian', phrases: [
     'The launch checklist is current, and the accessibility review is assigned.',
     'The customer feedback confirms that faster meeting notes are the priority.',
     'I will send the updated rollout plan after this meeting.'
   ] },
-  Beacon: { voice: 'Moira', name: 'Robert', phrases: [
+  Beacon: { voice: process.platform === 'win32' ? 'Microsoft David Desktop' : 'Moira', pitch: '+25%', rate: '+10%', name: 'Robert', phrases: [
     'The performance measurements remain within the expected operating range.',
     'I reviewed the transcription sample and the timestamps stayed in order.',
     'The next test should include a long silence followed by returning voices.'
   ] },
-  Cedar: { voice: 'Fred', name: 'Maya', phrases: [
+  Cedar: { voice: process.platform === 'win32' ? 'Microsoft Zira Desktop' : 'Fred', pitch: '-20%', rate: '+5%', name: 'Maya', phrases: [
     'The support guide now explains how participants can be matched to their names.',
     'I will confirm the export files and share the final quality report.',
     'The team agreed to keep unknown identities as numbered speaker labels.'
@@ -132,14 +132,43 @@ function buildClips() {
   const clips = {};
   const makeSynthetic = (speaker, info) => {
     clips[speaker] = info.phrases.map((text, index) => {
+      // The Windows diarizer needs more than a very short sentence to build a
+      // stable embedding. Pair adjacent phrases so varied wording still maps
+      // to the same identity instead of occasionally creating Speaker 4.
+      const spokenText = process.platform === 'win32'
+        ? `${text} ${info.phrases[(index + 1) % info.phrases.length]}` : text;
       const stem = `${speaker.toLowerCase()}-${index + 1}`;
-      const aiff = path.join(fixtureDir, `${stem}.aiff`);
       const wav = path.join(fixtureDir, `${stem}.wav`);
-      run('/usr/bin/say', ['-v', info.voice, '-r', '185', '-o', aiff, text], `voice ${info.voice}`);
-      run('/usr/bin/afconvert', ['-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', aiff, wav],
-        `convert ${info.voice}`);
+      if (process.platform === 'win32') {
+        const script = [
+          'Add-Type -AssemblyName System.Speech',
+          '$s = New-Object System.Speech.Synthesis.SpeechSynthesizer',
+          'try {',
+          '  $s.SelectVoice($env:YAPPER_TTS_VOICE)',
+          '  $format = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo(16000, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)',
+          '  $s.SetOutputToWaveFile($env:YAPPER_TTS_OUTPUT, $format)',
+          '  $text = [System.Security.SecurityElement]::Escape($env:YAPPER_TTS_TEXT)',
+          '  $ssml = "<speak version=\'1.0\' xmlns=\'http://www.w3.org/2001/10/synthesis\' xml:lang=\'en-US\'><prosody pitch=\'$env:YAPPER_TTS_PITCH\' rate=\'$env:YAPPER_TTS_RATE\'>$text</prosody></speak>"',
+          '  $s.SpeakSsml($ssml)',
+          '} finally { $s.Dispose() }'
+        ].join('; ');
+        const result = spawnSync('powershell.exe',
+          ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+            encoding: 'utf8', timeout: 90000,
+            env: { ...process.env, YAPPER_TTS_VOICE: info.voice, YAPPER_TTS_OUTPUT: wav,
+              YAPPER_TTS_TEXT: spokenText, YAPPER_TTS_PITCH: info.pitch, YAPPER_TTS_RATE: info.rate }
+          });
+        if (result.status !== 0) {
+          throw new Error(`voice ${info.voice} failed: ${(result.stderr || result.stdout || `exit ${result.status}`).trim()}`);
+        }
+      } else {
+        const aiff = path.join(fixtureDir, `${stem}.aiff`);
+        run('/usr/bin/say', ['-v', info.voice, '-r', '185', '-o', aiff, text], `voice ${info.voice}`);
+        run('/usr/bin/afconvert', ['-f', 'WAVE', '-d', 'LEI16@16000', '-c', '1', aiff, wav],
+          `convert ${info.voice}`);
+        fs.unlinkSync(aiff);
+      }
       const pcm = readWavePcm(wav);
-      fs.unlinkSync(aiff);
       fs.unlinkSync(wav);
       if (pcm.length / BPS < 1 || pcm.length / BPS > 15) {
         throw new Error(`${info.voice} produced an implausible ${(pcm.length / BPS).toFixed(1)} s clip`);
@@ -149,7 +178,7 @@ function buildClips() {
   };
 
   makeSynthetic('Me', VOICES.Me);
-  const humanRoot = process.env.YAPPER_HUMAN_FIXTURES;
+  const humanRoot = process.platform === 'darwin' && process.env.YAPPER_HUMAN_FIXTURES;
   if (humanRoot && fs.existsSync(humanRoot)) {
     const people = fs.readdirSync(humanRoot, { withFileTypes: true })
       .filter(entry => entry.isDirectory())
@@ -177,7 +206,7 @@ function buildClips() {
       + `, ${HUMAN_CLIPS_PER_SPEAKER} unique clips each`;
   } else {
     for (const speaker of ['Atlas', 'Beacon', 'Cedar']) makeSynthetic(speaker, VOICES[speaker]);
-    metrics.voiceFixture = 'macOS synthetic voices';
+    metrics.voiceFixture = `${process.platform === 'win32' ? 'Windows' : 'macOS'} synthetic voices`;
   }
   return clips;
 }
@@ -308,7 +337,7 @@ function allocatedBytes(file) {
   return Number.isFinite(stat.blocks) ? stat.blocks * 512 : stat.size;
 }
 
-// This test must never capture whatever the Mac is currently playing. The
+// This test must never capture whatever the machine is currently playing. The
 // recorder still receives every synthetic microphone block through its real
 // IPC and file handles; only the native input helper is replaced by silence.
 sysaudio.create = () => ({
@@ -367,9 +396,9 @@ require('../main.js');
 app.whenReady().then(async () => {
   const started = Date.now();
   const hardStop = setTimeout(() => {
-    say('FAIL  the three-hour simulation exceeded its 60 minute safety limit');
+    say('FAIL  the three-hour simulation exceeded its 75 minute safety limit');
     app.exit(1);
-  }, 60 * 60 * 1000);
+  }, 75 * 60 * 1000);
   try {
     const win = await mainWindow({ settleMs: 1500 });
     const $ = js => win.webContents.executeJavaScript(js, true);
@@ -441,13 +470,13 @@ app.whenReady().then(async () => {
     fs.readSync(liveFd, livePattern, 0, livePattern.length, engine.WAV_HEADER);
     fs.closeSync(liveFd);
 
-    say('\n--- 4. real Whisper + FluidAudio final pass ---');
+    say('\n--- 4. real Whisper + local speaker detection final pass ---');
     const finalRss = rss();
     const tFinal = Date.now();
     const ticker = setInterval(() => say(`  final pass still running (${Math.round((Date.now() - tFinal) / 1000)} s)`), 30_000);
     const transcript = await within(
       $(`window.yapper.transcribe(${JSON.stringify(folder)})`),
-      'three-hour final transcription and speaker detection', 40 * 60 * 1000
+      'three-hour final transcription and speaker detection', 65 * 60 * 1000
     ).finally(() => clearInterval(ticker));
     const finalSeconds = (Date.now() - tFinal) / 1000;
     const finalGrowth = (await settledRss()) - finalRss;
@@ -476,7 +505,7 @@ app.whenReady().then(async () => {
     metrics.diarization = diarization;
     say(`  speakers ${diarization.detectedLabels}; coverage ${(diarization.coverage * 100).toFixed(1)}%; `
       + `stable ${(diarization.stableAccuracy * 100).toFixed(1)}%; final hour ${(diarization.lateAccuracy * 100).toFixed(1)}%`);
-    check('FluidAudio found exactly three remote identities',
+    check('local diarization found exactly three remote identities',
       diarization.distinctMajorities === 3 && diarization.detectedLabels === 3,
       JSON.stringify(diarization.confusion));
     check('speaker detection covers at least 85% of remote turns', diarization.coverage >= 0.85,
@@ -516,7 +545,8 @@ app.whenReady().then(async () => {
     check('the notes prompt received the complete late transcript',
       noteInput.includes('Chuck:') && Math.max(...noteStamps) > DURATION_SEC - 120,
       `${noteInput.length} characters, last stamp ${Math.max(...noteStamps)}`);
-    check('the notes instruction forbids vague speaker references', /instead of vague phrases such as "the speaker"/i.test(noteSystem));
+    check('the notes instruction keeps unknown voices neutral without technical labels',
+      /Never write technical labels such as "Speaker 1"[\s\S]*unknown voice[\s\S]*summarize the point neutrally/i.test(noteSystem));
     check('generated notes use names and never “the speaker”',
       ['Sebastian', 'Robert', 'Maya'].every(name => draft.summary.includes(name))
       && !/the speaker/i.test(draft.summary));

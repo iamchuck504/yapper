@@ -224,7 +224,7 @@ time to first notes, and total note-writing time.
 
 On Windows and macOS 14 or newer, the final local pass also separates distinct
 voices on the remote/system track as **Speaker 1**, **Speaker 2**, and so on.
-Windows uses a pinned local WebAssembly model and macOS uses Core ML. The meeting
+Windows uses a pinned local multithreaded native model runner and macOS uses Core ML. The meeting
 keeps the two optional people fields distinct: **Participants** records who
 attended for meeting context and search, but does not assign voices; the
 collapsed **Match voices to names** control records who said what. Open it only

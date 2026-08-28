@@ -1,7 +1,8 @@
 # Third-party notices
 
-Yapper's Windows speaker diarization bundle is prepared from the pinned
-`k2-fsa/sherpa-onnx` v1.13.6 WebAssembly speaker-diarization release:
+Yapper's Windows speaker diarization bundle is prepared from two pinned
+`k2-fsa/sherpa-onnx` v1.13.6 release archives: the speaker-diarization model
+bundle and the x64 shared native runtime without text-to-speech:
 
 https://github.com/k2-fsa/sherpa-onnx/releases/tag/v1.13.6
 
@@ -13,11 +14,11 @@ It includes:
 - the 3D-Speaker embedding model, whose source project is licensed under
   Apache License 2.0.
 
-Yapper changes one path expression in the generated Emscripten loader so its
-preloaded data file is resolved beside the module in a Node worker. No model
-weights or inference code are changed. The exact upstream archive and its
-SHA-256 are recorded in `build/prepare-windows-diarizer.js` and in the bundled
-manifest.
+Yapper extracts the two unchanged ONNX models plus the native diarization
+executable and its two runtime libraries. No model weights or inference code
+are changed. Both exact upstream archives and their SHA-256 values, along with
+the hash of every installed file, are recorded in
+`build/prepare-windows-diarizer.js` and in the bundled manifest.
 
 Source projects:
 

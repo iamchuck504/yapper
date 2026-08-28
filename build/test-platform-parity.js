@@ -242,11 +242,10 @@ check('Windows writes the separated blocks while keeping the mixed recording',
   && /writeRecorded\(buf\)/.test(mainCode),
   'the live/recovery mix or the final Me/Them tracks would be missing');
 const diarizerCode = code('speaker-diarizer.js');
-const diarizerWorkerCode = code('speaker-diarize-worker.js');
-check('Windows sends its remote track to an isolated local diarization worker',
+check('Windows sends its remote track to an isolated native diarization process',
   /platform === 'win32'/.test(diarizerCode)
-  && /new Worker\(workerFile/.test(diarizerCode)
-  && /createOfflineSpeakerDiarization/.test(diarizerWorkerCode),
+  && /spawn\(executable, args/.test(diarizerCode)
+  && /sherpa-onnx-offline-speaker-diarization\.exe/.test(diarizerCode),
   'Windows would collapse every remote voice back to Them');
 check('the Windows diarizer has the same failure-safe transcript fallback as macOS',
   /segments:\s*\[\],\s*available:\s*false/.test(diarizerCode)
@@ -255,6 +254,11 @@ check('the Windows diarizer has the same failure-safe transcript fallback as mac
 check('Windows stages the diarizer on the destination volume before atomic rename',
   /mkdtemp\(path\.join\(path\.dirname\(destination\),\s*'\.yapper-diarizer-'\)\)/.test(windowsDiarizerPrep),
   'GitHub keeps TEMP and the checkout on different drives, where rename fails with EXDEV');
+check('Windows pins and verifies both native runtime and model archives',
+  /MODEL_ARCHIVE/.test(windowsDiarizerPrep)
+  && /NATIVE_ARCHIVE/.test(windowsDiarizerPrep)
+  && /EXPECTED_FILES/.test(windowsDiarizerPrep),
+  'an unverified runtime or model could enter the installer');
 
 console.log(fails ? `\n${fails} failures` : '\nPASS');
 process.exit(fails ? 1 : 0);

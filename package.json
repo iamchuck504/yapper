@@ -45,7 +45,6 @@
       "meetings.js",
       "sysaudio.js",
       "speaker-diarizer.js",
-      "speaker-diarize-worker.js",
       "security.js",
       "storage.js",
       "preload.js",
@@ -78,7 +77,6 @@
       "build/mic-probe",
       "build/system-audio",
       "build/speaker-diarize",
-      "speaker-diarize-worker.js",
       "build/speaker-diarizer-windows/**/*"
     ],
     "beforePack": "build/prepare-windows-diarizer.js",

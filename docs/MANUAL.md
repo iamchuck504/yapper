@@ -289,7 +289,7 @@ UI; several are deliberate trade-offs, marked as such.
    not silently uploaded.
 3. **Speaker detection has a platform-specific engine.** Both platforms keep
    microphone and system tracks apart. Windows uses a pinned local sherpa-onnx
-   WebAssembly worker; macOS 14+ uses Core ML. Each separates the remote side
+   native process; macOS 14+ uses Core ML. Each separates the remote side
    into `Speaker 1`, `Speaker 2`, and so on, and the user can map those labels
    to attendee names. They remain useful in the full transcript, but generated
    notes preserve real spoken or assigned names — including every explicitly
@@ -362,7 +362,7 @@ Neutral estimates of shape, not commitments; ordered by leverage.
   runtime, notarization, stapling and Gatekeeper checks are mandatory before
   upload. Publishing a newly remediated build remains an explicit action.
 - ~~**True diarization**~~ — **done locally** with Core ML on macOS 14+ and a
-  pinned sherpa-onnx/pyannote-class WebAssembly model on Windows.
+  pinned multithreaded sherpa-onnx/pyannote-class native runner on Windows.
 - **Renderer split** — mechanical refactor of the 2,500-line file into
   modules; no user-visible change, pays down the maintenance cost.
 

@@ -116,7 +116,7 @@ that ship are the files that run.
 | `provision.js` | 505 | First-run engine download for installed copies (Windows and macOS): pinned, SHA-256 verified, size-bounded, resumable and retried |
 | `library.js` | 169 | The index over every meeting: build, refresh, select by day or week |
 | `sysaudio.js` | 335 | macOS system audio: the native helper's lifecycle, its buffer, and mixing it into the microphone |
-| `speaker-diarizer.js` | 367 | Optional macOS Core ML and Windows WebAssembly diarization, timestamp alignment, stable transcript labels, neutral note prose and per-meeting name maps |
+| `speaker-diarizer.js` | 415 | Optional macOS Core ML and native Windows diarization, timestamp alignment, stable transcript labels, neutral note prose and per-meeting name maps |
 | `meetings.js` | 89 | Which running app counts as a meeting, in both platforms' vocabularies |
 | `keystore.js` | 39 | Sealing the API key with the OS keystore |
 | `bounds.js` | 34 | Pure geometry: keeping the floating bubble on screen |
@@ -175,12 +175,12 @@ loop.
 
 The macOS diarizer similarly returns only bounded JSON time ranges. FluidAudio's
 models run locally through Core ML. Windows runs the same bounded interface in
-`speaker-diarize-worker.js`, using a pinned SHA-256-verified sherpa-onnx
-WebAssembly bundle. The build downloads that ~46 MB compressed bundle from the
-official release, records every extracted hash, and ships the licenses; the
-worker keeps model loading and inference off Electron's UI thread. In both
-cases `speaker-diarizer.js` owns the fallbacks, stable display numbering,
-alignment to Whisper lines and user name mapping.
+a separate pinned sherpa-onnx native process with up to four CPU threads. The
+build downloads the official model and Windows runtime archives, verifies both
+archives plus every installed file by SHA-256, and ships the licenses. In both
+cases `speaker-diarizer.js` owns process isolation, cancellation, timeouts,
+fallbacks, stable display numbering, alignment to Whisper lines and user name
+mapping.
 
 None is required. Without the audio helper the app records the microphone
 alone and says so; without the mic probe, auto-detection stays off; without the
@@ -257,7 +257,7 @@ mix: the microphone track and the system-audio track each get their own
 `transcribeFile()` pass (and their own head start), and the lines are interleaved
 by timestamp with `Me:` plus remote labels. On Windows the renderer's
 audio-thread tap sends aligned source blocks alongside the mix, and the local
-sherpa-onnx worker diarizes the system track. On macOS 14+, FluidAudio does the
+sherpa-onnx native process diarizes the system track. On macOS 14+, FluidAudio does the
 same on the Neural Engine. Each runs in parallel with Whisper, and
 `speaker-diarizer.js` aligns its time ranges to Whisper's lines as stable
 `Speaker 1`, `Speaker 2`, etc. A failure is non-fatal and falls back to `Them:`.
@@ -865,7 +865,7 @@ three groups.
 | `test-dedup.js` | Transcript cleanup: which repeats are removed, which survive, and the time window that separates a seam artefact from a person restating something |
 | `test-two-track.js` | Per-side call tracks: the silence detector that spares the far-side track its inferences, and the merge that interleaves both sides by time with Me/remote labels without inventing, dropping or reordering a word |
 | `test-pcm-worklet.js` | The renderer audio-thread boundary: stereo-to-mono conversion, aligned microphone/system blocks, their exact mixed sum, and silence for a missing source |
-| `test-speakers.js` | Diarization JSON bounds, timestamp overlap, stable Speaker N numbering, safe name mapping, native helper self-test and Windows worker lifecycle |
+| `test-speakers.js` | Diarization bounds, timestamp overlap, stable Speaker N numbering, safe name mapping, native helper self-test and Windows process lifecycle |
 | `test-windows-diarizer.js` | A pinned official two-voice fixture proves the bundled Windows model finds both voices locally |
 | `test-two-track-app.js` | The two-track branch through the real app: a folder with per-side tracks comes back labelled, ordered, free of words hallucinated into the silent stretches, and with its audio released |
 | `test-library.js` | The meeting index: what counts as content, day and week selection, and the stamp that decides when a cached entry can be reused |

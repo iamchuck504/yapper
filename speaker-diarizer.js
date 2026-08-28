@@ -7,13 +7,15 @@
 // label and the meeting still finishes normally.
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
-const { Worker } = require('worker_threads');
 
 const MAX_HELPER_OUTPUT = 16 * 1024 * 1024;
 const MAX_SEGMENTS = 500000;
 const DEFAULT_TIMEOUT_MS = 12 * 60 * 1000;
+const MAX_LONG_AUDIO_TIMEOUT_MS = 45 * 60 * 1000;
+const PCM_BYTES_PER_SECOND = 16000 * 2;
 const MAX_LINE_MATCH_DISTANCE_SECONDS = 10;
 const SPEAKER_LABEL = /^(Me|Them|Speaker [1-9]\d*)$/;
 
@@ -113,29 +115,54 @@ function diarizeMacFile(helper, audioFile, options = {}) {
   return promise;
 }
 
-function unpackedPath(file) {
-  return file.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`);
+/** The Windows native diarizer uses up to four CPU threads. Twelve minutes is
+ * still a useful ceiling for ordinary calls, while long tracks receive a
+ * proportional allowance for slower machines. */
+function windowsTimeoutForBytes(bytes) {
+  const seconds = Math.max(0, (Number(bytes) - 44) / PCM_BYTES_PER_SECOND);
+  return Math.min(MAX_LONG_AUDIO_TIMEOUT_MS,
+    Math.max(DEFAULT_TIMEOUT_MS, Math.ceil(seconds * 180)));
 }
 
-/** Run sherpa-onnx in an isolated worker on Windows. The worker and its pinned
- * models are bundled with the installer, and a failure preserves Them: just as
- * the native macOS route does. */
+function windowsTimeoutForAudio(audioFile) {
+  try { return windowsTimeoutForBytes(fs.statSync(audioFile).size); }
+  catch { return DEFAULT_TIMEOUT_MS; }
+}
+
+function parseWindowsNativeOutput(text) {
+  if (typeof text !== 'string' || Buffer.byteLength(text, 'utf8') > MAX_HELPER_OUTPUT) return [];
+  const segments = [];
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.trim().match(/^(\d+(?:\.\d+)?)\s+--\s+(\d+(?:\.\d+)?)\s+(speaker_[0-9]+)$/);
+    if (match) segments.push({ speaker: match[3], start: Number(match[1]), end: Number(match[2]) });
+  }
+  return cleanSegments(segments);
+}
+
+/** Run the pinned multithreaded sherpa-onnx executable on Windows. The process
+ * is isolated from Electron's UI and a failure preserves Them:, just like the
+ * native macOS route. */
 function diarizeWindowsFile(helper, audioFile, options = {}) {
   const assetsDir = options.windowsAssets
     || (helper ? path.join(path.dirname(helper), 'speaker-diarizer-windows') : '');
-  const workerFile = options.workerFile
-    || unpackedPath(path.join(__dirname, 'speaker-diarize-worker.js'));
+  const executable = options.nativeExecutable
+    || path.join(assetsDir, 'sherpa-onnx-offline-speaker-diarization.exe');
+  const segmentation = path.join(assetsDir, 'segmentation.onnx');
+  const embedding = path.join(assetsDir, 'embedding.onnx');
   if (!audioFile || !assetsDir || !fs.existsSync(audioFile)
-      || !fs.existsSync(assetsDir) || !fs.existsSync(workerFile)) {
+      || !fs.existsSync(executable) || !fs.existsSync(segmentation) || !fs.existsSync(embedding)) {
     const none = Promise.resolve({ segments: [], available: false, reason: 'unavailable' });
     none.cancel = () => { };
     return none;
   }
 
-  const timeoutMs = Math.max(1000, Number(options.timeoutMs) || DEFAULT_TIMEOUT_MS);
+  const timeoutMs = Math.max(1000, Number(options.timeoutMs) || windowsTimeoutForAudio(audioFile));
   let cancel = () => { };
   const promise = new Promise(resolve => {
-    let worker;
+    let proc;
+    let stdout = Buffer.alloc(0);
+    let stderr = '';
+    let lastProgress = -1;
     let settled = false;
     let timer;
     const finish = result => {
@@ -145,11 +172,24 @@ function diarizeWindowsFile(helper, audioFile, options = {}) {
       resolve(result);
     };
     const stop = () => {
-      try { worker?.terminate(); } catch { /* already gone */ }
+      try { proc?.kill(); } catch { /* already gone */ }
     };
 
+    const threads = Math.max(1, Math.min(4,
+      typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length));
+    const args = [
+      ...(Array.isArray(options.nativeArgsPrefix) ? options.nativeArgsPrefix : []),
+      `--segmentation.num-threads=${threads}`,
+      `--embedding.num-threads=${threads}`,
+      '--clustering.cluster-threshold=0.5',
+      `--segmentation.pyannote-model=${segmentation}`,
+      `--embedding.model=${embedding}`,
+      audioFile
+    ];
     try {
-      worker = new Worker(workerFile, { workerData: { assetsDir, audioFile } });
+      proc = spawn(executable, args, {
+        cwd: assetsDir, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
+      });
     } catch (err) {
       finish({ segments: [], available: false, reason: err.message });
       return;
@@ -159,26 +199,32 @@ function diarizeWindowsFile(helper, audioFile, options = {}) {
       stop();
       finish({ segments: [], available: true, reason: 'not needed' });
     };
-    worker.on('message', message => {
-      if (!message || typeof message !== 'object') return;
-      if (message.type === 'progress' && typeof options.onProgress === 'function') {
-        options.onProgress(Number(message.done), Number(message.total));
-      } else if (message.type === 'result') {
-        const segments = cleanSegments(message.segments);
+    proc.stdout.on('data', chunk => {
+      if (stdout.length + chunk.length > MAX_HELPER_OUTPUT) {
         stop();
-        finish({
-          segments,
-          available: true,
-          reason: segments.length ? '' : 'no remote speech detected'
-        });
-      } else if (message.type === 'error') {
-        stop();
-        finish({ segments: [], available: true, reason: String(message.reason || 'speaker detection failed').slice(0, 500) });
+        return finish({ segments: [], available: true, reason: 'helper output was too large' });
+      }
+      stdout = Buffer.concat([stdout, chunk]);
+    });
+    proc.stderr.on('data', chunk => {
+      stderr = (stderr + String(chunk)).slice(-32768);
+      const matches = [...stderr.matchAll(/progress\s+(\d+(?:\.\d+)?)%/gi)];
+      if (matches.length && typeof options.onProgress === 'function') {
+        const progress = Math.max(0, Math.min(100, Number(matches[matches.length - 1][1])));
+        if (progress > lastProgress) {
+          lastProgress = progress;
+          options.onProgress(progress, 100);
+        }
       }
     });
-    worker.on('error', err => finish({ segments: [], available: false, reason: err.message }));
-    worker.on('exit', code => {
-      if (!settled) finish({ segments: [], available: true, reason: `speaker worker exited ${code}` });
+    proc.on('error', err => finish({ segments: [], available: false, reason: err.message }));
+    proc.on('close', code => {
+      const segments = code === 0 ? parseWindowsNativeOutput(stdout.toString('utf8')) : [];
+      finish({
+        segments,
+        available: true,
+        reason: segments.length ? '' : (stderr.trim().split(/\r?\n/).pop() || `helper exited ${code}`)
+      });
     });
     timer = setTimeout(() => {
       stop();
@@ -352,6 +398,8 @@ module.exports = {
   stampSeconds,
   cleanSegments,
   parseHelperOutput,
+  parseWindowsNativeOutput,
+  windowsTimeoutForBytes,
   diarizeFile,
   diarizeMacFile,
   diarizeWindowsFile,

@@ -52,7 +52,6 @@ for (const file of runtimeFiles) {
   check(`package config includes ${file}`, configured.has(file));
 }
 check('package config includes renderer assets', configured.has('renderer/**/*'));
-check('package config includes the Windows diarization worker', configured.has('speaker-diarize-worker.js'));
 check('package config includes pinned Windows diarization assets',
   configured.has('build/speaker-diarizer-windows/**/*'));
 check('package config includes third-party notices', configured.has('THIRD-PARTY-NOTICES.md'));
@@ -110,14 +109,13 @@ async function inspectApp(appPath) {
     }
   } else {
     const unpackedRoot = path.join(path.dirname(asarPath), 'app.asar.unpacked');
-    const worker = path.join(unpackedRoot, 'speaker-diarize-worker.js');
     const assets = path.join(unpackedRoot, 'build', 'speaker-diarizer-windows');
-    check('packaged Windows app contains the isolated diarization worker', fs.existsSync(worker), worker);
     for (const file of [
-      'sherpa-onnx-speaker-diarization.js',
-      'sherpa-onnx-wasm-main-speaker-diarization.js',
-      'sherpa-onnx-wasm-main-speaker-diarization.wasm',
-      'sherpa-onnx-wasm-main-speaker-diarization.data',
+      'sherpa-onnx-offline-speaker-diarization.exe',
+      'onnxruntime.dll',
+      'onnxruntime_providers_shared.dll',
+      'embedding.onnx',
+      'segmentation.onnx',
       'manifest.json'
     ]) {
       const bundled = path.join(assets, file);

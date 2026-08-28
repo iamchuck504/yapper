@@ -74,7 +74,7 @@ async function fixture() {
 
 (async () => {
   if (process.platform !== 'win32') {
-    console.log('skip  Windows WebAssembly diarizer test');
+    console.log('skip  Windows native diarizer test');
     return;
   }
   const audio = await fixture();
@@ -83,15 +83,11 @@ async function fixture() {
   const assets = packaged
     ? path.join(unpacked, 'build', 'speaker-diarizer-windows')
     : path.join(__dirname, 'speaker-diarizer-windows');
-  const workerFile = packaged
-    ? path.join(unpacked, 'speaker-diarize-worker.js')
-    : path.join(__dirname, '..', 'speaker-diarize-worker.js');
   const helperHint = path.join(path.dirname(assets), 'speaker-diarize');
   let progress = 0;
   const run = speakers.diarizeWindowsFile(helperHint, audio, {
     timeoutMs: 120000,
     windowsAssets: assets,
-    workerFile,
     onProgress: (done, total) => { if (total > 0 && done >= 0) progress++; }
   });
   const result = await run;
