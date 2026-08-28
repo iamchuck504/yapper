@@ -153,7 +153,7 @@ and then dropped as not worth the dependency; see the history of
 
    Updating is also cheap: the engine and models live in
    `~/Library/Application Support/yapper`, outside the bundle, so a new version
-   is the ~95 MB dmg and not another 650 MB. Meetings and granted permissions
+   is the ~117 MB dmg and not another 650 MB. Meetings and granted permissions
    survive, since neither belongs to the app bundle and the bundle id is stable.
 4. **Intel Macs are not built.** arm64 only; an x64/universal build would need
    a second engine compile and doubles the artifact size for a shrinking

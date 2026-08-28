@@ -747,8 +747,10 @@ models next to the code, `npm start` runs it. The engine home is the repo.
 **Users get an installer.** `npm run dist` produces
 `dist\Yapper-Setup-<version>.exe` (~155 MB including the local speaker model,
 NSIS, per-user, no admin) plus the
-`latest.yml` + blockmap feed files; `npm run release` builds and publishes them
-to the GitHub release feed in one step. What shipping changed in the code, and
+`latest.yml` + blockmap feed files; `npm run release` exercises the Windows
+package and installer lifecycle, then creates the release or replaces the
+Windows assets in a Mac-first release that already exists on the GitHub feed.
+What shipping changed in the code, and
 why:
 
 - **The engine moved out of the app.** An installed copy runs from a read-only

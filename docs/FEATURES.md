@@ -410,7 +410,7 @@ The rules around it:
 - **Updates** — checked at launch and every four hours. **Windows** downloads in
   the background and applies on quit, or immediately from the sidebar pill.
   Signed **macOS** releases use the same ready-to-restart flow. Updating does
-  not re-download the engine, which lives outside the app, so it is ~95 MB
+  not re-download the engine, which lives outside the app, so it is ~117 MB
   rather than another 650 MB. Meetings and granted permissions are untouched.
 - **Reminders** — add your own, alongside the ones extracted from notes.
 - **Keyboard** — the shortcuts live in the menu bar, so they are listed where
@@ -427,11 +427,12 @@ The rules around it:
 
 Stated plainly, so it is planned around rather than discovered:
 
-- **Separating multiple remote voices is currently macOS-only.** Both platforms
+- **Separating multiple remote voices is optional and local.** Both platforms
   retain the recorder and remote sides separately and label them reliably as
-  `Me`/`Them`. macOS 14+ can additionally separate remote voices locally as
-  `Speaker 1`, `Speaker 2`, and so on. Names are assigned by the user, not
-  guessed; unknown numbered labels never appear as people in generated notes.
+  `Me`/`Them`. With **Identify speakers** enabled, Windows uses its pinned
+  native sherpa-onnx runner and macOS 14+ uses Core ML to add `Speaker 1`,
+  `Speaker 2`, and later labels. Names are assigned by the user, not guessed;
+  unknown numbered labels never appear as people in generated notes.
 - **No calendar integration.** Detection knows a microphone is in use, not that
   "the 10:00 with Ana" is starting.
 - **No mobile, no sync, no sharing, no accounts.** Meetings live on the machine

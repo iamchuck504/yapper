@@ -131,6 +131,31 @@ check('package scripts expose both Windows sanity levels',
   pkg.scripts['test:windows'] && pkg.scripts['test:windows:package'],
   JSON.stringify(pkg.scripts));
 
+// --- the public guides and release handoff ---
+const readme = read('README.md');
+const features = read('docs/FEATURES.md');
+const windowsChecklist = read('.github/WINDOWS-RELEASE-CHECKLIST.md');
+const releaseDriver = read('build/release.js');
+check('the README names both platform release paths',
+  /mac\/build-app\.sh/.test(readme) && /npm run release/.test(readme),
+  'a one-platform instruction would strand the other update manifest');
+check('the feature guide describes optional local speakers on both platforms',
+  /Identify speakers[\s\S]{0,500}Windows[\s\S]{0,300}macOS 14/.test(features)
+  && !/currently macOS-only/.test(features),
+  'the copied public guide would send Windows users to an obsolete path');
+check('the Windows checklist is version-independent',
+  /\$version/.test(windowsChecklist) && !/Current `0\.1\./.test(windowsChecklist),
+  'the next release would inherit an old handoff');
+check('Windows can join a Mac-first release',
+  /releaseExists/.test(releaseDriver)
+  && /release', 'upload'/.test(releaseDriver)
+  && /--clobber/.test(releaseDriver),
+  'npm run release would fail merely because the Mac published first');
+check('Windows publishing runs its package and installer lifecycle first',
+  /test:windows:package/.test(releaseDriver)
+  && /test-windows-installer\.ps1/.test(releaseDriver),
+  'publishing could bypass the Windows runtime gates');
+
 // --- every test the docs list, exists ---
 const named = [...doc.matchAll(/`((?:test-|icon-)[\w-]+\.js)`/g)].map(m => m[1]);
 check('the document names tests', named.length >= 10, `${named.length}`);

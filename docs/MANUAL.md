@@ -33,7 +33,7 @@ pill in the sidebar. The whole loop is exercised by `build/e2e-update.ps1`,
 which installs a 0.1.0, serves it a 0.1.1, and checks that what is on disk
 afterwards is 0.1.1.
 
-**macOS** — `Yapper-<version>-arm64.dmg` (~95 MB), Apple Silicon, macOS 13 or
+**macOS** — `Yapper-<version>-arm64.dmg` (~117 MB), Apple Silicon, macOS 13 or
 newer. Release builds use the Developer ID identity for team `54H77VDNJY`,
 hardened runtime and Apple's notarization service. Gatekeeper can verify a
 normal dmg install, and signed updates download and install from inside the
@@ -45,7 +45,7 @@ acceptance; it never removes quarantine to bypass a failed check.
   unless its packaged modules, Electron fuses, signature, Team ID,
   notarization ticket and Gatekeeper assessment all pass.
 - **Updates install themselves.** The engine is not re-downloaded, so an
-  update costs ~95 MB rather than another 650 MB; meetings and permissions
+  update costs ~117 MB rather than another 650 MB; meetings and permissions
   survive because the bundle identity is stable.
 - **A system-audio permission has to be granted** on the first recording, on
   top of the microphone. It is what captures what the Mac is *playing* — the
@@ -266,7 +266,7 @@ transcript, notes, title. Useful for phone recordings and voice memos.
 | Calendar integration | **Missing** |
 | Sync, sharing, team features | **Missing** |
 
-Testing: ~30 scripted checks-suites — pure logic in `npm test` (seconds), plus
+Testing: dozens of scripted suites — pure logic in `npm test` (seconds), plus
 Electron-driven suites that operate the real window, feed real audio through
 the real IPC, and include fault injection, a measured two-hour meeting, and
 adversarial key-leak tests. `build/` also carries probes that diagnose rather
@@ -328,7 +328,8 @@ UI; several are deliberate trade-offs, marked as such.
     prompt reads better there.
 12. **Updates depend on the release feed being maintained.** Installed copies
     update themselves, but only from versions somebody actually published
-    (`npm run release`); a development checkout still updates with `git pull`.
+    (`bash mac/build-app.sh` on macOS, `npm run release` on Windows); a
+    development checkout still updates with `git pull`.
 13. **UI is English only.**
 14. **The transcript is not editable in-app.** Notes are; the transcript file
     must be edited externally if a word is wrong.
@@ -336,7 +337,7 @@ UI; several are deliberate trade-offs, marked as such.
     trail. For a company evaluating tools formally, this is a checkbox Yapper
     cannot tick — even though architecturally less data leaves the machine
     than with any cloud tool.
-16. **Maintainability debt:** the renderer is one 2,500-line file. Organized
+16. **Maintainability debt:** the renderer is one roughly 3,900-line file. Organized
     and documented, but it is the file every UI change touches.
 17. **One real-world user so far.** The automated suites are extensive, but
     the product has not survived contact with a fleet of strangers' machines,
@@ -366,7 +367,7 @@ Neutral estimates of shape, not commitments; ordered by leverage.
   upload. Publishing a newly remediated build remains an explicit action.
 - ~~**True diarization**~~ — **done locally** with Core ML on macOS 14+ and a
   pinned multithreaded sherpa-onnx/pyannote-class native runner on Windows.
-- **Renderer split** — mechanical refactor of the 2,500-line file into
+- **Renderer split** — mechanical refactor of the roughly 3,900-line file into
   modules; no user-visible change, pays down the maintenance cost.
 
 All screenshots in this manual are real captures of the current build against

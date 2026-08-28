@@ -4,32 +4,23 @@ Use this checklist for the next Yapper Windows release. Run it on a real
 Windows 10 or 11 x64 host; the macOS build and static parity tests are not
 Windows runtime sign-off.
 
-Current `0.1.13` handoff (updated 2026-08-26):
+This is an evergreen checklist. Set `$version` from `package.json`; never copy a
+version or commit from an older handoff. A Mac may already have created
+`v$version` and carried the last Windows installer forward to keep `latest.yml`
+available. Those carried files preserve the feed but are not Windows sign-off.
+`npm run release` now handles both cases: it creates a Windows-first release or
+replaces the carried Windows assets inside an existing Mac-first release.
 
-- Source version: `0.1.13`; use `macos-login-item` at or after `39f20ef`.
-- The macOS login-item/uninstaller, neutral speaker notes with named action
-  owners, continuous PDF layout, and clarified optional people fields are all
-  on that branch.
-- macOS `0.1.13` passed the full unit/static suite plus Electron sanity checks
-  for startup, recording, two-track audio, permissions, meters, speaker names,
-  PDF export, menus, and options. Its DMG and ZIP are signed and notarized.
-- The public `v0.1.13` release is intentionally macOS-first. It carries the
-  previous Windows `0.1.7` installer, blockmap, and `latest.yml` only so current
-  Windows installations keep a valid platform feed. Those carried files are
-  **not** a Windows `0.1.13` sign-off.
-- Windows packaging is unsigned, so SmartScreen is expected.
-- Do not run `build/release.js` for this handoff: `v0.1.13` already exists and
-  that script tries to create a new release. Complete every build-only and
-  runtime gate, then upload the three Windows `0.1.13` files to the existing
-  release as described in section 6.
+Windows packaging remains unsigned, so SmartScreen is expected.
 
 ## 1. Choose the release commit and version
 
 - [ ] Finish and review the macOS runtime checks.
 - [ ] Merge the intended feature branch into the release branch.
 - [ ] Confirm the worktree is clean and record the exact commit SHA.
+- [ ] Set `$version = (Get-Content package.json -Raw | ConvertFrom-Json).version`.
 - [ ] Confirm `package.json`, `package-lock.json`, and the release checkout all
-  say `0.1.13`; do not bump again merely because the macOS release exists.
+  say `$version`; do not bump again merely because the macOS release exists.
 - [ ] Confirm CI is green on both `windows-2025` and `macos-15`.
 
 ## 2. Prepare the Windows host
@@ -112,40 +103,30 @@ This installs disposable local versions. Do not run it during a real recording.
 - [ ] If a draft/staged route is available, test one installed copy against the
   intended GitHub feed before broad distribution.
 
-## 6. Add Windows to the existing release only after every gate passes
+## 6. Publish Windows only after every gate passes
 
 - [ ] Reconfirm `gh auth status`.
-- [ ] Confirm `v0.1.13` exists in `iamchuck504/yapper-releases` and is the
-  macOS-first release described above.
-- [ ] Do **not** run `npm run release` and do not create another tag. From the
-  verified Windows checkout, upload into that release:
+- [ ] Run the release driver from the exact verified checkout. It repeats the
+  automated Windows suite and exact installer lifecycle before upload:
 
   ```powershell
-  gh release upload v0.1.13 `
-    dist/Yapper-Setup-0.1.13.exe `
-    dist/Yapper-Setup-0.1.13.exe.blockmap `
-    dist/latest.yml `
-    --repo iamchuck504/yapper-releases --clobber
+  npm run release
   ```
 
-- [ ] Verify the release now contains the new Windows assets:
-  - installer EXE;
-  - EXE blockmap;
-  - `latest.yml`.
+- [ ] Verify `v$version` contains `Yapper-Setup-$version.exe`, its blockmap and
+  `latest.yml`, with no carried older Windows installer left beside them.
 - [ ] Download the three published Windows files and verify `latest.yml` URL,
   size, and SHA-512 against the downloaded installer.
-- [ ] Confirm an installed Windows `0.1.7` discovers and applies `0.1.13`.
-- [ ] Only after that succeeds, remove the carried `0.1.7` EXE and blockmap
-  from `v0.1.13`; `latest.yml` must remain the new `0.1.13` manifest.
+- [ ] Confirm an installed copy of the previous public Windows version
+  discovers and applies `$version`.
 - [ ] Verify the release still contains the already-published macOS assets:
   - `latest-mac.yml`;
   - DMG and ZIP plus blockmaps;
   - `install.sh`.
 - [ ] Confirm an existing Mac still sees its feed; a Windows-only release must
   not strand `latest-mac.yml`.
-- [ ] Edit the `v0.1.13` notes: change Windows from “preparation pending” to
-  “available”, list the Windows runtime checks actually completed, and retain
-  the unsigned/SmartScreen limitation.
+- [ ] Edit the release notes with the real version and source commit for each
+  platform, the runtime checks completed, and the unsigned/SmartScreen limit.
 
 ## Not signed off without a Windows host
 

@@ -170,6 +170,24 @@ test -f "$FEED" && gh release upload "v$VERSION" "$FEED" --repo "$REPO" --clobbe
 # the installer is cut with the build it installs, rather than living on a branch
 gh release upload "v$VERSION" mac/install.sh --repo "$REPO" --clobber
 
+# A Windows-first release may carry an older Mac build solely to keep its feed
+# alive. Once the real Mac build lands, remove those superseded files so the
+# download list contains one unambiguous Mac version. latest-mac.yml and
+# install.sh were replaced above; Windows assets are deliberately untouched.
+DMG_NAME="$(basename "$DMG")"
+ZIP_NAME="$(basename "$ZIP")"
+ZIP_BLOCKMAP_NAME="$(basename "$ZIP_BLOCKMAP")"
+while IFS= read -r asset; do
+  case "$asset" in
+    Yapper-*-arm64.dmg|Yapper-*-arm64.dmg.blockmap|Yapper-*-arm64-mac.zip|Yapper-*-arm64-mac.zip.blockmap)
+      if [ "$asset" != "$DMG_NAME" ] && [ "$asset" != "$ZIP_NAME" ] \
+         && [ "$asset" != "$ZIP_BLOCKMAP_NAME" ]; then
+        gh release delete-asset "v$VERSION" "$asset" --repo "$REPO" --yes
+      fi
+      ;;
+  esac
+done < <(gh release view "v$VERSION" --repo "$REPO" --json assets --jq '.assets[].name')
+
 if [ "$NEW_RELEASE" = "1" ]; then
   # electron-updater ALWAYS looks for latest.yml on the most recent release. A
   # mac-only cut would leave it without one and Windows copies would stop seeing

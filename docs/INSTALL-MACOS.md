@@ -41,7 +41,7 @@ curl -fsSL https://github.com/iamchuck504/yapper-releases/releases/latest/downlo
 
 **[github.com/iamchuck504/yapper-releases/releases/latest](https://github.com/iamchuck504/yapper-releases/releases/latest)**
 
-Take `Yapper-<version>-arm64.dmg` (~95 MB), open it, drag Yapper to
+Take `Yapper-<version>-arm64.dmg` (~117 MB), open it, drag Yapper to
 Applications, then open it normally.
 
 Drag it across before you open it. Yapper runs from inside the dmg, but a copy
@@ -223,7 +223,7 @@ Either way:
 
 - **The engine and models are not downloaded again** — they live in
   `~/Library/Application Support/yapper`, outside the app — so an update is
-  ~95 MB rather than another 650 MB.
+  ~117 MB rather than another 650 MB.
 - **Your meetings are untouched.** They are in `~/Documents/Meetings` and have
   nothing to do with the app bundle. They are ordinary unencrypted files;
   FileVault protects them while the Mac is locked. If iCloud Drive manages your
